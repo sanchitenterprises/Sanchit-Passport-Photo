@@ -2,9 +2,19 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
-    <application android:theme="@style/AppTheme" android:label="Sanchit Passport Photo" android:allowBackup="true" android:usesCleartextTraffic="false" android:hardwareAccelerated="true">
-        <activity android:name=".MainActivity" android:screenOrientation="portrait" android:exported="true" android:hardwareAccelerated="true">
+    <uses-feature android:name="android.hardware.consumerir" android:required="false"/>
+    <application
+        android:theme="@style/AppTheme"
+        android:label="STS DigiKit"
+        android:allowBackup="true"
+        android:usesCleartextTraffic="false"
+        android:hardwareAccelerated="true">
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="portrait"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
