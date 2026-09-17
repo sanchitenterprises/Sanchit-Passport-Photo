@@ -1,37 +1,281 @@
 package com.sanchit.passportphoto;
-import android.app.*;import android.os.*;import android.content.*;import android.content.pm.PackageManager;import android.graphics.*;import android.media.ExifInterface;import android.media.FaceDetector;import android.net.Uri;import android.provider.MediaStore;import android.view.*;import android.widget.*;import java.io.*;import java.util.*;
-public class MainActivity extends Activity{
- private ImageView preview;private Bitmap original,result,compareBitmap,undoBitmap;private SeekBar brightness,smooth,brush;private Button removeBtn,bgBtn;private boolean removeMode=false,bgMode=false,fromCamera=false;private Uri cameraUri;private static final int PICK=10,CAMERA=11,CAM_PERMISSION=12;private static final int BLUE=Color.rgb(74,144,194);
- @Override public void onCreate(Bundle b){super.onCreate(b);buildUi();}
- private TextView text(String s,int sp){TextView t=new TextView(this);t.setText(s);t.setTextSize(sp);t.setPadding(16,8,16,8);return t;}private Button button(String s){Button b=new Button(this);b.setText(s);return b;}
- private void buildUi(){LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(18,18,18,18);TextView title=text("Sanchit Passport Photo V1.0.4",23);title.setGravity(Gravity.CENTER);root.addView(title);root.addView(text("Full-res Camera • Safe Auto BG • Manual BG • Compare • बिना AI",13));preview=new ImageView(this);preview.setBackgroundColor(Color.rgb(230,230,230));preview.setScaleType(ImageView.ScaleType.FIT_CENTER);root.addView(preview,new LinearLayout.LayoutParams(-1,0,1));preview.setOnTouchListener((v,e)->handleToolTouch(e));LinearLayout source=new LinearLayout(this);Button camera=button("📷 कैमरा");Button pick=button("🖼 फोटो चुनें");source.addView(camera,new LinearLayout.LayoutParams(0,-2,1));source.addView(pick,new LinearLayout.LayoutParams(0,-2,1));root.addView(source);camera.setOnClickListener(v->openCamera());pick.setOnClickListener(v->startActivityForResult(new Intent(Intent.ACTION_PICK,MediaStore.Images.Media.EXTERNAL_CONTENT_URI),PICK));root.addView(text("Fairness / Brightness",13));brightness=new SeekBar(this);brightness.setMax(40);brightness.setProgress(4);root.addView(brightness);root.addView(text("Smooth",13));smooth=new SeekBar(this);smooth.setMax(3);smooth.setProgress(0);root.addView(smooth);LinearLayout tools=new LinearLayout(this);Button compare=button("COMPARE");removeBtn=button("OBJECT REMOVE");tools.addView(compare,new LinearLayout.LayoutParams(0,-2,1));tools.addView(removeBtn,new LinearLayout.LayoutParams(0,-2,1));root.addView(tools);LinearLayout tools2=new LinearLayout(this);bgBtn=button("MANUAL BG");Button undo=button("UNDO");tools2.addView(bgBtn,new LinearLayout.LayoutParams(0,-2,1));tools2.addView(undo,new LinearLayout.LayoutParams(0,-2,1));root.addView(tools2);compare.setOnTouchListener((v,e)->{if(result==null||compareBitmap==null)return false;if(e.getAction()==MotionEvent.ACTION_DOWN){preview.setImageBitmap(compareBitmap);return true;}if(e.getAction()==MotionEvent.ACTION_UP||e.getAction()==MotionEvent.ACTION_CANCEL){preview.setImageBitmap(result);return true;}return true;});removeBtn.setOnClickListener(v->{if(result==null){toast("पहले फोटो Process करें");return;}removeMode=!removeMode;bgMode=false;refreshToolButtons();toast(removeMode?"Extra object पर finger चलाएँ":"Object remove बंद");});bgBtn.setOnClickListener(v->{if(result==null){toast("पहले फोटो Process करें");return;}bgMode=!bgMode;removeMode=false;refreshToolButtons();toast(bgMode?"Background area पर tap करें":"Manual BG बंद");});undo.setOnClickListener(v->undoEdit());root.addView(text("Object Remove Brush Size",12));brush=new SeekBar(this);brush.setMax(60);brush.setProgress(24);root.addView(brush);LinearLayout row=new LinearLayout(this);Button process=button("फिर से PROCESS");Button reset=button("RESET");row.addView(process,new LinearLayout.LayoutParams(0,-2,1));row.addView(reset,new LinearLayout.LayoutParams(0,-2,1));root.addView(row);process.setOnClickListener(v->process());reset.setOnClickListener(v->reset());Button save=button("फोटो सेव करें");root.addView(save);save.setOnClickListener(v->save());setContentView(root);}
- private void refreshToolButtons(){if(removeBtn!=null)removeBtn.setText(removeMode?"OBJECT REMOVE ON ✓":"OBJECT REMOVE");if(bgBtn!=null)bgBtn.setText(bgMode?"MANUAL BG ON ✓":"MANUAL BG");}
- private boolean handleToolTouch(MotionEvent e){if(result==null||(!removeMode&&!bgMode))return false;if(e.getAction()!=MotionEvent.ACTION_DOWN&&e.getAction()!=MotionEvent.ACTION_MOVE)return true;float vw=preview.getWidth(),vh=preview.getHeight(),bw=result.getWidth(),bh=result.getHeight();float sc=Math.min(vw/bw,vh/bh),left=(vw-bw*sc)/2f,top=(vh-bh*sc)/2f;float bx=(e.getX()-left)/sc,by=(e.getY()-top)/sc;if(bx<0||by<0||bx>=bw||by>=bh)return true;if(bgMode){if(e.getAction()==MotionEvent.ACTION_DOWN){saveUndo();manualBgFill((int)bx,(int)by);preview.setImageBitmap(result);}return true;}if(removeMode){if(e.getAction()==MotionEvent.ACTION_DOWN)saveUndo();Canvas c=new Canvas(result);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setColor(BLUE);p.setStyle(Paint.Style.FILL);float rad=Math.max(7,brush.getProgress())/sc;c.drawCircle(bx,by,rad,p);preview.setImageBitmap(result);return true;}return false;}
- private void saveUndo(){if(result!=null)undoBitmap=result.copy(Bitmap.Config.ARGB_8888,true);}
- private void undoEdit(){if(undoBitmap==null){toast("Undo के लिए कोई बदलाव नहीं है");return;}result=undoBitmap.copy(Bitmap.Config.ARGB_8888,true);undoBitmap=null;preview.setImageBitmap(result);toast("पिछला बदलाव वापस हो गया");}
- private void manualBgFill(int sx,int sy){int w=result.getWidth(),h=result.getHeight();int[] p=new int[w*h];result.getPixels(p,0,w,0,0,w,h);int start=p[sy*w+sx];if(colorDist(start,BLUE)<30){toast("यह हिस्सा पहले से blue है");return;}boolean[] seen=new boolean[p.length];ArrayDeque<Integer> q=new ArrayDeque<>();int startId=sy*w+sx;q.add(startId);seen[startId]=true;int filled=0;while(!q.isEmpty()){int id=q.removeFirst(),x=id%w,y=id/w;if(colorDist(p[id],start)>48)continue;p[id]=BLUE;filled++;if(x>0){int n=id-1;if(!seen[n]){seen[n]=true;q.add(n);}}if(x<w-1){int n=id+1;if(!seen[n]){seen[n]=true;q.add(n);}}if(y>0){int n=id-w;if(!seen[n]){seen[n]=true;q.add(n);}}if(y<h-1){int n=id+w;if(!seen[n]){seen[n]=true;q.add(n);}}}result.setPixels(p,0,w,0,0,w,h);toast(filled>0?"Background area साफ हुआ":"Area नहीं मिला");}
- private double colorDist(int a,int b){int dr=Color.red(a)-Color.red(b),dg=Color.green(a)-Color.green(b),db=Color.blue(a)-Color.blue(b);return Math.sqrt(dr*dr+dg*dg+db*db);}
- private void openCamera(){if(Build.VERSION.SDK_INT>=23&&checkSelfPermission("android.permission.CAMERA")!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{"android.permission.CAMERA"},CAM_PERMISSION);return;}try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"SanchitCamera_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Sanchit Passport Photo/Camera Temp");cameraUri=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);if(cameraUri==null){toast("Camera file नहीं बन पाया");return;}Intent i=new Intent(MediaStore.ACTION_IMAGE_CAPTURE);i.putExtra(MediaStore.EXTRA_OUTPUT,cameraUri);i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_READ_URI_PERMISSION);i.setClipData(ClipData.newRawUri("camera-output",cameraUri));if(i.resolveActivity(getPackageManager())!=null)startActivityForResult(i,CAMERA);else{cleanupCameraUri();toast("Camera उपलब्ध नहीं है");}}catch(Exception e){cleanupCameraUri();toast("Camera error: "+e.getMessage());}}
- private void cleanupCameraUri(){try{if(cameraUri!=null)getContentResolver().delete(cameraUri,null,null);}catch(Exception ignored){}cameraUri=null;}
- @Override public void onRequestPermissionsResult(int r,String[] p,int[] g){super.onRequestPermissionsResult(r,p,g);if(r==CAM_PERMISSION&&g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED)openCamera();else if(r==CAM_PERMISSION)toast("Camera permission जरूरी है");}
- @Override protected void onActivityResult(int r,int c,Intent d){super.onActivityResult(r,c,d);try{if(r==CAMERA){if(c!=RESULT_OK){cleanupCameraUri();return;}Bitmap b=loadBitmap(cameraUri,2800);cleanupCameraUri();if(b==null){toast("Camera photo पढ़ी नहीं जा सकी");return;}original=b;fromCamera=true;auto();return;}if(c!=RESULT_OK)return;if(r==PICK&&d!=null&&d.getData()!=null){original=loadBitmap(d.getData(),2800);fromCamera=false;if(original!=null)auto();else toast("Photo पढ़ी नहीं जा सकी");}}catch(Exception e){cleanupCameraUri();toast("Photo error: "+e.getMessage());}}
- private Bitmap loadBitmap(Uri u,int maxDim)throws Exception{if(u==null)return null;BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;InputStream a=getContentResolver().openInputStream(u);BitmapFactory.decodeStream(a,null,o);if(a!=null)a.close();int sample=1;while(Math.max(o.outWidth,o.outHeight)/sample>maxDim)sample*=2;BitmapFactory.Options d=new BitmapFactory.Options();d.inSampleSize=Math.max(1,sample);d.inPreferredConfig=Bitmap.Config.ARGB_8888;InputStream b=getContentResolver().openInputStream(u);Bitmap bmp=BitmapFactory.decodeStream(b,null,d);if(b!=null)b.close();if(bmp==null)return null;int rot=0;try{InputStream e=getContentResolver().openInputStream(u);ExifInterface ex=new ExifInterface(e);int ori=ex.getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL);if(e!=null)e.close();if(ori==ExifInterface.ORIENTATION_ROTATE_90)rot=90;else if(ori==ExifInterface.ORIENTATION_ROTATE_180)rot=180;else if(ori==ExifInterface.ORIENTATION_ROTATE_270)rot=270;}catch(Exception ignored){}if(rot!=0){Matrix m=new Matrix();m.postRotate(rot);Bitmap r=Bitmap.createBitmap(bmp,0,0,bmp.getWidth(),bmp.getHeight(),m,true);if(r!=bmp)bmp.recycle();bmp=r;}return bmp;}
- private void auto(){brightness.setProgress(4);smooth.setProgress(0);removeMode=false;bgMode=false;undoBitmap=null;refreshToolButtons();process();}
- private void reset(){result=null;compareBitmap=null;undoBitmap=null;original=null;fromCamera=false;removeMode=false;bgMode=false;preview.setImageDrawable(null);brightness.setProgress(4);smooth.setProgress(0);refreshToolButtons();toast("Reset हो गया — नई फोटो चुनें");}
- private void process(){if(original==null){toast("पहले फोटो लें या चुनें");return;}Bitmap crop=smartCrop(original);int w=700,h=900;Bitmap src=Bitmap.createScaledBitmap(crop,w,h,true);compareBitmap=src.copy(Bitmap.Config.ARGB_8888,false);int[] p=new int[w*h];src.getPixels(p,0,w,0,0,w,h);boolean aggressive=!fromCamera;boolean[] mask=backgroundMask(p,w,h,aggressive);int add=brightness.getProgress();for(int i=0;i<p.length;i++){int c=p[i];if(mask[i]){if(isBoundary(mask,w,h,i))p[i]=blend(c,BLUE,.20f);else p[i]=BLUE;continue;}int r=Color.red(c),g=Color.green(c),b=Color.blue(c);r=clamp((int)(r*1.006f)+add);g=clamp((int)(g*1.006f)+add);b=clamp((int)(b*1.004f)+add);p[i]=Color.rgb(r,g,b);}Bitmap out=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);out.setPixels(p,0,w,0,0,w,h);if(smooth.getProgress()>0)out=softSmooth(out,smooth.getProgress());result=out;undoBitmap=null;removeMode=false;bgMode=false;refreshToolButtons();preview.setImageBitmap(result);toast(fromCamera?"V1.0.4 Camera Safe Process तैयार":"V1.0.4 Auto Process तैयार");}
- private int blend(int original,int bg,float keep){int r=(int)(Color.red(original)*keep+Color.red(bg)*(1-keep)),g=(int)(Color.green(original)*keep+Color.green(bg)*(1-keep)),b=(int)(Color.blue(original)*keep+Color.blue(bg)*(1-keep));return Color.rgb(clamp(r),clamp(g),clamp(b));}
- private boolean isBoundary(boolean[] m,int w,int h,int id){int x=id%w,y=id/w;if(x<1||y<1||x>=w-1||y>=h-1)return false;for(int yy=-1;yy<=1;yy++)for(int xx=-1;xx<=1;xx++)if(!m[(y+yy)*w+x+xx])return true;return false;}
- private boolean[] backgroundMask(int[] p,int w,int h,boolean aggressive){boolean[] out=edgeFlood(p,w,h,aggressive);if(!aggressive)return out;for(int pass=0;pass<2;pass++){boolean[] next=out.clone();for(int y=1;y<h-1;y++)for(int x=1;x<w-1;x++){int id=y*w+x;if(out[id])continue;int neighbors=0;for(int yy=-1;yy<=1;yy++)for(int xx=-1;xx<=1;xx++)if((xx!=0||yy!=0)&&out[(y+yy)*w+x+xx])neighbors++;if(neighbors>=5&&isChromaBackground(p[id]))next[id]=true;}out=next;}return out;}
- private boolean[] edgeFlood(int[] p,int w,int h,boolean aggressive){boolean[] seen=new boolean[p.length],mask=new boolean[p.length];int[] avg=dominantBorder(p,w,h);int rr=avg[0],gg=avg[1],bb=avg[2];ArrayDeque<Integer> q=new ArrayDeque<>();for(int x=0;x<w;x++){addSeed(q,seen,p,x,rr,gg,bb,aggressive);addSeed(q,seen,p,(h-1)*w+x,rr,gg,bb,aggressive);}for(int y=0;y<h;y++){addSeed(q,seen,p,y*w,rr,gg,bb,aggressive);addSeed(q,seen,p,y*w+w-1,rr,gg,bb,aggressive);}int[] dx={1,-1,0,0},dy={0,0,1,-1};while(!q.isEmpty()){int id=q.remove();mask[id]=true;int x=id%w,y=id/w;for(int k=0;k<4;k++){int nx=x+dx[k],ny=y+dy[k];if(nx<0||ny<0||nx>=w||ny>=h)continue;int ni=ny*w+nx;if(!seen[ni]&&similarBg(p[ni],rr,gg,bb,aggressive)){seen[ni]=true;q.add(ni);}}}return mask;}
- private int[] dominantBorder(int[] p,int w,int h){int[] count=new int[512],sr=new int[512],sg=new int[512],sb=new int[512];int step=3;for(int x=0;x<w;x+=step){acc(p[x],count,sr,sg,sb);acc(p[(h-1)*w+x],count,sr,sg,sb);}for(int y=0;y<h;y+=step){acc(p[y*w],count,sr,sg,sb);acc(p[y*w+w-1],count,sr,sg,sb);}int best=0;for(int i=1;i<512;i++)if(count[i]>count[best])best=i;int n=Math.max(1,count[best]);return new int[]{sr[best]/n,sg[best]/n,sb[best]/n};}
- private void acc(int c,int[] count,int[] sr,int[] sg,int[] sb){int r=Color.red(c),g=Color.green(c),b=Color.blue(c),bin=(r>>5)*64+(g>>5)*8+(b>>5);count[bin]++;sr[bin]+=r;sg[bin]+=g;sb[bin]+=b;}
- private void addSeed(ArrayDeque<Integer> q,boolean[] seen,int[] p,int id,int r,int g,int b,boolean aggressive){if(!seen[id]&&similarBg(p[id],r,g,b,aggressive)){seen[id]=true;q.add(id);}}
- private boolean similarBg(int c,int r,int g,int b,boolean aggressive){int cr=Color.red(c),cg=Color.green(c),cb=Color.blue(c),mx=Math.max(cr,Math.max(cg,cb));if(mx<100&&!aggressive)return false;int dr=cr-r,dg=cg-g,db=cb-b;double d=Math.sqrt(dr*dr+dg*dg+db*db);if(!aggressive)return d<34;return d<54||isChromaBackground(c);}
- private boolean isChromaBackground(int c){int r=Color.red(c),g=Color.green(c),b=Color.blue(c);int max=Math.max(r,Math.max(g,b)),min=Math.min(r,Math.min(g,b));boolean green=g>88&&g>r*1.15&&g>b*.95&&(max-min)>28;boolean cyan=g>95&&b>95&&r<Math.min(g,b)*.78&&(max-min)>28;boolean paleGreen=g>145&&g>r*1.07&&g>b*.95&&(g-r)>16;return green||cyan||paleGreen;}
- private int clamp(int v){return Math.max(0,Math.min(255,v));}
- private Bitmap softSmooth(Bitmap s,int level){int w=s.getWidth(),h=s.getHeight();int[] a=new int[w*h],o=new int[w*h];s.getPixels(a,0,w,0,0,w,h);System.arraycopy(a,0,o,0,a.length);float mix=Math.min(.12f,.04f*level);for(int y=1;y<h-1;y++)for(int x=1;x<w-1;x++){int id=y*w+x,c=a[id],r=Color.red(c),g=Color.green(c),b=Color.blue(c);if(b>r*1.18&&b>g*.95)continue;int ar=0,ag=0,ab=0;for(int yy=-1;yy<=1;yy++)for(int xx=-1;xx<=1;xx++){int z=a[(y+yy)*w+x+xx];ar+=Color.red(z);ag+=Color.green(z);ab+=Color.blue(z);}ar/=9;ag/=9;ab/=9;o[id]=Color.rgb(clamp((int)(r*(1-mix)+ar*mix)),clamp((int)(g*(1-mix)+ag*mix)),clamp((int)(b*(1-mix)+ab*mix)));}Bitmap d=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);d.setPixels(o,0,w,0,0,w,h);return d;}
- private Bitmap smartCrop(Bitmap b){try{int ow=b.getWidth(),oh=b.getHeight();int dw=Math.min(1000,ow);float scale=(float)dw/ow;int dh=Math.max(2,(int)(oh*scale));if((dw&1)==1)dw--;Bitmap small=Bitmap.createScaledBitmap(b,dw,dh,true).copy(Bitmap.Config.RGB_565,false);FaceDetector fd=new FaceDetector(small.getWidth(),small.getHeight(),1);FaceDetector.Face[] fs=new FaceDetector.Face[1];if(fd.findFaces(small,fs)>0&&fs[0]!=null){PointF m=new PointF();fs[0].getMidPoint(m);float inv=(float)ow/small.getWidth(),cx=m.x*inv,eyesY=m.y*inv,eye=fs[0].eyesDistance()*inv;float cw=Math.max(eye*5.5f,ow*.36f);cw=Math.min(cw,ow);float ch=cw*9f/7f;if(ch>oh){ch=oh;cw=ch*7f/9f;}float left=cx-cw/2f,top=eyesY-ch*.40f;left=Math.max(0,Math.min(left,ow-cw));top=Math.max(0,Math.min(top,oh-ch));return Bitmap.createBitmap(b,Math.round(left),Math.round(top),Math.round(cw),Math.round(ch));}}catch(Exception ignored){}return crop79(b);}
- private Bitmap crop79(Bitmap b){int w=b.getWidth(),h=b.getHeight();float t=7f/9f;int nw=w,nh=h;if((float)w/h>t)nw=(int)(h*t);else nh=(int)(w/t);return Bitmap.createBitmap(b,(w-nw)/2,(h-nh)/2,nw,nh);}
- private void save(){if(result==null){toast("पहले फोटो तैयार करें");return;}try{ContentValues v=new ContentValues();v.put(MediaStore.Images.Media.DISPLAY_NAME,"Sanchit_Passport_"+System.currentTimeMillis()+".jpg");v.put(MediaStore.Images.Media.MIME_TYPE,"image/jpeg");if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Sanchit Passport Photo");Uri u=getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,v);OutputStream os=getContentResolver().openOutputStream(u);result.compress(Bitmap.CompressFormat.JPEG,97,os);os.close();toast("फोटो सेव हो गई");}catch(Exception e){toast("Save error: "+e.getMessage());}}
- private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
+
+import android.app.*;
+import android.os.*;
+import android.content.*;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.provider.MediaStore;
+import android.view.*;
+import android.webkit.*;
+import android.widget.*;
+
+public class MainActivity extends Activity {
+    private static final int CAMERA_PERMISSION = 40;
+    private static final int FILE_PICK = 41;
+    private static final int MODE_NONE = 0;
+    private static final int MODE_CAMERA = 1;
+    private static final int MODE_GALLERY = 2;
+    private static final String HOME = "https://chatgpt.com/";
+
+    private static final String FIXED_PROMPT =
+            "इस फोटो को professional 35×45 mm passport-size photo में तैयार करें। व्यक्ति की exact identity, face shape, eyes, eyebrows, nose, lips, ears, jawline, hairstyle और natural proportions बिल्कुल न बदलें। चेहरा noticeably fairer, brighter और clean करें लेकिन realistic skin texture रखें। Pimples, dark spots, blemishes, uneven tone और dullness साफ करें। Background clean medium-light blue #4A90C2 करें। Person, hair, ears, neck, shoulders और कपड़ों को सुरक्षित रखें; background और extra unwanted objects हटाएँ। Straight front-facing passport framing रखें, head और shoulders properly centered हों, soft even lighting हो और final photo sharp high-resolution हो।";
+
+    private WebView web;
+    private ValueCallback<Uri[]> fileCallback;
+    private Uri cameraUri;
+    private int pendingMode = MODE_NONE;
+
+    @Override public void onCreate(Bundle b) {
+        super.onCreate(b);
+        buildUi();
+        configureWebView();
+        web.loadUrl(HOME);
+    }
+
+    private Button makeButton(String title) {
+        Button b = new Button(this);
+        b.setText(title);
+        b.setTextSize(14);
+        b.setAllCaps(false);
+        return b;
+    }
+
+    private void buildUi() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFFFFFFFF);
+
+        web = new WebView(this);
+        root.addView(web, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(6, 4, 6, 4);
+
+        Button refresh = makeButton("⟳ Refresh");
+        Button camera = makeButton("📷 Camera");
+        Button gallery = makeButton("🖼 Gallery");
+
+        bar.addView(refresh, new LinearLayout.LayoutParams(0, dp(58), 1f));
+        bar.addView(camera, new LinearLayout.LayoutParams(0, dp(58), 1f));
+        bar.addView(gallery, new LinearLayout.LayoutParams(0, dp(58), 1f));
+        root.addView(bar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        refresh.setOnClickListener(v -> web.reload());
+        camera.setOnClickListener(v -> triggerSiteUpload(MODE_CAMERA));
+        gallery.setOnClickListener(v -> triggerSiteUpload(MODE_GALLERY));
+
+        setContentView(root);
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    private void configureWebView() {
+        WebSettings s = web.getSettings();
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setAllowContentAccess(true);
+        s.setAllowFileAccess(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setSupportMultipleWindows(false);
+        s.setLoadWithOverviewMode(false);
+        s.setUseWideViewPort(false);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        String ua = s.getUserAgentString();
+        if (ua != null) s.setUserAgentString(ua.replace("; wv", ""));
+
+        CookieManager cm = CookieManager.getInstance();
+        cm.setAcceptCookie(true);
+        if (Build.VERSION.SDK_INT >= 21) cm.setAcceptThirdPartyCookies(web, true);
+
+        web.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return false;
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return false;
+            }
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                CookieManager.getInstance().flush();
+            }
+        });
+
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onShowFileChooser(WebView view,
+                    ValueCallback<Uri[]> callback, FileChooserParams params) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = callback;
+                if (pendingMode == MODE_CAMERA) {
+                    openCameraForWeb();
+                } else {
+                    openGalleryForWeb(params);
+                }
+                return true;
+            }
+        });
+    }
+
+    private void triggerSiteUpload(int mode) {
+        pendingMode = mode;
+        String js = "(function(){" +
+                "var i=document.querySelector('input[type=file]');" +
+                "if(i){i.click();return 'input';}" +
+                "var bs=[].slice.call(document.querySelectorAll('button'));" +
+                "var b=bs.find(function(x){var t=((x.getAttribute('aria-label')||'')+' '+(x.getAttribute('title')||'')+' '+(x.innerText||'')).toLowerCase();return /attach|upload|photo|image|file|add photos/.test(t);});" +
+                "if(b){b.click();setTimeout(function(){var f=document.querySelector('input[type=file]');if(f)f.click();},450);return 'button';}" +
+                "return 'none';})()";
+        web.evaluateJavascript(js, value -> {
+            if (value != null && value.contains("none")) {
+                pendingMode = MODE_NONE;
+                toast("पहले ChatGPT में login करके नया chat खोलें");
+            }
+        });
+    }
+
+    private void openCameraForWeb() {
+        if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission("android.permission.CAMERA") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.CAMERA"}, CAMERA_PERMISSION);
+            return;
+        }
+        try {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Images.Media.DISPLAY_NAME,
+                    "Sanchit_ChatGPT_" + System.currentTimeMillis() + ".jpg");
+            v.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            if (Build.VERSION.SDK_INT >= 29)
+                v.put(MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/Sanchit Passport Photo/Camera");
+            cameraUri = getContentResolver().insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+            if (cameraUri == null) {
+                finishFileChooser(null);
+                toast("Camera file नहीं बन पाया");
+                return;
+            }
+            Intent i = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            i.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+            i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            i.setClipData(ClipData.newRawUri("camera-output", cameraUri));
+            if (i.resolveActivity(getPackageManager()) != null) {
+                startActivityForResult(i, FILE_PICK);
+            } else {
+                finishFileChooser(null);
+                toast("Camera उपलब्ध नहीं है");
+            }
+        } catch (Exception e) {
+            finishFileChooser(null);
+            toast("Camera error");
+        }
+    }
+
+    private void openGalleryForWeb(WebChromeClient.FileChooserParams params) {
+        try {
+            Intent i;
+            try {
+                i = params != null ? params.createIntent() : null;
+            } catch (Exception ex) {
+                i = null;
+            }
+            if (i == null) {
+                i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("image/*");
+            }
+            startActivityForResult(i, FILE_PICK);
+        } catch (Exception e) {
+            finishFileChooser(null);
+            toast("Gallery नहीं खुली");
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == CAMERA_PERMISSION) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+                openCameraForWeb();
+            } else {
+                finishFileChooser(null);
+                toast("Camera permission जरूरी है");
+            }
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_PICK || fileCallback == null) return;
+
+        Uri[] result = null;
+        if (resultCode == RESULT_OK) {
+            if (pendingMode == MODE_CAMERA && cameraUri != null) {
+                result = new Uri[]{cameraUri};
+            } else if (data != null) {
+                if (data.getClipData() != null) {
+                    int n = data.getClipData().getItemCount();
+                    result = new Uri[n];
+                    for (int x = 0; x < n; x++) result[x] = data.getClipData().getItemAt(x).getUri();
+                } else if (data.getData() != null) {
+                    result = new Uri[]{data.getData()};
+                }
+            }
+        }
+        finishFileChooser(result);
+        if (result != null && result.length > 0) scheduleFixedPrompt();
+    }
+
+    private void finishFileChooser(Uri[] result) {
+        if (fileCallback != null) {
+            fileCallback.onReceiveValue(result);
+            fileCallback = null;
+        }
+        pendingMode = MODE_NONE;
+    }
+
+    private void scheduleFixedPrompt() {
+        web.postDelayed(this::insertPromptAndTrySend, 2500);
+        web.postDelayed(this::insertPromptAndTrySend, 5200);
+    }
+
+    private String jsQuoted(String s) {
+        return "'" + s.replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "") + "'";
+    }
+
+    private void insertPromptAndTrySend() {
+        String p = jsQuoted(FIXED_PROMPT);
+        String js = "(function(){" +
+                "var p=" + p + ";" +
+                "var e=document.querySelector('#prompt-textarea')||document.querySelector('textarea')||document.querySelector('[contenteditable=true]');" +
+                "if(!e)return 'no-editor';" +
+                "e.focus();" +
+                "if(e.tagName==='TEXTAREA'){var d=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');if(d&&d.set)d.set.call(e,p);else e.value=p;e.dispatchEvent(new Event('input',{bubbles:true}));}" +
+                "else{e.innerHTML='';try{document.execCommand('insertText',false,p);}catch(x){e.textContent=p;}e.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:p}));}" +
+                "var s=document.querySelector('[data-testid=send-button]')||document.querySelector('button[aria-label*=Send]')||document.querySelector('button[aria-label*=send]');" +
+                "if(s&&!s.disabled){s.click();return 'sent';}return 'filled';})()";
+        web.evaluateJavascript(js, null);
+    }
+
+    @Override public void onBackPressed() {
+        if (web != null && web.canGoBack()) web.goBack();
+        else super.onBackPressed();
+    }
+
+    @Override protected void onPause() {
+        super.onPause();
+        CookieManager.getInstance().flush();
+    }
+
+    private void toast(String s) {
+        Toast.makeText(this, s, Toast.LENGTH_SHORT).show();
+    }
 }
