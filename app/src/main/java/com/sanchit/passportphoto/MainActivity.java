@@ -22,15 +22,17 @@ public class MainActivity extends Activity {
             "इस फोटो को professional 35×45 mm passport-size photo में तैयार करें। व्यक्ति की exact identity, face shape, eyes, eyebrows, nose, lips, ears, jawline, hairstyle और natural proportions बिल्कुल न बदलें। चेहरा noticeably fairer, brighter और clean करें लेकिन realistic skin texture रखें। Pimples, dark spots, blemishes, uneven tone और dullness साफ करें। Background clean medium-light blue #4A90C2 करें। Person, hair, ears, neck, shoulders और कपड़ों को सुरक्षित रखें; background और extra unwanted objects हटाएँ। Straight front-facing passport framing रखें, head और shoulders properly centered हों, soft even lighting हो और final photo sharp high-resolution हो।";
 
     private WebView web;
+    private ProgressBar progress;
     private ValueCallback<Uri[]> fileCallback;
     private Uri cameraUri;
     private int pendingMode = MODE_NONE;
+    private int blankRetry = 0;
 
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         buildUi();
         configureWebView();
-        web.loadUrl(HOME);
+        loadHome(false);
     }
 
     private Button makeButton(String title) {
@@ -46,8 +48,23 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFFFFFFFF);
 
+        FrameLayout processArea = new FrameLayout(this);
         web = new WebView(this);
-        root.addView(web, new LinearLayout.LayoutParams(
+        web.setBackgroundColor(0xFFFFFFFF);
+        web.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+        processArea.addView(web, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setMax(100);
+        progress.setProgress(0);
+        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, dp(3));
+        pp.gravity = Gravity.TOP;
+        processArea.addView(progress, pp);
+
+        root.addView(processArea, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         LinearLayout bar = new LinearLayout(this);
@@ -62,9 +79,13 @@ public class MainActivity extends Activity {
         bar.addView(camera, new LinearLayout.LayoutParams(0, dp(58), 1f));
         bar.addView(gallery, new LinearLayout.LayoutParams(0, dp(58), 1f));
         root.addView(bar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        refresh.setOnClickListener(v -> web.reload());
+        refresh.setOnClickListener(v -> {
+            blankRetry = 0;
+            loadHome(true);
+        });
         camera.setOnClickListener(v -> triggerSiteUpload(MODE_CAMERA));
         gallery.setOnClickListener(v -> triggerSiteUpload(MODE_GALLERY));
 
@@ -85,10 +106,23 @@ public class MainActivity extends Activity {
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setSupportMultipleWindows(false);
         s.setLoadWithOverviewMode(false);
-        s.setUseWideViewPort(false);
+        s.setUseWideViewPort(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        String ua = s.getUserAgentString();
-        if (ua != null) s.setUserAgentString(ua.replace("; wv", ""));
+        s.setLoadsImagesAutomatically(true);
+        s.setBlockNetworkLoads(false);
+        s.setBlockNetworkImage(false);
+        s.setCacheMode(WebSettings.LOAD_DEFAULT);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        s.setDefaultTextEncodingName("UTF-8");
+        s.setTextZoom(100);
+
+        try {
+            String ua = WebSettings.getDefaultUserAgent(this);
+            if (ua != null) {
+                ua = ua.replace("; wv", "").replace("Version/4.0 ", "");
+                s.setUserAgentString(ua);
+            }
+        } catch (Exception ignored) {}
 
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
@@ -96,30 +130,120 @@ public class MainActivity extends Activity {
 
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri u = request.getUrl();
+                String scheme = u != null ? u.getScheme() : null;
+                if (scheme != null && !scheme.equals("http") && !scheme.equals("https")) {
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception ignored) {}
+                    return true;
+                }
                 return false;
             }
+
             @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (url == null) return false;
+                if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url))); } catch (Exception ignored) {}
+                    return true;
+                }
                 return false;
             }
+
+            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                progress.setVisibility(View.VISIBLE);
+            }
+
+            @Override public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                CookieManager.getInstance().flush();
+            }
+
             @Override public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
+                verifyPageSoon();
+            }
+
+            @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                if (request != null && request.isForMainFrame()) {
+                    showLoadError("ChatGPT load नहीं हुआ। नीचे Refresh दबाएँ।");
+                }
+            }
+
+            @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
+                super.onReceivedHttpError(view, request, response);
+                if (request != null && request.isForMainFrame() && response != null && response.getStatusCode() >= 400) {
+                    showLoadError("ChatGPT server response " + response.getStatusCode() + " मिला। Refresh करें।");
+                }
             }
         });
 
         web.setWebChromeClient(new WebChromeClient() {
+            @Override public void onProgressChanged(WebView view, int newProgress) {
+                progress.setProgress(newProgress);
+                progress.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
+            }
+
             @Override public boolean onShowFileChooser(WebView view,
                     ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileCallback != null) fileCallback.onReceiveValue(null);
                 fileCallback = callback;
-                if (pendingMode == MODE_CAMERA) {
-                    openCameraForWeb();
-                } else {
-                    openGalleryForWeb(params);
-                }
+                if (pendingMode == MODE_CAMERA) openCameraForWeb();
+                else openGalleryForWeb(params);
                 return true;
             }
         });
+    }
+
+    private void loadHome(boolean clearView) {
+        if (clearView) web.stopLoading();
+        progress.setVisibility(View.VISIBLE);
+        progress.setProgress(5);
+        web.loadUrl(HOME);
+        web.postDelayed(this::verifyPage, 9000);
+    }
+
+    private void verifyPageSoon() {
+        web.postDelayed(this::verifyPage, 1800);
+    }
+
+    private void verifyPage() {
+        if (web == null) return;
+        web.evaluateJavascript("(function(){return document.body?document.body.innerHTML.length:0;})()", value -> {
+            int len = 0;
+            try {
+                String v = value == null ? "0" : value.replace("\"", "").trim();
+                len = Integer.parseInt(v);
+            } catch (Exception ignored) {}
+            if (len < 80) {
+                if (blankRetry < 1) {
+                    blankRetry++;
+                    web.stopLoading();
+                    web.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+                    web.loadUrl(HOME);
+                    web.postDelayed(() -> web.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT), 2500);
+                    web.postDelayed(this::verifyPage, 7000);
+                } else {
+                    showLoadError("ChatGPT page blank रह गया। Refresh दबाएँ। अगर फिर भी blank रहे तो Android System WebView/Chrome update करना पड़ेगा।");
+                }
+            } else {
+                blankRetry = 0;
+            }
+        });
+    }
+
+    private void showLoadError(String msg) {
+        progress.setVisibility(View.GONE);
+        String html = "<html><head><meta name='viewport' content='width=device-width,initial-scale=1'/></head>" +
+                "<body style='font-family:sans-serif;padding:24px;color:#333'>" +
+                "<h3>Sanchit Passport Photo</h3><p>" + escapeHtml(msg) + "</p>" +
+                "<p>नीचे के Refresh, Camera और Gallery button बने रहेंगे।</p></body></html>";
+        web.loadDataWithBaseURL(HOME, html, "text/html", "UTF-8", null);
+    }
+
+    private String escapeHtml(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     private void triggerSiteUpload(int mode) {
@@ -129,12 +253,12 @@ public class MainActivity extends Activity {
                 "if(i){i.click();return 'input';}" +
                 "var bs=[].slice.call(document.querySelectorAll('button'));" +
                 "var b=bs.find(function(x){var t=((x.getAttribute('aria-label')||'')+' '+(x.getAttribute('title')||'')+' '+(x.innerText||'')).toLowerCase();return /attach|upload|photo|image|file|add photos/.test(t);});" +
-                "if(b){b.click();setTimeout(function(){var f=document.querySelector('input[type=file]');if(f)f.click();},450);return 'button';}" +
+                "if(b){b.click();setTimeout(function(){var f=document.querySelector('input[type=file]');if(f)f.click();},500);return 'button';}" +
                 "return 'none';})()";
         web.evaluateJavascript(js, value -> {
             if (value != null && value.contains("none")) {
                 pendingMode = MODE_NONE;
-                toast("पहले ChatGPT में login करके नया chat खोलें");
+                toast("पहले ऊपर ChatGPT खोलकर login करें");
             }
         });
     }
@@ -165,9 +289,8 @@ public class MainActivity extends Activity {
             i.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
                     Intent.FLAG_GRANT_READ_URI_PERMISSION);
             i.setClipData(ClipData.newRawUri("camera-output", cameraUri));
-            if (i.resolveActivity(getPackageManager()) != null) {
-                startActivityForResult(i, FILE_PICK);
-            } else {
+            if (i.resolveActivity(getPackageManager()) != null) startActivityForResult(i, FILE_PICK);
+            else {
                 finishFileChooser(null);
                 toast("Camera उपलब्ध नहीं है");
             }
@@ -180,11 +303,8 @@ public class MainActivity extends Activity {
     private void openGalleryForWeb(WebChromeClient.FileChooserParams params) {
         try {
             Intent i;
-            try {
-                i = params != null ? params.createIntent() : null;
-            } catch (Exception ex) {
-                i = null;
-            }
+            try { i = params != null ? params.createIntent() : null; }
+            catch (Exception ex) { i = null; }
             if (i == null) {
                 i = new Intent(Intent.ACTION_GET_CONTENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -200,9 +320,8 @@ public class MainActivity extends Activity {
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(requestCode, permissions, results);
         if (requestCode == CAMERA_PERMISSION) {
-            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-                openCameraForWeb();
-            } else {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) openCameraForWeb();
+            else {
                 finishFileChooser(null);
                 toast("Camera permission जरूरी है");
             }
@@ -240,8 +359,8 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleFixedPrompt() {
-        web.postDelayed(this::insertPromptAndTrySend, 2500);
-        web.postDelayed(this::insertPromptAndTrySend, 5200);
+        web.postDelayed(this::insertPromptAndTrySend, 2600);
+        web.postDelayed(this::insertPromptAndTrySend, 5600);
     }
 
     private String jsQuoted(String s) {
