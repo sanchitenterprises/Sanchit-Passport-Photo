@@ -1,7 +1,7 @@
-name: Build Android APK
+name: Build STS DigiKit APK
 on:
   push:
-    branches: [ main ]
+    branches: [ sts-digikit ]
   workflow_dispatch:
 jobs:
   build:
@@ -19,5 +19,5 @@ jobs:
         run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: Sanchit-Passport-Photo-APK
+          name: STS-DigiKit-APK
           path: app/build/outputs/apk/debug/app-debug.apk
