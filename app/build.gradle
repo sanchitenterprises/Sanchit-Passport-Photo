@@ -1,14 +1,24 @@
 plugins { id 'com.android.application' }
 
 android {
-    namespace 'com.sanchit.passportphoto'
+    namespace 'com.sts.digikit'
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.sanchit.passportphoto'
+        applicationId 'com.sts.digikit'
         minSdk 24
         targetSdk 35
-        versionCode 8
-        versionName '1.0.7'
+        versionCode 1
+        versionName '1.0.0'
     }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    implementation 'com.google.zxing:core:3.5.3'
 }
