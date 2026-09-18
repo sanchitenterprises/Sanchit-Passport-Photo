@@ -2792,28 +2792,62 @@ public class MainActivity extends Activity {
         updateBill.run();
     }
 
-    private void showScannerCameraInViewport(){
-        if(scannerViewport==null) return;
-
-        scannerViewport.removeAllViews();
-        embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
-        embeddedScanner.setBackgroundColor(Color.BLACK);
-        embeddedScanner.setStatusText("");
-        configureEmbeddedScanner();
-        scannerViewport.addView(embeddedScanner,new FrameLayout.LayoutParams(-1,-1));
-
-        scannerResultLocked=false;
-        scannerActive=true;
+    private String scanDetails(String raw,com.google.zxing.BarcodeFormat format){
+        String value=raw==null?"":raw.trim();
+        StringBuilder b=new StringBuilder();
+        b.append(L("FORMAT: ","फॉर्मेट: ")).append(format==null?"UNKNOWN":format.toString()).append("\n");
 
         try{
-            embeddedScanner.resume();
-        }catch(Throwable e){
-            scannerActive=false;
-            renderScannerDetails(
-                    L("Camera could not start. Close other camera apps and try again.",
-                      "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"),
-                    "");
+            android.net.Uri uri=android.net.Uri.parse(value);
+            String scheme=uri.getScheme()==null?"":uri.getScheme().toLowerCase(java.util.Locale.US);
+
+            if("upi".equals(scheme)){
+                String pa=scanParam(uri,"pa");
+                String pn=scanParam(uri,"pn");
+                String am=scanParam(uri,"am");
+                String cu=scanParam(uri,"cu");
+                String tn=scanParam(uri,"tn");
+                String tr=scanParam(uri,"tr");
+                String mc=scanParam(uri,"mc");
+
+                b.append(L("TYPE: UPI PAYMENT QR","प्रकार: UPI PAYMENT QR")).append("\n");
+                if(!pn.isEmpty()) b.append(L("Name: ","नाम: ")).append(pn).append("\n");
+                if(!pa.isEmpty()) b.append("UPI ID: ").append(pa).append("\n");
+                if(!am.isEmpty()) b.append(L("Amount: ₹","राशि: ₹")).append(am).append("\n");
+                if(!cu.isEmpty()) b.append(L("Currency: ","मुद्रा: ")).append(cu).append("\n");
+                if(!tn.isEmpty()) b.append(L("Note: ","नोट: ")).append(tn).append("\n");
+                if(!tr.isEmpty()) b.append(L("Reference: ","रेफरेंस: ")).append(tr).append("\n");
+                if(!mc.isEmpty()) b.append(L("Merchant Category: ","मर्चेंट कैटेगरी: ")).append(mc).append("\n");
+            }else if(value.startsWith("WIFI:")){
+                b.append(L("TYPE: WI-FI QR","प्रकार: WI-FI QR")).append("\n");
+                String ssid=parseWifiPart(value,"S");
+                String type=parseWifiPart(value,"T");
+                String pass=parseWifiPart(value,"P");
+                if(!ssid.isEmpty()) b.append("SSID: ").append(ssid).append("\n");
+                if(!type.isEmpty()) b.append(L("Security: ","सिक्योरिटी: ")).append(type).append("\n");
+                if(!pass.isEmpty()) b.append(L("Password: ","पासवर्ड: ")).append(pass).append("\n");
+            }else if("http".equals(scheme) || "https".equals(scheme)){
+                b.append(L("TYPE: WEBSITE / URL","प्रकार: WEBSITE / URL")).append("\n");
+                b.append("URL: ").append(value).append("\n");
+            }else if("tel".equals(scheme)){
+                b.append(L("TYPE: PHONE NUMBER","प्रकार: फोन नंबर")).append("\n");
+                b.append(L("Number: ","नंबर: ")).append(uri.getSchemeSpecificPart()).append("\n");
+            }else if("mailto".equals(scheme)){
+                b.append(L("TYPE: EMAIL","प्रकार: ईमेल")).append("\n");
+                b.append("Email: ").append(uri.getSchemeSpecificPart()).append("\n");
+            }else if(format!=null && format!=com.google.zxing.BarcodeFormat.QR_CODE){
+                b.append(L("TYPE: BARCODE","प्रकार: BARCODE")).append("\n");
+                b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
+            }else{
+                b.append(L("TYPE: QR DATA","प्रकार: QR DATA")).append("\n");
+                b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
+            }
+        }catch(Exception e){
+            b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
         }
+
+        b.append("\n").append(L("RAW DATA:","RAW DATA:")).append("\n").append(value);
+        return b.toString();
     }
 
     private String scannerWebLink(String value){
