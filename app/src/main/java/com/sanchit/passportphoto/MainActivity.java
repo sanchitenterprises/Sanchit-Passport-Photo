@@ -1453,11 +1453,458 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static class TvDevice{
+        String name;
+        String ip;
+        String type;
+        TvDevice(String n,String i,String t){name=n;ip=i;type=t;}
+        @Override public String toString(){return name+"  ("+type+" • "+ip+")";}
+    }
+
+    private String xmlTag(String xml,String tag){
+        if(xml==null) return "";
+        String low=xml.toLowerCase(java.util.Locale.US);
+        String open="<"+tag.toLowerCase(java.util.Locale.US)+">";
+        String close="</"+tag.toLowerCase(java.util.Locale.US)+">";
+        int a=low.indexOf(open);
+        if(a<0) return "";
+        int b=low.indexOf(close,a+open.length());
+        if(b<0) return "";
+        return xml.substring(a+open.length(),b).replace("&amp;","&").trim();
+    }
+
+    private String fetchLanText(String url,int timeout){
+        java.net.HttpURLConnection con=null;
+        try{
+            con=(java.net.HttpURLConnection)new java.net.URL(url).openConnection();
+            con.setConnectTimeout(timeout);
+            con.setReadTimeout(timeout);
+            con.setUseCaches(false);
+            java.io.InputStream in=con.getInputStream();
+            java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream();
+            byte[] b=new byte[4096];
+            int n,total=0;
+            while((n=in.read(b))>0 && total<200000){
+                out.write(b,0,n);
+                total+=n;
+            }
+            in.close();
+            return new String(out.toByteArray(),java.nio.charset.StandardCharsets.UTF_8);
+        }catch(Exception e){
+            return "";
+        }finally{
+            if(con!=null) con.disconnect();
+        }
+    }
+
+    private String headerValue(String response,String name){
+        String[] lines=response.split("\\r?\\n");
+        for(String line:lines){
+            int p=line.indexOf(':');
+            if(p>0 && line.substring(0,p).trim().equalsIgnoreCase(name)){
+                return line.substring(p+1).trim();
+            }
+        }
+        return "";
+    }
+
+    private java.util.ArrayList<TvDevice> discoverTvs(){
+        java.util.ArrayList<TvDevice> out=new java.util.ArrayList<>();
+        java.util.HashSet<String> seen=new java.util.HashSet<>();
+        android.net.wifi.WifiManager.MulticastLock lock=null;
+        java.net.DatagramSocket socket=null;
+        try{
+            android.net.wifi.WifiManager wm=(android.net.wifi.WifiManager)getApplicationContext().getSystemService(WIFI_SERVICE);
+            if(wm!=null){
+                lock=wm.createMulticastLock("sts-tv-discovery");
+                lock.setReferenceCounted(false);
+                lock.acquire();
+            }
+
+            socket=new java.net.DatagramSocket();
+            socket.setSoTimeout(350);
+            String[] targets={"ssdp:all","roku:ecp","urn:schemas-upnp-org:device:MediaRenderer:1"};
+            for(String st:targets){
+                String msg="M-SEARCH * HTTP/1.1\\r\\n"
+                        +"HOST: 239.255.255.250:1900\\r\\n"
+                        +"MAN: \\"ssdp:discover\\"\\r\\n"
+                        +"MX: 2\\r\\n"
+                        +"ST: "+st+"\\r\\n\\r\\n";
+                byte[] data=msg.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                java.net.DatagramPacket packet=new java.net.DatagramPacket(
+                        data,data.length,java.net.InetAddress.getByName("239.255.255.250"),1900);
+                socket.send(packet);
+            }
+
+            long until=System.currentTimeMillis()+2800;
+            while(System.currentTimeMillis()<until){
+                try{
+                    byte[] buf=new byte[8192];
+                    java.net.DatagramPacket packet=new java.net.DatagramPacket(buf,buf.length);
+                    socket.receive(packet);
+                    String response=new String(packet.getData(),0,packet.getLength(),java.nio.charset.StandardCharsets.UTF_8);
+                    String lower=response.toLowerCase(java.util.Locale.US);
+                    String ip=packet.getAddress().getHostAddress();
+                    if(ip==null || seen.contains(ip)) continue;
+
+                    String location=headerValue(response,"LOCATION");
+                    String description=location.isEmpty()?"":fetchLanText(location,1200);
+                    String all=(response+"\n"+description).toLowerCase(java.util.Locale.US);
+
+                    boolean tvLike=all.contains("roku") || all.contains("samsung") || all.contains("webos")
+                            || all.contains("lg electronics") || all.contains("mediarenderer")
+                            || all.contains("smarttv") || all.contains("television") || all.contains("dial");
+                    if(!tvLike) continue;
+
+                    String type="UPNP";
+                    if(all.contains("roku")) type="ROKU";
+                    else if(all.contains("samsung")) type="SAMSUNG";
+                    else if(all.contains("webos") || all.contains("lg electronics")) type="LG";
+
+                    String friendly=xmlTag(description,"friendlyName");
+                    String manufacturer=xmlTag(description,"manufacturer");
+                    String model=xmlTag(description,"modelName");
+                    String name=friendly;
+                    if(name.isEmpty()) name=(manufacturer+" "+model).trim();
+                    if(name.isEmpty()) name=type+" TV";
+
+                    out.add(new TvDevice(name,ip,type));
+                    seen.add(ip);
+                }catch(java.net.SocketTimeoutException ignored){}
+            }
+        }catch(Exception ignored){
+        }finally{
+            if(socket!=null) socket.close();
+            if(lock!=null && lock.isHeld()) lock.release();
+        }
+        return out;
+    }
+
+    private boolean portOpen(String ip,int port,int timeout){
+        java.net.Socket s=null;
+        try{
+            s=new java.net.Socket();
+            s.connect(new java.net.InetSocketAddress(ip,port),timeout);
+            return true;
+        }catch(Exception e){
+            return false;
+        }finally{
+            try{if(s!=null)s.close();}catch(Exception ignored){}
+        }
+    }
+
+    private boolean checkTvDevice(TvDevice d){
+        if(d==null) return false;
+        if("ROKU".equals(d.type)){
+            String x=fetchLanText("http://"+d.ip+":8060/query/device-info",1800);
+            return !x.isEmpty();
+        }
+        if("SAMSUNG".equals(d.type)) return portOpen(d.ip,8001,1000) || portOpen(d.ip,8002,1000);
+        if("LG".equals(d.type)) return portOpen(d.ip,3000,1000) || portOpen(d.ip,3001,1000);
+        return portOpen(d.ip,80,900) || portOpen(d.ip,8000,900);
+    }
+
+    private String rokuKey(String key){
+        if("POWER".equals(key)) return "Power";
+        if("HOME".equals(key)) return "Home";
+        if("UP".equals(key)) return "Up";
+        if("DOWN".equals(key)) return "Down";
+        if("LEFT".equals(key)) return "Left";
+        if("RIGHT".equals(key)) return "Right";
+        if("OK".equals(key)) return "Select";
+        if("BACK".equals(key)) return "Back";
+        if("VOL_UP".equals(key)) return "VolumeUp";
+        if("VOL_DOWN".equals(key)) return "VolumeDown";
+        if("MUTE".equals(key)) return "VolumeMute";
+        if("CH_UP".equals(key)) return "ChannelUp";
+        if("CH_DOWN".equals(key)) return "ChannelDown";
+        if("PLAY".equals(key)) return "Play";
+        return key;
+    }
+
+    private boolean sendRokuKey(String ip,String key){
+        java.net.HttpURLConnection con=null;
+        try{
+            String k=java.net.URLEncoder.encode(rokuKey(key),"UTF-8");
+            java.net.URL url=new java.net.URL("http://"+ip+":8060/keypress/"+k);
+            con=(java.net.HttpURLConnection)url.openConnection();
+            con.setConnectTimeout(1800);
+            con.setReadTimeout(1800);
+            con.setRequestMethod("POST");
+            con.setDoOutput(true);
+            con.getOutputStream().close();
+            int code=con.getResponseCode();
+            return code>=200 && code<400;
+        }catch(Exception e){
+            return false;
+        }finally{
+            if(con!=null) con.disconnect();
+        }
+    }
+
+    private String samsungKey(String key){
+        if("POWER".equals(key)) return "KEY_POWER";
+        if("HOME".equals(key)) return "KEY_HOME";
+        if("UP".equals(key)) return "KEY_UP";
+        if("DOWN".equals(key)) return "KEY_DOWN";
+        if("LEFT".equals(key)) return "KEY_LEFT";
+        if("RIGHT".equals(key)) return "KEY_RIGHT";
+        if("OK".equals(key)) return "KEY_ENTER";
+        if("BACK".equals(key)) return "KEY_RETURN";
+        if("VOL_UP".equals(key)) return "KEY_VOLUP";
+        if("VOL_DOWN".equals(key)) return "KEY_VOLDOWN";
+        if("MUTE".equals(key)) return "KEY_MUTE";
+        if("CH_UP".equals(key)) return "KEY_CHUP";
+        if("CH_DOWN".equals(key)) return "KEY_CHDOWN";
+        if("PLAY".equals(key)) return "KEY_PLAY";
+        return key;
+    }
+
+    private java.net.Socket samsungSocket(String ip,int port,boolean secure) throws Exception{
+        if(!secure){
+            java.net.Socket s=new java.net.Socket();
+            s.connect(new java.net.InetSocketAddress(ip,port),2200);
+            return s;
+        }
+        javax.net.ssl.TrustManager[] trust={new javax.net.ssl.X509TrustManager(){
+            public java.security.cert.X509Certificate[] getAcceptedIssuers(){return new java.security.cert.X509Certificate[0];}
+            public void checkClientTrusted(java.security.cert.X509Certificate[] c,String a){}
+            public void checkServerTrusted(java.security.cert.X509Certificate[] c,String a){}
+        }};
+        javax.net.ssl.SSLContext sc=javax.net.ssl.SSLContext.getInstance("TLS");
+        sc.init(null,trust,new java.security.SecureRandom());
+        javax.net.ssl.SSLSocket s=(javax.net.ssl.SSLSocket)sc.getSocketFactory().createSocket();
+        s.connect(new java.net.InetSocketAddress(ip,port),2500);
+        s.startHandshake();
+        return s;
+    }
+
+    private void writeWsText(java.io.OutputStream out,String text) throws Exception{
+        byte[] data=text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.security.SecureRandom rnd=new java.security.SecureRandom();
+        byte[] mask=new byte[4];
+        rnd.nextBytes(mask);
+
+        out.write(0x81);
+        int len=data.length;
+        if(len<=125){
+            out.write(0x80|len);
+        }else if(len<=65535){
+            out.write(0x80|126);
+            out.write((len>>8)&255);
+            out.write(len&255);
+        }else{
+            out.write(0x80|127);
+            for(int i=7;i>=0;i--) out.write((len>>(8*i))&255);
+        }
+        out.write(mask);
+        for(int i=0;i<data.length;i++) out.write(data[i]^mask[i%4]);
+        out.flush();
+    }
+
+    private boolean sendSamsungWs(String ip,int port,boolean secure,String key){
+        java.net.Socket socket=null;
+        try{
+            socket=samsungSocket(ip,port,secure);
+            socket.setSoTimeout(3000);
+
+            byte[] nonce=new byte[16];
+            new java.security.SecureRandom().nextBytes(nonce);
+            String wsKey=android.util.Base64.encodeToString(nonce,android.util.Base64.NO_WRAP);
+            String name=android.util.Base64.encodeToString("STS DigiKit".getBytes(java.nio.charset.StandardCharsets.UTF_8),android.util.Base64.NO_WRAP);
+            name=java.net.URLEncoder.encode(name,"UTF-8");
+            String path="/api/v2/channels/samsung.remote.control?name="+name;
+
+            java.io.OutputStream out=socket.getOutputStream();
+            String req="GET "+path+" HTTP/1.1\\r\\n"
+                    +"Host: "+ip+":"+port+"\\r\\n"
+                    +"Upgrade: websocket\\r\\n"
+                    +"Connection: Upgrade\\r\\n"
+                    +"Sec-WebSocket-Key: "+wsKey+"\\r\\n"
+                    +"Sec-WebSocket-Version: 13\\r\\n"
+                    +"Origin: http://localhost\\r\\n\\r\\n";
+            out.write(req.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.flush();
+
+            java.io.BufferedReader br=new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(),java.nio.charset.StandardCharsets.UTF_8));
+            String first=br.readLine();
+            if(first==null || !first.contains("101")) return false;
+            String line;
+            while((line=br.readLine())!=null && !line.isEmpty()){}
+
+            String payload="{\"method\":\"ms.remote.control\",\"params\":{\"Cmd\":\"Click\",\"DataOfCmd\":\""
+                    +samsungKey(key)+"\",\"Option\":\"false\",\"TypeOfRemote\":\"SendRemoteKey\"}}";
+            writeWsText(out,payload);
+            try{Thread.sleep(100);}catch(Exception ignored){}
+            return true;
+        }catch(Exception e){
+            return false;
+        }finally{
+            try{if(socket!=null)socket.close();}catch(Exception ignored){}
+        }
+    }
+
+    private boolean sendSamsungKey(String ip,String key){
+        if(sendSamsungWs(ip,8001,false,key)) return true;
+        return sendSamsungWs(ip,8002,true,key);
+    }
+
+    private boolean sendTvKey(TvDevice d,String key){
+        if(d==null) return false;
+        if("ROKU".equals(d.type)) return sendRokuKey(d.ip,key);
+        if("SAMSUNG".equals(d.type)) return sendSamsungKey(d.ip,key);
+        return false;
+    }
+
     private void showRemote(){
-        currentTool="REMOTE"; shell(L("REMOTE","रिमोट"));
-        ConsumerIrManager ir=(ConsumerIrManager)getSystemService(CONSUMER_IR_SERVICE);
-        String msg=(ir!=null&&ir.hasIrEmitter())?"IR Blaster detected. Device-specific remote profiles अगले update में जोड़ेंगे।":"इस phone में IR Blaster उपलब्ध नहीं है।";
-        TextView t=tv(msg,22,WHITE);styleResult(t);root.addView(t,resultParams(180));
+        currentTool="REMOTE";
+        shell(L("SMART TV REMOTE","स्मार्ट TV रिमोट"));
+
+        TextView status=tv(L("Same Wi-Fi TV remote","एक ही Wi-Fi पर TV रिमोट"),17,SOFT);
+        status.setGravity(Gravity.CENTER);
+        styleResult(status);
+        root.addView(status,controlParams(64));
+
+        Button scan=btn(L("AUTO FIND TV ON WI-FI","Wi-Fi पर TV खोजें"));
+        root.addView(scan,controlParams(58));
+
+        Spinner devices=dropdown(new String[]{L("No TV selected","कोई TV चुना नहीं")});
+        root.addView(devices,controlParams(58));
+
+        Button connect=btn(L("CONNECT / SAVE TV","TV कनेक्ट / सेव करें"));
+        root.addView(connect,controlParams(58));
+
+        LinearLayout remoteBox=new LinearLayout(this);
+        remoteBox.setOrientation(LinearLayout.VERTICAL);
+        remoteBox.setPadding(dp(4),dp(4),dp(4),dp(4));
+        remoteBox.setBackground(grad(Color.rgb(13,31,52),Color.rgb(20,50,75),14));
+        root.addView(remoteBox,new LinearLayout.LayoutParams(-1,0,1));
+
+        java.util.ArrayList<TvDevice> found=new java.util.ArrayList<>();
+        final TvDevice[] active={null};
+
+        java.util.function.BiConsumer<String,String> addRemoteButton=(label,key)->{};
+
+        java.util.function.Consumer<String[]> addRow=(String[] specs)->{
+            LinearLayout row=new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for(String spec:specs){
+                String[] parts=spec.split("\\|",2);
+                String label=parts[0];
+                String key=parts.length>1?parts[1]:"";
+                Button b=btn(label);
+                row.addView(b,new LinearLayout.LayoutParams(0,dp(58),1));
+                b.setOnClickListener(v->{
+                    TvDevice d=active[0];
+                    if(d==null){
+                        Toast.makeText(this,L("Connect a TV first","पहले TV कनेक्ट करें"),Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    status.setText(L("Sending: ","भेज रहे हैं: ")+label);
+                    new Thread(()->{
+                        boolean ok=sendTvKey(d,key);
+                        runOnUiThread(()->{
+                            if(ok) status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+                            else status.setText(L("Command failed. Reconnect TV or allow remote access on TV.","कमांड नहीं गया। TV दोबारा कनेक्ट करें या TV पर remote access allow करें।"));
+                        });
+                    }).start();
+                });
+            }
+            remoteBox.addView(row,new LinearLayout.LayoutParams(-1,0,1));
+        };
+
+        addRow.accept(new String[]{"⏻|POWER","⌂|HOME","↩|BACK"});
+        addRow.accept(new String[]{"VOL −|VOL_DOWN","▲|UP","VOL +|VOL_UP"});
+        addRow.accept(new String[]{"◀|LEFT","OK|OK","▶|RIGHT"});
+        addRow.accept(new String[]{"CH −|CH_DOWN","▼|DOWN","CH +|CH_UP"});
+        addRow.accept(new String[]{"MUTE|MUTE","PLAY|PLAY"});
+
+        Runnable refreshSpinner=()->{
+            java.util.ArrayList<String> names=new java.util.ArrayList<>();
+            if(found.isEmpty()) names.add(L("No TV found","कोई TV नहीं मिला"));
+            else for(TvDevice d:found) names.add(d.toString());
+
+            ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,names){
+                @Override public View getView(int pos,View convert,android.view.ViewGroup parent){
+                    TextView t=(TextView)super.getView(pos,convert,parent);
+                    t.setTextColor(WHITE);t.setTextSize(16);t.setPadding(dp(12),0,dp(12),0);t.setBackgroundColor(PANEL2);
+                    return t;
+                }
+                @Override public View getDropDownView(int pos,View convert,android.view.ViewGroup parent){
+                    TextView t=(TextView)super.getDropDownView(pos,convert,parent);
+                    t.setTextColor(WHITE);t.setTextSize(16);t.setPadding(dp(12),dp(12),dp(12),dp(12));t.setBackgroundColor(PANEL);
+                    return t;
+                }
+            };
+            devices.setAdapter(adapter);
+        };
+
+        scan.setOnClickListener(v->{
+            scan.setEnabled(false);
+            status.setText(L("Searching TVs on this Wi-Fi...","इस Wi-Fi पर TV खोज रहे हैं..."));
+            new Thread(()->{
+                java.util.ArrayList<TvDevice> list=discoverTvs();
+                runOnUiThread(()->{
+                    found.clear();
+                    found.addAll(list);
+                    refreshSpinner.run();
+                    scan.setEnabled(true);
+                    if(found.isEmpty()){
+                        status.setText(L("No compatible TV discovered. Phone and TV must be on the same Wi-Fi.","TV नहीं मिला। Phone और TV एक ही Wi-Fi पर होना चाहिए।"));
+                    }else if(found.size()==1 && ("ROKU".equals(found.get(0).type) || "SAMSUNG".equals(found.get(0).type))){
+                        active[0]=found.get(0);
+                        TvDevice d=active[0];
+                        getSharedPreferences("sts",0).edit()
+                                .putString("tv_name",d.name).putString("tv_ip",d.ip).putString("tv_type",d.type).apply();
+                        status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+d.name);
+                    }else{
+                        status.setText(found.size()+" "+L("TV device(s) found. Select one and connect.","TV मिले। एक चुनकर connect करें।"));
+                    }
+                });
+            }).start();
+        });
+
+        connect.setOnClickListener(v->{
+            if(found.isEmpty()){
+                scan.performClick();
+                return;
+            }
+            int pos=devices.getSelectedItemPosition();
+            if(pos<0 || pos>=found.size()) pos=0;
+            TvDevice d=found.get(pos);
+            if(!("ROKU".equals(d.type) || "SAMSUNG".equals(d.type))){
+                status.setText(d.name+" "+L("was found, but this model needs its brand pairing protocol. Roku and Samsung Wi-Fi control are enabled in this build.","मिला है, लेकिन इस model के लिए brand pairing protocol चाहिए। इस build में Roku और Samsung Wi-Fi control चालू है।"));
+                return;
+            }
+            active[0]=d;
+            getSharedPreferences("sts",0).edit()
+                    .putString("tv_name",d.name).putString("tv_ip",d.ip).putString("tv_type",d.type).apply();
+            status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+        });
+
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String savedIp=sp.getString("tv_ip","");
+        String savedType=sp.getString("tv_type","");
+        String savedName=sp.getString("tv_name","Saved TV");
+        if(!savedIp.isEmpty() && ("ROKU".equals(savedType) || "SAMSUNG".equals(savedType))){
+            TvDevice saved=new TvDevice(savedName,savedIp,savedType);
+            found.add(saved);
+            refreshSpinner.run();
+            status.setText(L("Reconnecting saved TV...","सेव TV दोबारा कनेक्ट कर रहे हैं..."));
+            new Thread(()->{
+                boolean ok=checkTvDevice(saved);
+                runOnUiThread(()->{
+                    if(ok){
+                        active[0]=saved;
+                        status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+saved.name);
+                    }else{
+                        status.setText(L("Saved TV not reachable. Tap Auto Find TV.","सेव TV नहीं मिला। Auto Find TV दबाएं।"));
+                    }
+                });
+            }).start();
+        }else{
+            scan.performClick();
+        }
     }
 
     private void showUnitConverter(){
