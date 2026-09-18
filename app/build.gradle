@@ -1,15 +1,36 @@
 plugins { id 'com.android.application'; id 'com.google.protobuf' }
 
+def stableKeyB64 = file('sts-stable-key.b64')
+def stableKeyFile = file("$buildDir/sts-stable-key.jks")
+if (stableKeyB64.exists()) {
+    stableKeyFile.parentFile.mkdirs()
+    stableKeyFile.bytes = java.util.Base64.getDecoder().decode(stableKeyB64.text.trim())
+}
+
 android {
     namespace 'com.sts.digikit'
     compileSdk 35
+
+    signingConfigs {
+        stable {
+            storeFile stableKeyFile
+            storePassword 'STSDigiKit2026'
+            keyAlias 'sts_digikit'
+            keyPassword 'STSDigiKit2026'
+        }
+    }
 
     defaultConfig {
         applicationId 'com.sts.digikit'
         minSdk 24
         targetSdk 35
-        versionCode 27
-        versionName '1.0.26'
+        versionCode 28
+        versionName '1.0.27'
+    }
+
+    buildTypes {
+        debug { signingConfig signingConfigs.stable }
+        release { signingConfig signingConfigs.stable }
     }
 
     compileOptions {
