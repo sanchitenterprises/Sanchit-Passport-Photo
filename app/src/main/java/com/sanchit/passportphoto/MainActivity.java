@@ -31,7 +31,6 @@ public class MainActivity extends Activity {
     private boolean vibrationEnabled = true;
     private String language = "ENGLISH";
     private String currentTool = "CALCULATOR";
-    private String dropdownPosition = "TOP";
     private boolean toolPickerOpen = false;
     private final StringBuilder appLogs = new StringBuilder();
     private final DecimalFormat df = new DecimalFormat("#,##0.00");
@@ -45,7 +44,6 @@ public class MainActivity extends Activity {
         devMode=sp.getBoolean("devMode",false);
         vibrationEnabled=sp.getBoolean("vibration",true);
         language=sp.getString("language","ENGLISH");
-        dropdownPosition=sp.getString("dropdownPosition","TOP");
         logEvent("App started");
         showCalculator();
     }
@@ -140,7 +138,7 @@ public class MainActivity extends Activity {
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(BG);
 
-        if("TOP".equals(dropdownPosition)) addFixedDropdown(outer,name);
+        addFixedDropdown(outer,name);
 
         ScrollView sc=new ScrollView(this);
         sc.setFillViewport(true);
@@ -149,8 +147,6 @@ public class MainActivity extends Activity {
         root.setPadding(0,0,0,0);
         sc.addView(root);
         outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
-
-        if("BOTTOM".equals(dropdownPosition)) addFixedDropdown(outer,name);
 
         setContentView(outer);
         return sc;
@@ -206,9 +202,13 @@ public class MainActivity extends Activity {
         TextView spacer=tv("",1,WHITE);
         header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
+        outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
+
         ScrollView listScroll=new ScrollView(this);
         listScroll.setFillViewport(true);
         listScroll.setBackgroundColor(BG);
+        listScroll.setVerticalScrollBarEnabled(true);
+        listScroll.setScrollbarFadingEnabled(false);
 
         LinearLayout tools=new LinearLayout(this);
         tools.setOrientation(LinearLayout.VERTICAL);
@@ -230,14 +230,7 @@ public class MainActivity extends Activity {
         addMenu(tools,L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),()->{toolPickerOpen=false;openTool("SCAN");});
 
         listScroll.addView(tools,new ScrollView.LayoutParams(-1,-2));
-
-        if("TOP".equals(dropdownPosition)){
-            outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
-            outer.addView(listScroll,new LinearLayout.LayoutParams(-1,0,1));
-        }else{
-            outer.addView(listScroll,new LinearLayout.LayoutParams(-1,0,1));
-            outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
-        }
+        outer.addView(listScroll,new LinearLayout.LayoutParams(-1,0,1));
 
         menu.setOnClickListener(v->showTopMenu(menu));
         label.setOnClickListener(v->{toolPickerOpen=false;reopenCurrentTool();});
@@ -259,7 +252,6 @@ public class MainActivity extends Activity {
     private void showTopMenu(View anchor){
         PopupMenu p=new PopupMenu(this,anchor);
         p.getMenu().add(L("LANGUAGE","भाषा"));
-        p.getMenu().add(L("DROPDOWN POSITION","ड्रॉपडाउन की स्थिति"));
         p.getMenu().add(L("ABOUT","ऐप के बारे में"));
         p.setOnMenuItemClickListener(item->{
             String s=item.getTitle().toString();
@@ -281,29 +273,12 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            if(s.equals(L("DROPDOWN POSITION","ड्रॉपडाउन की स्थिति"))){
-                final String[] positions={L("TOP","ऊपर"),L("BOTTOM","नीचे")};
-                int checked="BOTTOM".equals(dropdownPosition)?1:0;
-                new AlertDialog.Builder(this)
-                        .setTitle(L("Dropdown Position","ड्रॉपडाउन की स्थिति"))
-                        .setSingleChoiceItems(positions,checked,(d,which)->{
-                            dropdownPosition=which==1?"BOTTOM":"TOP";
-                            getSharedPreferences("sts",0).edit().putString("dropdownPosition",dropdownPosition).apply();
-                            d.dismiss();
-                            toolPickerOpen=false;
-                            reopenCurrentTool();
-                        })
-                        .setNegativeButton(L("CANCEL","रद्द करें"),null)
-                        .show();
-                return true;
-            }
-
             if(s.equals(L("ABOUT","ऐप के बारे में"))){
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.9\nOffline utility toolkit\nTool list position can be changed from the three-dot menu.",
-                                "संस्करण 1.0.9\nऑफलाइन यूटिलिटी टूलकिट\nटूल लिस्ट की स्थिति Three-dot मेनू से ऊपर/नीचे की जा सकती है।"))
+                                "Version 1.0.10\nOffline utility toolkit\nTap the current tool name to open the full-screen list, then swipe the list up or down.",
+                                "संस्करण 1.0.10\nऑफलाइन यूटिलिटी टूलकिट\nपूरी लिस्ट खोलने के लिए ऊपर के टूल नाम पर टैप करें, फिर लिस्ट को उंगली से ऊपर-नीचे स्क्रॉल करें।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -333,7 +308,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.9\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.10\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
     }
 
