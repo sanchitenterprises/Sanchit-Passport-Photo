@@ -2816,6 +2816,228 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String scannerWebLink(String value){
+        if(value==null) return "";
+        String s=value.trim();
+        if(s.matches("(?i)^https?://\\S+$")) return s;
+        if(s.matches("(?i)^www\\.\\S+$")) return "https://"+s;
+        try{
+            java.util.regex.Matcher m=java.util.regex.Pattern
+                    .compile("(?i)https?://[^\\s]+")
+                    .matcher(s);
+            if(m.find()) return m.group();
+        }catch(Exception ignored){}
+        return "";
+    }
+
+    private void renderScannerDetails(String details,String raw){
+        if(scannerViewport==null) return;
+
+        scannerViewport.removeAllViews();
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        TextView result=tv("",19,WHITE);
+        result.setGravity(Gravity.CENTER);
+        result.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+        result.setPadding(dp(18),dp(18),dp(18),dp(18));
+        result.setBackground(grad(PANEL,Color.rgb(23,52,88),0));
+
+        String link=scannerWebLink(raw);
+        if(link.isEmpty()){
+            result.setText(details);
+            result.setTextIsSelectable(true);
+        }else{
+            String label=details+"\n\n"+L("LINK: ","लिंक: ")+link;
+            android.text.SpannableString span=new android.text.SpannableString(label);
+            int pos=label.lastIndexOf(link);
+            if(pos>=0){
+                span.setSpan(new android.text.style.ClickableSpan(){
+                    @Override public void onClick(View widget){
+                        try{
+                            Intent open=new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(link));
+                            startActivity(open);
+                        }catch(Exception e){
+                            Toast.makeText(MainActivity.this,L("Browser could not open this link","Browser इस link को नहीं खोल सका"),Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                    @Override public void updateDrawState(android.text.TextPaint ds){
+                        super.updateDrawState(ds);
+                        ds.setColor(Color.rgb(40,145,255));
+                        ds.setUnderlineText(true);
+                    }
+                },pos,pos+link.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            result.setText(span);
+            result.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
+            result.setHighlightColor(Color.TRANSPARENT);
+        }
+
+        scannerDetails=result;
+        scroll.addView(result,new ScrollView.LayoutParams(-1,-1));
+        scannerViewport.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
+    }
+
+    private void handleScannerResult(String value,com.google.zxing.BarcodeFormat format){
+        if(value==null || value.trim().isEmpty()) return;
+
+        scannerResultLocked=true;
+        scannerActive=false;
+        try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
+
+        String details=scanDetails(value,format);
+        lastScannerRaw=value;
+        lastScannerDetails=details;
+
+        savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),details);
+        haptic();
+        renderScannerDetails(details,value);
+    }
+
+    private android.graphics.Bitmap loadGalleryBitmap(android.net.Uri uri) throws Exception{
+        android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds=true;
+
+        java.io.InputStream first=getContentResolver().openInputStream(uri);
+        if(first==null) throw new java.io.IOException("Image could not be opened");
+        android.graphics.BitmapFactory.decodeStream(first,null,bounds);
+        first.close();
+
+        int sample=1;
+        int max=Math.max(bounds.outWidth,bounds.outHeight);
+        while(max/sample>2200) sample*=2;
+
+        android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+        opts.inSampleSize=Math.max(1,sample);
+        opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+
+        java.io.InputStream in=getContentResolver().openInputStream(uri);
+        if(in==null) throw new java.io.IOException("Image could not be opened");
+        android.graphics.Bitmap bm=android.graphics.BitmapFactory.decodeStream(in,null,opts);
+        in.close();
+
+        if(bm==null) throw new java.io.IOException("Unsupported image");
+        return bm;
+    }
+
+    private com.google.zxing.Result decodeBitmapOnce(android.graphics.Bitmap bm) throws Exception{
+        int w=bm.getWidth(),h=bm.getHeight();
+        int[] pixels=new int[w*h];
+        bm.getPixels(pixels,0,w,0,0,w,h);
+
+        com.google.zxing.RGBLuminanceSource source=
+                new com.google.zxing.RGBLuminanceSource(w,h,pixels);
+
+        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> hints=
+                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
+        hints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
+        hints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
+        hints.put(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS,
+                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class));
+
+        com.google.zxing.MultiFormatReader reader=new com.google.zxing.MultiFormatReader();
+        reader.setHints(hints);
+
+        try{
+            return reader.decodeWithState(new com.google.zxing.BinaryBitmap(
+                    new com.google.zxing.common.HybridBinarizer(source)));
+        }catch(Exception first){
+            reader.reset();
+            com.google.zxing.LuminanceSource inv=source.invert();
+            return reader.decode(new com.google.zxing.BinaryBitmap(
+                    new com.google.zxing.common.HybridBinarizer(inv)),hints);
+        }
+    }
+
+    private com.google.zxing.Result decodeGalleryImage(android.graphics.Bitmap original) throws Exception{
+        Exception last=null;
+        android.graphics.Bitmap current=original;
+
+        for(int i=0;i<4;i++){
+            try{
+                return decodeBitmapOnce(current);
+            }catch(Exception e){
+                last=e;
+            }
+
+            if(i<3){
+                android.graphics.Matrix m=new android.graphics.Matrix();
+                m.postRotate(90);
+                android.graphics.Bitmap rotated=android.graphics.Bitmap.createBitmap(
+                        current,0,0,current.getWidth(),current.getHeight(),m,true);
+                if(current!=original && current!=rotated) current.recycle();
+                current=rotated;
+            }
+        }
+
+        if(current!=original){
+            try{current.recycle();}catch(Exception ignored){}
+        }
+        if(last!=null) throw last;
+        throw com.google.zxing.NotFoundException.getNotFoundInstance();
+    }
+
+    private void pickScannerImageFromGallery(){
+        try{
+            Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            pick.setType("image/*");
+            startActivityForResult(pick,REQ_GALLERY_SCAN);
+        }catch(Exception e){
+            if(scannerDetails!=null){
+                scannerDetails.setText(L("Gallery could not be opened.","Gallery नहीं खुल सकी।"));
+            }
+        }
+    }
+
+    private void configureEmbeddedScanner(){
+        if(embeddedScanner==null) return;
+
+        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> scanHints=
+                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
+        scanHints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
+        scanHints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
+
+        java.util.Collection<com.google.zxing.BarcodeFormat> allFormats=
+                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class);
+
+        embeddedScanner.getBarcodeView().setDecoderFactory(
+                new com.journeyapps.barcodescanner.DefaultDecoderFactory(
+                        allFormats,scanHints,"UTF-8",2));
+
+        embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
+            @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
+                if(result==null || result.getText()==null || scannerResultLocked) return;
+                handleScannerResult(result.getText(),result.getBarcodeFormat());
+            }
+            @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
+        });
+    }
+
+    private void showScannerCameraInViewport(){
+        if(scannerViewport==null) return;
+
+        scannerViewport.removeAllViews();
+        embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
+        embeddedScanner.setBackgroundColor(Color.BLACK);
+        embeddedScanner.setStatusText("");
+        configureEmbeddedScanner();
+        scannerViewport.addView(embeddedScanner,new FrameLayout.LayoutParams(-1,-1));
+
+        scannerResultLocked=false;
+        scannerActive=true;
+
+        try{
+            embeddedScanner.resume();
+        }catch(Throwable e){
+            scannerActive=false;
+            renderScannerDetails(
+                    L("Camera could not start. Close other camera apps and try again.",
+                      "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"),
+                    "");
+        }
+    }
+
     private void showScanner(){
         currentTool="SCAN";
         toolPickerOpen=false;
