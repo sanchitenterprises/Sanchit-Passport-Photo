@@ -61,13 +61,33 @@ public class MainActivity extends Activity {
     }
     private Button btn(String s){
         Button b=new Button(this); b.setText(s); b.setAllCaps(false); b.setTextColor(WHITE); b.setTextSize(16);
-        b.setBackground(bg(PANEL2,10)); return b;
+        b.setPadding(dp(10),dp(8),dp(10),dp(8));
+        b.setBackground(bg(PANEL2,8)); return b;
     }
     private EditText input(String hint){
         EditText e=new EditText(this); e.setHint(hint); e.setHintTextColor(SOFT); e.setTextColor(WHITE);
-        e.setTextSize(18); e.setSingleLine(true); e.setPadding(dp(12),dp(8),dp(12),dp(8));
-        e.setBackground(bg(PANEL,0)); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(2),0,dp(2)); e.setLayoutParams(p); return e;
+        e.setTextSize(18); e.setSingleLine(true); e.setPadding(dp(14),dp(8),dp(14),dp(8));
+        e.setBackground(bg(PANEL,8)); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(4),0,dp(4)); e.setLayoutParams(p); return e;
+    }
+
+    private LinearLayout.LayoutParams controlParams(int heightDp){
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(heightDp));
+        p.setMargins(0,dp(4),0,dp(4));
+        return p;
+    }
+
+    private LinearLayout.LayoutParams resultParams(int heightDp){
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(heightDp));
+        p.setMargins(0,dp(10),0,dp(4));
+        return p;
+    }
+
+    private void styleResult(TextView t){
+        t.setGravity(Gravity.CENTER);
+        t.setTypeface(null,1);
+        t.setPadding(dp(14),dp(12),dp(14),dp(12));
+        t.setBackground(bg(PANEL2,10));
     }
 
     private Spinner dropdown(String[] items){
@@ -86,7 +106,7 @@ public class MainActivity extends Activity {
         };
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         s.setAdapter(a);
-        s.setBackground(bg(PANEL2,0));
+        s.setBackground(bg(PANEL2,8));
         return s;
     }
     private String L(String en,String hi){
@@ -172,7 +192,7 @@ public class MainActivity extends Activity {
         box.setBackgroundColor(BG);
 
         TextView help=tv(L("Select an item, then move it UP or DOWN.","आइटम चुनें, फिर उसे ऊपर या नीचे करें।"),16,SOFT);
-        box.addView(help,new LinearLayout.LayoutParams(-1,dp(58)));
+        box.addView(help,controlParams(58));
 
         ListView list=new ListView(this);
         list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
@@ -200,7 +220,7 @@ public class MainActivity extends Activity {
         Button down=btn("▼  "+L("DOWN","नीचे"));
         controls.addView(up,new LinearLayout.LayoutParams(0,dp(58),1));
         controls.addView(down,new LinearLayout.LayoutParams(0,dp(58),1));
-        box.addView(controls,new LinearLayout.LayoutParams(-1,dp(58)));
+        box.addView(controls,controlParams(58));
 
         AlertDialog dialog=new AlertDialog.Builder(this)
                 .setTitle(L("DROPDOWN LIST ORDER","ड्रॉपडाउन लिस्ट क्रम"))
@@ -333,7 +353,7 @@ public class MainActivity extends Activity {
 
         for(String key:getToolOrder()){
             final String k=key;
-            addMenu(tools,toolName(k),()->{toolPickerOpen=false;openTool(k);});
+            addMenu(tools,toolName(k),()->{toolPickerOpen=false;openTool(k);},k.equals(currentTool));
         }
 
         listScroll.addView(tools,new ScrollView.LayoutParams(-1,-2));
@@ -351,8 +371,18 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(LinearLayout list,String s,Runnable r){
-        TextView row=tv(s,20,WHITE); row.setGravity(Gravity.CENTER); row.setTypeface(null,1); row.setBackground(bg(PANEL,0));
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72)); p.setMargins(0,0,0,0); list.addView(row,p);
+        addMenu(list,s,r,false);
+    }
+
+    private void addMenu(LinearLayout list,String s,Runnable r,boolean selected){
+        TextView row=tv(s,20,selected?BG:WHITE);
+        row.setGravity(Gravity.CENTER);
+        row.setTypeface(null,1);
+        row.setBackground(bg(selected?ACCENT:PANEL,0));
+        if(selected) row.setContentDescription(s+" selected");
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72));
+        p.setMargins(0,0,0,dp(2));
+        list.addView(row,p);
         row.setOnClickListener(v->{logEvent("Open: "+s); haptic(); r.run();});
     }
 
@@ -390,8 +420,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.11\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.11\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.12\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.12\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -421,8 +451,8 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.11\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
-        about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
+        TextView about=tv("Version 1.0.12\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
     private void showLogs(){
@@ -430,7 +460,7 @@ public class MainActivity extends Activity {
         TextView logs=tv(appLogs.length()==0?"No logs yet":appLogs.toString(),15,WHITE);
         logs.setGravity(Gravity.TOP|Gravity.LEFT); logs.setTextIsSelectable(true); logs.setBackground(bg(PANEL,10));
         root.addView(logs,new LinearLayout.LayoutParams(-1,-2));
-        Button clear=btn("CLEAR LOGS"); root.addView(clear,new LinearLayout.LayoutParams(-1,dp(58)));
+        Button clear=btn("CLEAR LOGS"); root.addView(clear,controlParams(58));
         clear.setOnClickListener(v->{appLogs.setLength(0);logs.setText("No logs yet");});
     }
 
@@ -457,7 +487,7 @@ public class MainActivity extends Activity {
 
     private void showCalculator(){
         currentTool="CALCULATOR"; shell(L("CALCULATOR","कैलकुलेटर"));
-        final TextView display=tv("0",32,WHITE); display.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL); display.setBackground(bg(PANEL,12)); root.addView(display,new LinearLayout.LayoutParams(-1,dp(80)));
+        final TextView display=tv("0",32,WHITE); display.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL); display.setTypeface(null,1); display.setBackground(bg(PANEL,8)); root.addView(display,resultParams(80));
         String[][] keys={{"7","8","9","÷"},{"4","5","6","×"},{"1","2","3","-"},{"0",".","C","+"},{"⌫","="}};
         final String[] expr={""}; final double[] first={0}; final String[] op={""};
         for(String[] row:keys){
@@ -485,7 +515,7 @@ public class MainActivity extends Activity {
 
     private void showCashCounter(){
         currentTool="CASH_COUNTER"; shell(L("CASH COUNTER","कैश काउंटर"));
-        TextView total=tv("TOTAL ₹0",28,WHITE); total.setGravity(Gravity.CENTER); total.setBackground(bg(PANEL2,12)); root.addView(total,new LinearLayout.LayoutParams(-1,dp(76)));
+        TextView total=tv("TOTAL ₹0",28,WHITE); styleResult(total); root.addView(total,resultParams(76));
         int[] den={500,200,100,50,20,10,5,2,1}; java.util.ArrayList<EditText> qty=new java.util.ArrayList<>();
         for(int d:den){
             LinearLayout line=new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
@@ -493,7 +523,7 @@ public class MainActivity extends Activity {
             EditText q=input("Qty"); q.setInputType(android.text.InputType.TYPE_CLASS_NUMBER); qty.add(q); line.addView(q,new LinearLayout.LayoutParams(dp(130),dp(54)));
             root.addView(line);
         }
-        Button calc=btn("CALCULATE TOTAL"); root.addView(calc,new LinearLayout.LayoutParams(-1,dp(60)));
+        Button calc=btn("CALCULATE TOTAL"); root.addView(calc,controlParams(60));
         calc.setOnClickListener(v->{long sum=0;for(int i=0;i<den.length;i++){long q=0;try{q=Long.parseLong(qty.get(i).getText().toString());}catch(Exception ignored){}sum+=q*den[i];} total.setText("TOTAL ₹"+String.format(java.util.Locale.US,"%,d",sum));});
     }
 
@@ -501,8 +531,8 @@ public class MainActivity extends Activity {
         currentTool="AGE"; shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
         final Calendar dob=Calendar.getInstance(), asof=Calendar.getInstance();
         Button bd=btn("SELECT DATE OF BIRTH"); Button td=btn("CALCULATE UP TO TODAY"); Button go=btn("CALCULATE AGE");
-        root.addView(bd,new LinearLayout.LayoutParams(-1,dp(60))); root.addView(td,new LinearLayout.LayoutParams(-1,dp(60))); root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));
-        TextView out=tv("Select date of birth",21,WHITE); out.setGravity(Gravity.CENTER); out.setBackground(bg(PANEL2,12)); root.addView(out,new LinearLayout.LayoutParams(-1,dp(120)));
+        root.addView(bd,controlParams(60)); root.addView(td,controlParams(60)); root.addView(go,controlParams(60));
+        TextView out=tv("Select date of birth",21,WHITE); styleResult(out); root.addView(out,resultParams(120));
         bd.setOnClickListener(v->pickDate(dob, c->bd.setText(date(c))));
         td.setOnClickListener(v->pickDate(asof, c->td.setText("UP TO: "+date(c))));
         go.setOnClickListener(v->{Calendar a=(Calendar)asof.clone();Calendar b=(Calendar)dob.clone();if(a.before(b)){out.setText("Invalid date");return;}int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);if(d<0){m--;Calendar prev=(Calendar)a.clone();prev.add(Calendar.MONTH,-1);d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);}if(m<0){y--;m+=12;}long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;out.setText(y+" Years  "+m+" Months  "+d+" Days\nTotal Days: "+days);});
@@ -514,7 +544,7 @@ public class MainActivity extends Activity {
     private void showSavings(){
         currentTool="SAVINGS"; shell(L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"));
         Spinner mode=dropdown(new String[]{"SIP","RD","FD"});
-        root.addView(mode,new LinearLayout.LayoutParams(-1,dp(58)));
+        root.addView(mode,controlParams(58));
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);root.addView(box);
         mode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
             @Override public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){ financeBox(box,String.valueOf(mode.getSelectedItem())); }
@@ -525,18 +555,18 @@ public class MainActivity extends Activity {
     private void financeBox(LinearLayout box,String mode){
         box.removeAllViews();
         EditText p=input(mode.equals("FD")?"Principal Amount":"Monthly Amount"); EditText rate=input("Annual Interest %"); EditText years=input("Years");
-        box.addView(p);box.addView(rate);box.addView(years);Button calc=btn("CALCULATE "+mode);box.addView(calc,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));box.addView(out,new LinearLayout.LayoutParams(-1,dp(110)));
+        box.addView(p);box.addView(rate);box.addView(years);Button calc=btn("CALCULATE "+mode);box.addView(calc,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);box.addView(out,resultParams(110));
         calc.setOnClickListener(v->{double P=val(p),r=val(rate)/100.0,t=val(years),fv=0,invested=0;if(mode.equals("FD")){fv=P*Math.pow(1+r/4.0,4*t);invested=P;}else{double i=r/12.0;int n=(int)Math.round(t*12);invested=P*n;if(i==0)fv=invested;else fv=P*((Math.pow(1+i,n)-1)/i)*(mode.equals("SIP")?(1+i):1);}out.setText("Invested: ₹"+df.format(invested)+"\nMaturity: ₹"+df.format(fv)+"\nGain: ₹"+df.format(fv-invested));});
     }
 
     private void showEmiInterest(){
         currentTool="EMI"; shell(L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"));
         Spinner mode=dropdown(new String[]{"EMI","SIMPLE INTEREST"});
-        root.addView(mode,new LinearLayout.LayoutParams(-1,dp(58)));
+        root.addView(mode,controlParams(58));
         EditText loan=input("Loan / Principal Amount");EditText rate=input("Annual Interest %");EditText months=input("Tenure in Months");
         root.addView(loan);root.addView(rate);root.addView(months);
-        Button calc=btn("CALCULATE");root.addView(calc,new LinearLayout.LayoutParams(-1,dp(58)));
-        TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,0));root.addView(out,new LinearLayout.LayoutParams(-1,dp(120)));
+        Button calc=btn("CALCULATE");root.addView(calc,controlParams(58));
+        TextView out=tv("",20,WHITE);styleResult(out);root.addView(out,resultParams(120));
         calc.setOnClickListener(v->{
             double P=val(loan);
             if(mode.getSelectedItemPosition()==0){
@@ -550,7 +580,7 @@ public class MainActivity extends Activity {
 
     private void showNumberWords(){
         currentTool="WORDS"; shell(L("NUMBER TO WORDS","संख्या शब्दों में"));
-        EditText e=input("Enter whole number");e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);root.addView(e);Button go=btn("CONVERT");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",22,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(150)));
+        EditText e=input("Enter whole number");e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);root.addView(e);Button go=btn("CONVERT");root.addView(go,controlParams(60));TextView out=tv("",22,WHITE);styleResult(out);root.addView(out,resultParams(150));
         go.setOnClickListener(v->{try{long n=Long.parseLong(e.getText().toString());out.setText(indianWords(n));}catch(Exception x){out.setText("Enter valid number");}});
     }
     private String indianWords(long n){
@@ -562,14 +592,14 @@ public class MainActivity extends Activity {
     private void showQr(boolean wifi){
         currentTool=wifi?"WIFI_QR":"QR"; shell(wifi?L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"):L("QR CODE GENERATOR","QR कोड जनरेटर"));
         EditText a=input(wifi?"Wi-Fi Name (SSID)":"Text / URL");root.addView(a);EditText b=null;if(wifi){b=input("Wi-Fi Password");b.setInputType(android.text.InputType.TYPE_CLASS_TEXT);root.addView(b);}
-        Button go=btn("GENERATE QR");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));ImageView img=new ImageView(this);img.setAdjustViewBounds(true);root.addView(img,new LinearLayout.LayoutParams(-1,dp(340)));EditText pass=b;
+        Button go=btn("GENERATE QR");root.addView(go,controlParams(60));ImageView img=new ImageView(this);img.setAdjustViewBounds(true);root.addView(img,new LinearLayout.LayoutParams(-1,dp(340)));EditText pass=b;
         go.setOnClickListener(v->{String data=wifi?"WIFI:T:WPA;S:"+a.getText().toString()+";P:"+pass.getText().toString()+";;":a.getText().toString();Bitmap bm=qrBitmap(data,800);if(bm!=null)img.setImageBitmap(bm);});
     }
     private Bitmap qrBitmap(String data,int size){try{BitMatrix m=new MultiFormatWriter().encode(data,BarcodeFormat.QR_CODE,size,size);Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.RGB_565);for(int y=0;y<size;y++)for(int x=0;x<size;x++)b.setPixel(x,y,m.get(x,y)?Color.BLACK:Color.WHITE);return b;}catch(Exception e){Toast.makeText(this,"QR error",Toast.LENGTH_SHORT).show();return null;}}
 
     private void showGst(){
         currentTool="GST"; shell(L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"));
-        EditText amt=input("Amount");EditText disc=input("Discount %");EditText gst=input("GST %");root.addView(amt);root.addView(disc);root.addView(gst);Button go=btn("CALCULATE");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(130)));
+        EditText amt=input("Amount");EditText disc=input("Discount %");EditText gst=input("GST %");root.addView(amt);root.addView(disc);root.addView(gst);Button go=btn("CALCULATE");root.addView(go,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);root.addView(out,resultParams(130));
         go.setOnClickListener(v->{double a=val(amt),d=a*val(disc)/100.0,after=a-d,g=after*val(gst)/100.0;out.setText("Discount: ₹"+df.format(d)+"\nGST: ₹"+df.format(g)+"\nFinal: ₹"+df.format(after+g));});
     }
 
@@ -577,13 +607,13 @@ public class MainActivity extends Activity {
         currentTool="REMOTE"; shell(L("REMOTE","रिमोट"));
         ConsumerIrManager ir=(ConsumerIrManager)getSystemService(CONSUMER_IR_SERVICE);
         String msg=(ir!=null&&ir.hasIrEmitter())?"IR Blaster detected. Device-specific remote profiles अगले update में जोड़ेंगे।":"इस phone में IR Blaster उपलब्ध नहीं है।";
-        TextView t=tv(msg,22,WHITE);t.setGravity(Gravity.CENTER);t.setBackground(bg(PANEL2,12));root.addView(t,new LinearLayout.LayoutParams(-1,dp(180)));
+        TextView t=tv(msg,22,WHITE);styleResult(t);root.addView(t,resultParams(180));
     }
 
     private void showUnitConverter(){
         currentTool="UNIT"; shell(L("UNIT CONVERTER","यूनिट कन्वर्टर"));
-        Spinner type=dropdown(new String[]{"Kilometer → Mile","Mile → Kilometer","Kilogram → Pound","Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"});root.addView(type,new LinearLayout.LayoutParams(-1,dp(58)));
-        EditText in=input("Value");root.addView(in);Button go=btn("CONVERT");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",24,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(110)));
+        Spinner type=dropdown(new String[]{"Kilometer → Mile","Mile → Kilometer","Kilogram → Pound","Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"});root.addView(type,controlParams(58));
+        EditText in=input("Value");root.addView(in);Button go=btn("CONVERT");root.addView(go,controlParams(60));TextView out=tv("",24,WHITE);styleResult(out);root.addView(out,resultParams(110));
         go.setOnClickListener(v->{double x=val(in),y=0;switch(type.getSelectedItemPosition()){case 0:y=x*0.621371;break;case 1:y=x/0.621371;break;case 2:y=x*2.20462;break;case 3:y=x/2.20462;break;case 4:y=x*9/5+32;break;case 5:y=(x-32)*5/9;break;}out.setText(trim(y));});
     }
 
@@ -592,7 +622,7 @@ public class MainActivity extends Activity {
     private void showQuickBill(){
         currentTool="BILL"; shell(L("QUICK BILL","क्विक बिल"));
         EditText name=input("Item Name");name.setInputType(android.text.InputType.TYPE_CLASS_TEXT);EditText qty=input("Quantity");EditText rate=input("Rate ₹");EditText gst=input("GST %");
-        root.addView(name);root.addView(qty);root.addView(rate);root.addView(gst);Button go=btn("MAKE BILL");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(180)));
+        root.addView(name);root.addView(qty);root.addView(rate);root.addView(gst);Button go=btn("MAKE BILL");root.addView(go,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);root.addView(out,resultParams(180));
         go.setOnClickListener(v->{double q=val(qty),r=val(rate),base=q*r,g=base*val(gst)/100.0;out.setText((name.getText().length()>0?name.getText().toString():"Item")+"\nQty: "+trim(q)+" × ₹"+df.format(r)+"\nSubtotal: ₹"+df.format(base)+"\nGST: ₹"+df.format(g)+"\nTOTAL: ₹"+df.format(base+g));});
     }
 
