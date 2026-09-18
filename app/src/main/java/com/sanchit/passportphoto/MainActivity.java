@@ -1525,11 +1525,11 @@ public class MainActivity extends Activity {
             socket.setSoTimeout(350);
             String[] targets={"ssdp:all","roku:ecp","urn:schemas-upnp-org:device:MediaRenderer:1"};
             for(String st:targets){
-                String msg="M-SEARCH * HTTP/1.1\\r\\n"
-                        +"HOST: 239.255.255.250:1900\\r\\n"
-                        +"MAN: \\"ssdp:discover\\"\\r\\n"
-                        +"MX: 2\\r\\n"
-                        +"ST: "+st+"\\r\\n\\r\\n";
+                String msg="M-SEARCH * HTTP/1.1\r\n"
+                        +"HOST: 239.255.255.250:1900\r\n"
+                        +"MAN: \"ssdp:discover\"\r\n"
+                        +"MX: 2\r\n"
+                        +"ST: "+st+"\r\n\r\n";
                 byte[] data=msg.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 java.net.DatagramPacket packet=new java.net.DatagramPacket(
                         data,data.length,java.net.InetAddress.getByName("239.255.255.250"),1900);
@@ -1716,13 +1716,13 @@ public class MainActivity extends Activity {
             String path="/api/v2/channels/samsung.remote.control?name="+name;
 
             java.io.OutputStream out=socket.getOutputStream();
-            String req="GET "+path+" HTTP/1.1\\r\\n"
-                    +"Host: "+ip+":"+port+"\\r\\n"
-                    +"Upgrade: websocket\\r\\n"
-                    +"Connection: Upgrade\\r\\n"
-                    +"Sec-WebSocket-Key: "+wsKey+"\\r\\n"
-                    +"Sec-WebSocket-Version: 13\\r\\n"
-                    +"Origin: http://localhost\\r\\n\\r\\n";
+            String req="GET "+path+" HTTP/1.1\r\n"
+                    +"Host: "+ip+":"+port+"\r\n"
+                    +"Upgrade: websocket\r\n"
+                    +"Connection: Upgrade\r\n"
+                    +"Sec-WebSocket-Key: "+wsKey+"\r\n"
+                    +"Sec-WebSocket-Version: 13\r\n"
+                    +"Origin: http://localhost\r\n\r\n";
             out.write(req.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             out.flush();
 
