@@ -86,55 +86,111 @@ public class MainActivity extends Activity {
         return s;
     }
     private ScrollView shell(String name){
-        LinearLayout outer=new LinearLayout(this); outer.setOrientation(LinearLayout.VERTICAL); outer.setBackgroundColor(BG);
-        LinearLayout head=new LinearLayout(this); head.setGravity(Gravity.CENTER_VERTICAL); head.setPadding(0,0,0,0); head.setBackgroundColor(PANEL2);
-        Button back=btn("‹"); back.setTextSize(28); head.addView(back,new LinearLayout.LayoutParams(dp(54),dp(50)));
-        title=tv(name,22,WHITE); title.setGravity(Gravity.CENTER); head.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
-        outer.addView(head);
-        ScrollView sc=new ScrollView(this); root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(0,0,0,0);
-        sc.addView(root); outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(outer);
-        back.setOnClickListener(v->showHome()); return sc;
+        LinearLayout outer=new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackgroundColor(BG);
+
+        addFixedDropdown(outer,false);
+
+        LinearLayout head=new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(0,0,0,0);
+        head.setBackgroundColor(PANEL);
+        Button back=btn("‹");
+        back.setTextSize(28);
+        back.setBackground(bg(PANEL,0));
+        head.addView(back,new LinearLayout.LayoutParams(dp(54),dp(50)));
+        title=tv(name,20,WHITE);
+        title.setGravity(Gravity.CENTER);
+        head.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
+        TextView space=tv("",1,WHITE);
+        head.addView(space,new LinearLayout.LayoutParams(dp(54),dp(50)));
+        outer.addView(head,new LinearLayout.LayoutParams(-1,dp(50)));
+
+        ScrollView sc=new ScrollView(this);
+        sc.setFillViewport(true);
+        root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(0,0,0,0);
+        sc.addView(root);
+        outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+        setContentView(outer);
+        back.setOnClickListener(v->showHome());
+        return sc;
+    }
+
+    private void addFixedDropdown(LinearLayout outer, boolean openByDefault){
+        LinearLayout header=new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(0,0,0,0);
+        header.setBackgroundColor(PANEL2);
+
+        TextView menu=tv("⋮",34,WHITE);
+        menu.setGravity(Gravity.CENTER);
+        menu.setBackground(bg(PANEL,0));
+        header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
+
+        TextView label=tv("CALCULATOR",23,WHITE);
+        label.setGravity(Gravity.CENTER);
+        label.setTypeface(null,1);
+        header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
+
+        TextView arrow=tv(openByDefault?"▲":"▼",26,ACCENT);
+        arrow.setGravity(Gravity.CENTER);
+        header.addView(arrow,new LinearLayout.LayoutParams(dp(58),dp(64)));
+
+        outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
+
+        LinearLayout tools=new LinearLayout(this);
+        tools.setOrientation(LinearLayout.VERTICAL);
+        tools.setVisibility(openByDefault?View.VISIBLE:View.GONE);
+        tools.setBackgroundColor(BG);
+
+        addMenu(tools,"CALCULATOR",()->showCalculator());
+        addMenu(tools,"CASH COUNTER",()->showCashCounter());
+        addMenu(tools,"AGE CALCULATOR",()->showAge());
+        addMenu(tools,"RD / FD / SIP CALCULATOR",()->showSavings());
+        addMenu(tools,"EMI / INTEREST CALCULATOR",()->showEmiInterest());
+        addMenu(tools,"NUMBER TO WORDS",()->showNumberWords());
+        addMenu(tools,"QR CODE GENERATOR",()->showQr(false));
+        addMenu(tools,"GST / DISCOUNT CALCULATOR",()->showGst());
+        addMenu(tools,"WI-FI QR GENERATOR",()->showQr(true));
+        addMenu(tools,"REMOTE",()->showRemote());
+        addMenu(tools,"UNIT CONVERTER",()->showUnitConverter());
+        addMenu(tools,"INTERNET SPEED TEST",()->openSpeedTest());
+        addMenu(tools,"QUICK BILL",()->showQuickBill());
+        addMenu(tools,"QR / BARCODE SCANNER",()->scanCode());
+
+        ScrollView dropScroll=new ScrollView(this);
+        dropScroll.addView(tools);
+        dropScroll.setVisibility(openByDefault?View.VISIBLE:View.GONE);
+        LinearLayout.LayoutParams dpParams=new LinearLayout.LayoutParams(-1,0);
+        dpParams.weight=openByDefault?1f:0f;
+        outer.addView(dropScroll,dpParams);
+
+        View.OnClickListener toggle=v->{
+            boolean opening=dropScroll.getVisibility()!=View.VISIBLE;
+            dropScroll.setVisibility(opening?View.VISIBLE:View.GONE);
+            arrow.setText(opening?"▲":"▼");
+            LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
+            p.height=opening?0:0;
+            p.weight=opening?1f:0f;
+            dropScroll.setLayoutParams(p);
+        };
+        label.setOnClickListener(toggle);
+        arrow.setOnClickListener(toggle);
+        header.setOnClickListener(toggle);
+        menu.setOnClickListener(v->showTopMenu(menu));
     }
 
     private void showHome(){
-        LinearLayout outer=new LinearLayout(this); outer.setOrientation(LinearLayout.VERTICAL); outer.setBackgroundColor(BG);
-        LinearLayout top=new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(0,0,0,0); top.setBackgroundColor(BG);
-        TextView logo=tv("▣",28,WHITE); logo.setGravity(Gravity.CENTER); logo.setBackground(bg(Color.rgb(225,225,225),40));
-        logo.setTextColor(Color.rgb(20,65,110)); top.addView(logo,new LinearLayout.LayoutParams(dp(58),dp(58)));
-        TextView name=tv("STS DigiKit",27,WHITE); name.setTypeface(null,1); top.addView(name,new LinearLayout.LayoutParams(0,dp(58),1));
-        TextView menu=tv("⋮",36,WHITE); menu.setGravity(Gravity.CENTER); top.addView(menu,new LinearLayout.LayoutParams(dp(50),dp(58)));
-        menu.setOnClickListener(v->showTopMenu(menu));
-        outer.addView(top);
-        ScrollView sc=new ScrollView(this); sc.setFillViewport(true); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); list.setPadding(0,0,0,0);
-        TextView section=tv("CALCULATOR                                      ▲",22,WHITE); section.setGravity(Gravity.CENTER); section.setTypeface(null,1); section.setBackground(bg(PANEL2,0));
-        list.addView(section,new LinearLayout.LayoutParams(-1,dp(62)));
-
-        LinearLayout calcItems=new LinearLayout(this);
-        calcItems.setOrientation(LinearLayout.VERTICAL);
-        list.addView(calcItems,new LinearLayout.LayoutParams(-1,-2));
-
-        addMenu(calcItems,"CALCULATOR",()->showCalculator());
-        addMenu(calcItems,"CASH COUNTER",()->showCashCounter());
-        addMenu(calcItems,"AGE CALCULATOR",()->showAge());
-        addMenu(calcItems,"RD / FD / SIP CALCULATOR",()->showSavings());
-        addMenu(calcItems,"EMI / INTEREST CALCULATOR",()->showEmiInterest());
-        addMenu(calcItems,"NUMBER TO WORDS",()->showNumberWords());
-        addMenu(calcItems,"QR CODE GENERATOR",()->showQr(false));
-        addMenu(calcItems,"GST / DISCOUNT CALCULATOR",()->showGst());
-        addMenu(calcItems,"WI-FI QR GENERATOR",()->showQr(true));
-        addMenu(calcItems,"REMOTE",()->showRemote());
-        addMenu(calcItems,"UNIT CONVERTER",()->showUnitConverter());
-        addMenu(calcItems,"INTERNET SPEED TEST",()->openSpeedTest());
-        addMenu(calcItems,"QUICK BILL",()->showQuickBill());
-        addMenu(calcItems,"QR / BARCODE SCANNER",()->scanCode());
-
-        section.setOnClickListener(v->{
-            boolean open=calcItems.getVisibility()==View.VISIBLE;
-            calcItems.setVisibility(open?View.GONE:View.VISIBLE);
-            section.setText(open?"CALCULATOR                                      ▼":"CALCULATOR                                      ▲");
-        });
-        sc.addView(list); outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(outer);
+        LinearLayout outer=new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackgroundColor(BG);
+        addFixedDropdown(outer,true);
+        setContentView(outer);
     }
+
     private void addMenu(LinearLayout list,String s,Runnable r){
         TextView row=tv(s,20,WHITE); row.setGravity(Gravity.CENTER); row.setTypeface(null,1); row.setBackground(bg(PANEL,0));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72)); p.setMargins(0,0,0,0); list.addView(row,p);
@@ -182,7 +238,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.4\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.5\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
     }
 
