@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private TextView scannerStatus;
+    private TextView scannerDetails;
     private boolean scannerActive=false;
     private boolean scannerResultLocked=false;
 
@@ -492,8 +493,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.23\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.23\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.24\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.24\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -523,7 +524,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.23\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.24\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1880,10 +1881,18 @@ public class MainActivity extends Activity {
                     dialog.show();
                 });
             }catch(Exception ex){
-                runOnUiThread(()->status.setText(
-                        L("Android TV pairing could not start. Make sure TV Remote Service is enabled and both devices are on the same Wi-Fi. ",
-                          "Android TV pairing शुरू नहीं हुआ। TV Remote Service चालू रखें और दोनों device एक ही Wi-Fi पर रखें। ")
-                                +(ex.getMessage()==null?"":ex.getMessage())));
+                runOnUiThread(()->{
+                    String detail=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();
+                    String msg=L(
+                            "Android TV pairing could not start. Both devices must be on the same Wi-Fi and Android TV Remote Service must be enabled.\n\nTechnical detail: ",
+                            "Android TV pairing शुरू नहीं हुआ। दोनों device एक ही Wi-Fi पर हों और Android TV Remote Service चालू हो।\n\nTechnical detail: ")+detail;
+                    status.setText(msg);
+                    new AlertDialog.Builder(this)
+                            .setTitle(L("ANDROID TV CONNECTION","ANDROID TV CONNECTION"))
+                            .setMessage(msg)
+                            .setPositiveButton("OK",null)
+                            .show();
+                });
             }
         }).start();
     }
@@ -1896,7 +1905,7 @@ public class MainActivity extends Activity {
         TextView status=tv(L("Same Wi-Fi TV remote","एक ही Wi-Fi पर TV रिमोट"),17,SOFT);
         status.setGravity(Gravity.CENTER);
         styleResult(status);
-        root.addView(status,controlParams(64));
+        root.addView(status,controlParams(92));
 
         Button scan=btn(L("AUTO FIND TV ON WI-FI","Wi-Fi पर TV खोजें"));
         root.addView(scan,controlParams(58));
@@ -2495,6 +2504,84 @@ public class MainActivity extends Activity {
         });
     }
 
+    private String scanParam(android.net.Uri uri,String key){
+        try{
+            String v=uri.getQueryParameter(key);
+            return v==null?"":v.trim();
+        }catch(Exception e){
+            return "";
+        }
+    }
+
+    private String parseWifiPart(String raw,String key){
+        try{
+            String body=raw.substring(5);
+            java.util.regex.Matcher m=java.util.regex.Pattern
+                    .compile("(?:^|;)"+java.util.regex.Pattern.quote(key)+":((?:\\\\.|[^;])*)")
+                    .matcher(body);
+            if(m.find()) return m.group(1).replace("\\;",";").replace("\\:"," : ").replace("\\\\","\\");
+        }catch(Exception ignored){}
+        return "";
+    }
+
+    private String scanDetails(String raw,com.google.zxing.BarcodeFormat format){
+        String value=raw==null?"":raw.trim();
+        StringBuilder b=new StringBuilder();
+        b.append(L("FORMAT: ","फॉर्मेट: ")).append(format==null?"UNKNOWN":format.toString()).append("\n");
+
+        try{
+            android.net.Uri uri=android.net.Uri.parse(value);
+            String scheme=uri.getScheme()==null?"":uri.getScheme().toLowerCase(java.util.Locale.US);
+
+            if("upi".equals(scheme)){
+                String pa=scanParam(uri,"pa");
+                String pn=scanParam(uri,"pn");
+                String am=scanParam(uri,"am");
+                String cu=scanParam(uri,"cu");
+                String tn=scanParam(uri,"tn");
+                String tr=scanParam(uri,"tr");
+                String mc=scanParam(uri,"mc");
+
+                b.append(L("TYPE: UPI PAYMENT QR","प्रकार: UPI PAYMENT QR")).append("\n");
+                if(!pn.isEmpty()) b.append(L("Name: ","नाम: ")).append(pn).append("\n");
+                if(!pa.isEmpty()) b.append("UPI ID: ").append(pa).append("\n");
+                if(!am.isEmpty()) b.append(L("Amount: ₹","राशि: ₹")).append(am).append("\n");
+                if(!cu.isEmpty()) b.append(L("Currency: ","मुद्रा: ")).append(cu).append("\n");
+                if(!tn.isEmpty()) b.append(L("Note: ","नोट: ")).append(tn).append("\n");
+                if(!tr.isEmpty()) b.append(L("Reference: ","रेफरेंस: ")).append(tr).append("\n");
+                if(!mc.isEmpty()) b.append(L("Merchant Category: ","मर्चेंट कैटेगरी: ")).append(mc).append("\n");
+            }else if(value.startsWith("WIFI:")){
+                b.append(L("TYPE: WI-FI QR","प्रकार: WI-FI QR")).append("\n");
+                String ssid=parseWifiPart(value,"S");
+                String type=parseWifiPart(value,"T");
+                String pass=parseWifiPart(value,"P");
+                if(!ssid.isEmpty()) b.append("SSID: ").append(ssid).append("\n");
+                if(!type.isEmpty()) b.append(L("Security: ","सिक्योरिटी: ")).append(type).append("\n");
+                if(!pass.isEmpty()) b.append(L("Password: ","पासवर्ड: ")).append(pass).append("\n");
+            }else if("http".equals(scheme) || "https".equals(scheme)){
+                b.append(L("TYPE: WEBSITE / URL","प्रकार: WEBSITE / URL")).append("\n");
+                b.append("URL: ").append(value).append("\n");
+            }else if("tel".equals(scheme)){
+                b.append(L("TYPE: PHONE NUMBER","प्रकार: फोन नंबर")).append("\n");
+                b.append(L("Number: ","नंबर: ")).append(uri.getSchemeSpecificPart()).append("\n");
+            }else if("mailto".equals(scheme)){
+                b.append(L("TYPE: EMAIL","प्रकार: ईमेल")).append("\n");
+                b.append("Email: ").append(uri.getSchemeSpecificPart()).append("\n");
+            }else if(format!=null && format!=com.google.zxing.BarcodeFormat.QR_CODE){
+                b.append(L("TYPE: BARCODE","प्रकार: BARCODE")).append("\n");
+                b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
+            }else{
+                b.append(L("TYPE: QR DATA","प्रकार: QR DATA")).append("\n");
+                b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
+            }
+        }catch(Exception e){
+            b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
+        }
+
+        b.append("\n").append(L("RAW DATA:","RAW DATA:")).append("\n").append(value);
+        return b.toString();
+    }
+
     private void showScanner(){
         currentTool="SCAN";
         toolPickerOpen=false;
@@ -2520,8 +2607,28 @@ public class MainActivity extends Activity {
         styleResult(scannerStatus);
         body.addView(scannerStatus,controlParams(58));
 
+        scannerDetails=tv(
+                L("After a scan, decoded details will appear here.",
+                  "Scan के बाद decoded details यहाँ दिखाई देंगी।"),
+                14,SOFT);
+        scannerDetails.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
+        scannerDetails.setTextIsSelectable(true);
+        scannerDetails.setBackground(bg(PANEL,10));
+        body.addView(scannerDetails,controlParams(104));
+
         embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
         embeddedScanner.setBackgroundColor(Color.BLACK);
+
+        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> scanHints=
+                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
+        scanHints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
+        scanHints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
+        java.util.Collection<com.google.zxing.BarcodeFormat> allFormats=
+                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class);
+        embeddedScanner.getBarcodeView().setDecoderFactory(
+                new com.journeyapps.barcodescanner.DefaultDecoderFactory(
+                        allFormats,scanHints,"UTF-8",2));
+
         embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
             @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
                 if(result==null || result.getText()==null || scannerResultLocked) return;
@@ -2530,23 +2637,26 @@ public class MainActivity extends Activity {
                 try{embeddedScanner.pause();}catch(Throwable ignored){}
 
                 String value=result.getText();
-                scannerStatus.setText(L("Scan successful","स्कैन सफल"));
-                savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),value);
+                String details=scanDetails(value,result.getBarcodeFormat());
+                scannerStatus.setText(L("QR / Barcode detected - details ready","QR / Barcode मिला - details तैयार हैं"));
+                if(scannerDetails!=null) scannerDetails.setText(details);
+                savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),details);
 
                 new AlertDialog.Builder(MainActivity.this)
-                        .setTitle(L("Scan Result","स्कैन परिणाम"))
-                        .setMessage(value)
-                        .setPositiveButton(L("COPY","कॉपी"),(d,w)->{
+                        .setTitle(L("QR / Barcode Details","QR / Barcode Details"))
+                        .setMessage(details)
+                        .setPositiveButton(L("COPY RAW","RAW कॉपी"),(d,w)->{
                             try{
                                 android.content.ClipboardManager cm=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
                                 cm.setPrimaryClip(android.content.ClipData.newPlainText("scan",value));
                             }catch(Exception ignored){}
                         })
-                        .setNeutralButton(L("SHARE","शेयर"),(d,w)->
-                                sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),value))
+                        .setNeutralButton(L("SHARE DETAILS","DETAILS शेयर"),(d,w)->
+                                sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),details))
                         .setNegativeButton(L("CLOSE","बंद करें"),null)
                         .setOnDismissListener(d->scannerStatus.setText(
-                                L("Tap START SCANNER to scan again.","फिर scan करने के लिए START SCANNER दबाएं।")))
+                                L("Details shown below. Tap START SCANNER to scan again.",
+                                  "Details नीचे हैं। फिर scan करने के लिए START SCANNER दबाएं।")))
                         .show();
             }
             @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
