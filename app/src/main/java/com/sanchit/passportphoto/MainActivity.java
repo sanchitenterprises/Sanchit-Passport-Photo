@@ -29,6 +29,8 @@ public class MainActivity extends Activity {
     private TextView title;
     private boolean devMode = false;
     private boolean vibrationEnabled = true;
+    private String language = "ENGLISH";
+    private String currentTool = "CALCULATOR";
     private final StringBuilder appLogs = new StringBuilder();
     private final DecimalFormat df = new DecimalFormat("#,##0.00");
 
@@ -40,8 +42,9 @@ public class MainActivity extends Activity {
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         devMode=sp.getBoolean("devMode",false);
         vibrationEnabled=sp.getBoolean("vibration",true);
+        language=sp.getString("language","ENGLISH");
         logEvent("App started");
-        showHome();
+        showCalculator();
     }
 
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
@@ -85,27 +88,38 @@ public class MainActivity extends Activity {
         s.setBackground(bg(PANEL2,0));
         return s;
     }
+    private String L(String en,String hi){
+        return "HINDI".equals(language)?hi:en;
+    }
+
+    private void openTool(String key){
+        currentTool=key;
+        if("CALCULATOR".equals(key)) showCalculator();
+        else if("CASH_COUNTER".equals(key)) showCashCounter();
+        else if("AGE".equals(key)) showAge();
+        else if("SAVINGS".equals(key)) showSavings();
+        else if("EMI".equals(key)) showEmiInterest();
+        else if("WORDS".equals(key)) showNumberWords();
+        else if("QR".equals(key)) showQr(false);
+        else if("GST".equals(key)) showGst();
+        else if("WIFI_QR".equals(key)) showQr(true);
+        else if("REMOTE".equals(key)) showRemote();
+        else if("UNIT".equals(key)) showUnitConverter();
+        else if("SPEED".equals(key)) openSpeedTest();
+        else if("BILL".equals(key)) showQuickBill();
+        else if("SCAN".equals(key)) scanCode();
+    }
+
+    private void reopenCurrentTool(){
+        openTool(currentTool);
+    }
+
     private ScrollView shell(String name){
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
         outer.setBackgroundColor(BG);
 
-        addFixedDropdown(outer,false);
-
-        LinearLayout head=new LinearLayout(this);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        head.setPadding(0,0,0,0);
-        head.setBackgroundColor(PANEL);
-        Button back=btn("‹");
-        back.setTextSize(28);
-        back.setBackground(bg(PANEL,0));
-        head.addView(back,new LinearLayout.LayoutParams(dp(54),dp(50)));
-        title=tv(name,20,WHITE);
-        title.setGravity(Gravity.CENTER);
-        head.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
-        TextView space=tv("",1,WHITE);
-        head.addView(space,new LinearLayout.LayoutParams(dp(54),dp(50)));
-        outer.addView(head,new LinearLayout.LayoutParams(-1,dp(50)));
+        addFixedDropdown(outer,name);
 
         ScrollView sc=new ScrollView(this);
         sc.setFillViewport(true);
@@ -115,11 +129,10 @@ public class MainActivity extends Activity {
         sc.addView(root);
         outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(outer);
-        back.setOnClickListener(v->showHome());
         return sc;
     }
 
-    private void addFixedDropdown(LinearLayout outer, boolean openByDefault){
+    private void addFixedDropdown(LinearLayout outer, String currentName){
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0,0,0,0);
@@ -130,14 +143,14 @@ public class MainActivity extends Activity {
         menu.setBackground(bg(PANEL,0));
         header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
-        TextView label=tv("CALCULATOR",23,WHITE);
+        TextView label=tv(currentName,21,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
         header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
 
         TextView grip=tv("≡",32,ACCENT);
         grip.setGravity(Gravity.CENTER);
-        grip.setContentDescription("Drag tools");
+        grip.setContentDescription("Drag list");
         header.addView(grip,new LinearLayout.LayoutParams(dp(58),dp(64)));
 
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
@@ -146,66 +159,57 @@ public class MainActivity extends Activity {
         tools.setOrientation(LinearLayout.VERTICAL);
         tools.setBackgroundColor(BG);
 
-        addMenu(tools,"CALCULATOR",()->showCalculator());
-        addMenu(tools,"CASH COUNTER",()->showCashCounter());
-        addMenu(tools,"AGE CALCULATOR",()->showAge());
-        addMenu(tools,"RD / FD / SIP CALCULATOR",()->showSavings());
-        addMenu(tools,"EMI / INTEREST CALCULATOR",()->showEmiInterest());
-        addMenu(tools,"NUMBER TO WORDS",()->showNumberWords());
-        addMenu(tools,"QR CODE GENERATOR",()->showQr(false));
-        addMenu(tools,"GST / DISCOUNT CALCULATOR",()->showGst());
-        addMenu(tools,"WI-FI QR GENERATOR",()->showQr(true));
-        addMenu(tools,"REMOTE",()->showRemote());
-        addMenu(tools,"UNIT CONVERTER",()->showUnitConverter());
-        addMenu(tools,"INTERNET SPEED TEST",()->openSpeedTest());
-        addMenu(tools,"QUICK BILL",()->showQuickBill());
-        addMenu(tools,"QR / BARCODE SCANNER",()->scanCode());
+        addMenu(tools,L("CALCULATOR","कैलकुलेटर"),()->openTool("CALCULATOR"));
+        addMenu(tools,L("CASH COUNTER","कैश काउंटर"),()->openTool("CASH_COUNTER"));
+        addMenu(tools,L("AGE CALCULATOR","आयु कैलकुलेटर"),()->openTool("AGE"));
+        addMenu(tools,L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"),()->openTool("SAVINGS"));
+        addMenu(tools,L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"),()->openTool("EMI"));
+        addMenu(tools,L("NUMBER TO WORDS","संख्या शब्दों में"),()->openTool("WORDS"));
+        addMenu(tools,L("QR CODE GENERATOR","QR कोड जनरेटर"),()->openTool("QR"));
+        addMenu(tools,L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"),()->openTool("GST"));
+        addMenu(tools,L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"),()->openTool("WIFI_QR"));
+        addMenu(tools,L("REMOTE","रिमोट"),()->openTool("REMOTE"));
+        addMenu(tools,L("UNIT CONVERTER","यूनिट कन्वर्टर"),()->openTool("UNIT"));
+        addMenu(tools,L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),()->openTool("SPEED"));
+        addMenu(tools,L("QUICK BILL","क्विक बिल"),()->openTool("BILL"));
+        addMenu(tools,L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),()->openTool("SCAN"));
 
         ScrollView dropScroll=new ScrollView(this);
+        dropScroll.setFillViewport(false);
         dropScroll.addView(tools);
-        dropScroll.setVisibility(openByDefault?View.VISIBLE:View.GONE);
-        LinearLayout.LayoutParams dropParams=new LinearLayout.LayoutParams(-1,0);
-        dropParams.weight=openByDefault?1f:0f;
-        outer.addView(dropScroll,dropParams);
+        dropScroll.setVisibility(View.GONE);
+        outer.addView(dropScroll,new LinearLayout.LayoutParams(-1,0));
 
-        View.OnClickListener toggle=v->{
-            boolean opening=dropScroll.getVisibility()!=View.VISIBLE;
-            dropScroll.setVisibility(opening?View.VISIBLE:View.GONE);
+        final boolean[] opened={false};
+        Runnable setOpen=()->{
+            opened[0]=!opened[0];
             LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
-            p.height=0;
-            p.weight=opening?1f:0f;
+            p.height=opened[0]?dp(410):0;
+            p.weight=0f;
             dropScroll.setLayoutParams(p);
+            dropScroll.setVisibility(opened[0]?View.VISIBLE:View.GONE);
         };
-        label.setOnClickListener(toggle);
 
-        final float[] downY={0f};
-        final boolean[] dragged={false};
+        label.setOnClickListener(v->setOpen.run());
+
+        final float[] lastY={0f};
+        final boolean[] moved={false};
         grip.setOnTouchListener((v,e)->{
             if(e.getAction()==MotionEvent.ACTION_DOWN){
-                downY[0]=e.getRawY();
-                dragged[0]=false;
+                lastY[0]=e.getRawY();
+                moved[0]=false;
                 return true;
             }
             if(e.getAction()==MotionEvent.ACTION_MOVE){
-                float dy=e.getRawY()-downY[0];
-                if(Math.abs(dy)>dp(18)) dragged[0]=true;
-                if(dy>dp(42) && dropScroll.getVisibility()!=View.VISIBLE){
-                    dropScroll.setVisibility(View.VISIBLE);
-                    LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
-                    p.height=0; p.weight=1f; dropScroll.setLayoutParams(p);
-                    downY[0]=e.getRawY();
-                    haptic();
-                }else if(dy<-dp(42) && dropScroll.getVisibility()==View.VISIBLE){
-                    dropScroll.setVisibility(View.GONE);
-                    LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
-                    p.height=0; p.weight=0f; dropScroll.setLayoutParams(p);
-                    downY[0]=e.getRawY();
-                    haptic();
-                }
+                if(!opened[0]) setOpen.run();
+                float dy=e.getRawY()-lastY[0];
+                if(Math.abs(dy)>dp(2)) moved[0]=true;
+                dropScroll.scrollBy(0,(int)-dy);
+                lastY[0]=e.getRawY();
                 return true;
             }
             if(e.getAction()==MotionEvent.ACTION_UP){
-                if(!dragged[0]) toggle.onClick(v);
+                if(!moved[0]) setOpen.run();
                 return true;
             }
             return true;
@@ -215,11 +219,7 @@ public class MainActivity extends Activity {
     }
 
     private void showHome(){
-        LinearLayout outer=new LinearLayout(this);
-        outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setBackgroundColor(BG);
-        addFixedDropdown(outer,true);
-        setContentView(outer);
+        showCalculator();
     }
 
     private void addMenu(LinearLayout list,String s,Runnable r){
@@ -230,21 +230,31 @@ public class MainActivity extends Activity {
 
     private void showTopMenu(View anchor){
         PopupMenu p=new PopupMenu(this,anchor);
-        android.view.SubMenu lang=p.getMenu().addSubMenu("LANGUAGE");
-        lang.add("ENGLISH");
-        lang.add("HINDI");
-        p.getMenu().add("ABOUT");
+        p.getMenu().add(L("LANGUAGE","भाषा"));
+        p.getMenu().add(L("ABOUT","ऐप के बारे में"));
         p.setOnMenuItemClickListener(item->{
             String s=item.getTitle().toString();
-            if("ENGLISH".equals(s) || "HINDI".equals(s)){
-                getSharedPreferences("sts",0).edit().putString("language",s).apply();
-                Toast.makeText(this,"Language: "+s,Toast.LENGTH_SHORT).show();
+            if(s.equals(L("LANGUAGE","भाषा"))){
+                final String[] choices={"ENGLISH","HINDI"};
+                int checked="HINDI".equals(language)?1:0;
+                new AlertDialog.Builder(this)
+                        .setTitle(L("Select Language","भाषा चुनें"))
+                        .setSingleChoiceItems(choices,checked,(d,which)->{
+                            language=choices[which];
+                            getSharedPreferences("sts",0).edit().putString("language",language).apply();
+                            d.dismiss();
+                            reopenCurrentTool();
+                        })
+                        .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                        .show();
                 return true;
             }
-            if("ABOUT".equals(s)){
+            if(s.equals(L("ABOUT","ऐप के बारे में"))){
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
-                        .setMessage("Version 1.0.6\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools")
+                        .setMessage(L(
+                                "Version 1.0.7\nOffline utility toolkit\nUse the fixed top dropdown to change tools.",
+                                "संस्करण 1.0.7\nऑफलाइन यूटिलिटी टूलकिट\nटूल बदलने के लिए ऊपर का फिक्स्ड ड्रॉपडाउन इस्तेमाल करें।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -274,7 +284,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.6\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.7\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
     }
 
@@ -309,7 +319,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCalculator(){
-        shell("CALCULATOR");
+        currentTool="CALCULATOR"; shell(L("CALCULATOR","कैलकुलेटर"));
         final TextView display=tv("0",32,WHITE); display.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL); display.setBackground(bg(PANEL,12)); root.addView(display,new LinearLayout.LayoutParams(-1,dp(80)));
         String[][] keys={{"7","8","9","÷"},{"4","5","6","×"},{"1","2","3","-"},{"0",".","C","+"},{"⌫","="}};
         final String[] expr={""}; final double[] first={0}; final String[] op={""};
@@ -337,7 +347,7 @@ public class MainActivity extends Activity {
     private String trim(double x){ if(x==(long)x)return String.valueOf((long)x); return new DecimalFormat("0.########").format(x); }
 
     private void showCashCounter(){
-        shell("CASH COUNTER");
+        currentTool="CASH_COUNTER"; shell(L("CASH COUNTER","कैश काउंटर"));
         TextView total=tv("TOTAL ₹0",28,WHITE); total.setGravity(Gravity.CENTER); total.setBackground(bg(PANEL2,12)); root.addView(total,new LinearLayout.LayoutParams(-1,dp(76)));
         int[] den={500,200,100,50,20,10,5,2,1}; java.util.ArrayList<EditText> qty=new java.util.ArrayList<>();
         for(int d:den){
@@ -351,7 +361,7 @@ public class MainActivity extends Activity {
     }
 
     private void showAge(){
-        shell("AGE CALCULATOR");
+        currentTool="AGE"; shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
         final Calendar dob=Calendar.getInstance(), asof=Calendar.getInstance();
         Button bd=btn("SELECT DATE OF BIRTH"); Button td=btn("CALCULATE UP TO TODAY"); Button go=btn("CALCULATE AGE");
         root.addView(bd,new LinearLayout.LayoutParams(-1,dp(60))); root.addView(td,new LinearLayout.LayoutParams(-1,dp(60))); root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));
@@ -365,7 +375,7 @@ public class MainActivity extends Activity {
     private String date(Calendar c){return String.format(java.util.Locale.US,"%02d/%02d/%04d",c.get(Calendar.DAY_OF_MONTH),c.get(Calendar.MONTH)+1,c.get(Calendar.YEAR));}
 
     private void showSavings(){
-        shell("RD / FD / SIP CALCULATOR");
+        currentTool="SAVINGS"; shell(L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"));
         Spinner mode=dropdown(new String[]{"SIP","RD","FD"});
         root.addView(mode,new LinearLayout.LayoutParams(-1,dp(58)));
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);root.addView(box);
@@ -383,7 +393,7 @@ public class MainActivity extends Activity {
     }
 
     private void showEmiInterest(){
-        shell("EMI / INTEREST CALCULATOR");
+        currentTool="EMI"; shell(L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"));
         Spinner mode=dropdown(new String[]{"EMI","SIMPLE INTEREST"});
         root.addView(mode,new LinearLayout.LayoutParams(-1,dp(58)));
         EditText loan=input("Loan / Principal Amount");EditText rate=input("Annual Interest %");EditText months=input("Tenure in Months");
@@ -402,7 +412,7 @@ public class MainActivity extends Activity {
     }
 
     private void showNumberWords(){
-        shell("NUMBER TO WORDS");
+        currentTool="WORDS"; shell(L("NUMBER TO WORDS","संख्या शब्दों में"));
         EditText e=input("Enter whole number");e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);root.addView(e);Button go=btn("CONVERT");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",22,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(150)));
         go.setOnClickListener(v->{try{long n=Long.parseLong(e.getText().toString());out.setText(indianWords(n));}catch(Exception x){out.setText("Enter valid number");}});
     }
@@ -413,7 +423,7 @@ public class MainActivity extends Activity {
     private String under100(int n){String[] a={"","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"};String[] t={"","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"};if(n<20)return a[n];return t[n/10]+(n%10>0?" "+a[n%10]:"");}
 
     private void showQr(boolean wifi){
-        shell(wifi?"WI-FI QR GENERATOR":"QR CODE GENERATOR");
+        currentTool=wifi?"WIFI_QR":"QR"; shell(wifi?L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"):L("QR CODE GENERATOR","QR कोड जनरेटर"));
         EditText a=input(wifi?"Wi-Fi Name (SSID)":"Text / URL");root.addView(a);EditText b=null;if(wifi){b=input("Wi-Fi Password");b.setInputType(android.text.InputType.TYPE_CLASS_TEXT);root.addView(b);}
         Button go=btn("GENERATE QR");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));ImageView img=new ImageView(this);img.setAdjustViewBounds(true);root.addView(img,new LinearLayout.LayoutParams(-1,dp(340)));EditText pass=b;
         go.setOnClickListener(v->{String data=wifi?"WIFI:T:WPA;S:"+a.getText().toString()+";P:"+pass.getText().toString()+";;":a.getText().toString();Bitmap bm=qrBitmap(data,800);if(bm!=null)img.setImageBitmap(bm);});
@@ -421,20 +431,20 @@ public class MainActivity extends Activity {
     private Bitmap qrBitmap(String data,int size){try{BitMatrix m=new MultiFormatWriter().encode(data,BarcodeFormat.QR_CODE,size,size);Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.RGB_565);for(int y=0;y<size;y++)for(int x=0;x<size;x++)b.setPixel(x,y,m.get(x,y)?Color.BLACK:Color.WHITE);return b;}catch(Exception e){Toast.makeText(this,"QR error",Toast.LENGTH_SHORT).show();return null;}}
 
     private void showGst(){
-        shell("GST / DISCOUNT CALCULATOR");
+        currentTool="GST"; shell(L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"));
         EditText amt=input("Amount");EditText disc=input("Discount %");EditText gst=input("GST %");root.addView(amt);root.addView(disc);root.addView(gst);Button go=btn("CALCULATE");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(130)));
         go.setOnClickListener(v->{double a=val(amt),d=a*val(disc)/100.0,after=a-d,g=after*val(gst)/100.0;out.setText("Discount: ₹"+df.format(d)+"\nGST: ₹"+df.format(g)+"\nFinal: ₹"+df.format(after+g));});
     }
 
     private void showRemote(){
-        shell("REMOTE");
+        currentTool="REMOTE"; shell(L("REMOTE","रिमोट"));
         ConsumerIrManager ir=(ConsumerIrManager)getSystemService(CONSUMER_IR_SERVICE);
         String msg=(ir!=null&&ir.hasIrEmitter())?"IR Blaster detected. Device-specific remote profiles अगले update में जोड़ेंगे।":"इस phone में IR Blaster उपलब्ध नहीं है।";
         TextView t=tv(msg,22,WHITE);t.setGravity(Gravity.CENTER);t.setBackground(bg(PANEL2,12));root.addView(t,new LinearLayout.LayoutParams(-1,dp(180)));
     }
 
     private void showUnitConverter(){
-        shell("UNIT CONVERTER");
+        currentTool="UNIT"; shell(L("UNIT CONVERTER","यूनिट कन्वर्टर"));
         Spinner type=dropdown(new String[]{"Kilometer → Mile","Mile → Kilometer","Kilogram → Pound","Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"});root.addView(type,new LinearLayout.LayoutParams(-1,dp(58)));
         EditText in=input("Value");root.addView(in);Button go=btn("CONVERT");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",24,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(110)));
         go.setOnClickListener(v->{double x=val(in),y=0;switch(type.getSelectedItemPosition()){case 0:y=x*0.621371;break;case 1:y=x/0.621371;break;case 2:y=x*2.20462;break;case 3:y=x/2.20462;break;case 4:y=x*9/5+32;break;case 5:y=(x-32)*5/9;break;}out.setText(trim(y));});
@@ -443,7 +453,7 @@ public class MainActivity extends Activity {
     private void openSpeedTest(){try{startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://fast.com")));}catch(Exception e){Toast.makeText(this,"Browser नहीं मिला",Toast.LENGTH_SHORT).show();}}
 
     private void showQuickBill(){
-        shell("QUICK BILL");
+        currentTool="BILL"; shell(L("QUICK BILL","क्विक बिल"));
         EditText name=input("Item Name");name.setInputType(android.text.InputType.TYPE_CLASS_TEXT);EditText qty=input("Quantity");EditText rate=input("Rate ₹");EditText gst=input("GST %");
         root.addView(name);root.addView(qty);root.addView(rate);root.addView(gst);Button go=btn("MAKE BILL");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(180)));
         go.setOnClickListener(v->{double q=val(qty),r=val(rate),base=q*r,g=base*val(gst)/100.0;out.setText((name.getText().length()>0?name.getText().toString():"Item")+"\nQty: "+trim(q)+" × ₹"+df.format(r)+"\nSubtotal: ₹"+df.format(base)+"\nGST: ₹"+df.format(g)+"\nTOTAL: ₹"+df.format(base+g));});
@@ -464,5 +474,5 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode,resultCode,data);
     }
 
-    @Override public void onBackPressed(){ showHome(); }
+    @Override public void onBackPressed(){ finish(); }
 }
