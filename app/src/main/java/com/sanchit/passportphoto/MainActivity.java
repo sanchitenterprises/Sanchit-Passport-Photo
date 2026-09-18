@@ -1497,7 +1497,289 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void openSpeedTest(){try{startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://fast.com")));}catch(Exception e){Toast.makeText(this,"Browser नहीं मिला",Toast.LENGTH_SHORT).show();}}
+    private class SpeedometerView extends View{
+        private double speed=0;
+        private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        SpeedometerView(Context context){ super(context); }
+
+        void setSpeed(double value){
+            speed=Math.max(0,value);
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            float w=getWidth(),h=getHeight();
+            float cx=w/2f;
+            float cy=h*0.62f;
+            float r=Math.min(w*0.40f,h*0.48f);
+            RectF arc=new RectF(cx-r,cy-r,cx+r,cy+r);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(dp(16));
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(Color.rgb(43,76,105));
+            canvas.drawArc(arc,135,270,false,p);
+
+            p.setStrokeWidth(dp(12));
+            p.setColor(TEAL);
+            canvas.drawArc(arc,135,90,false,p);
+            p.setColor(ACCENT);
+            canvas.drawArc(arc,225,90,false,p);
+            p.setColor(ORANGE);
+            canvas.drawArc(arc,315,90,false,p);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(dp(12));
+            p.setColor(SOFT);
+
+            for(int i=0;i<=10;i++){
+                double a=Math.toRadians(135+(270.0*i/10.0));
+                float x1=(float)(cx+Math.cos(a)*(r-dp(27)));
+                float y1=(float)(cy+Math.sin(a)*(r-dp(27)));
+                String label=String.valueOf(i*50);
+                canvas.drawText(label,x1,y1+dp(4),p);
+            }
+
+            double shown=Math.min(speed,500.0);
+            double ang=Math.toRadians(135+(shown/500.0)*270.0);
+            float nx=(float)(cx+Math.cos(ang)*(r-dp(46)));
+            float ny=(float)(cy+Math.sin(ang)*(r-dp(46)));
+
+            p.setColor(WHITE);
+            p.setStrokeWidth(dp(5));
+            p.setStyle(Paint.Style.STROKE);
+            canvas.drawLine(cx,cy,nx,ny,p);
+
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(ACCENT);
+            canvas.drawCircle(cx,cy,dp(10),p);
+
+            p.setColor(WHITE);
+            p.setTextSize(dp(30));
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            canvas.drawText(new DecimalFormat("0.0").format(speed),cx,cy-dp(48),p);
+
+            p.setTextSize(dp(13));
+            p.setColor(SOFT);
+            canvas.drawText("Mbps",cx,cy-dp(24),p);
+        }
+    }
+
+    private double speedPing() throws Exception{
+        long sum=0;
+        int ok=0;
+        for(int i=0;i<3;i++){
+            java.net.HttpURLConnection con=null;
+            try{
+                long st=System.nanoTime();
+                java.net.URL url=new java.net.URL("https://speed.cloudflare.com/cdn-cgi/trace?x="+System.nanoTime());
+                con=(java.net.HttpURLConnection)url.openConnection();
+                con.setConnectTimeout(5000);
+                con.setReadTimeout(5000);
+                con.setUseCaches(false);
+                con.setRequestProperty("Cache-Control","no-cache");
+                java.io.InputStream in=con.getInputStream();
+                byte[] b=new byte[512];
+                while(in.read(b)>0){}
+                in.close();
+                long ms=(System.nanoTime()-st)/1000000L;
+                sum+=ms;
+                ok++;
+            }finally{
+                if(con!=null) con.disconnect();
+            }
+        }
+        return ok==0?0:(double)sum/ok;
+    }
+
+    private double speedDownload(java.util.function.Consumer<Double> live) throws Exception{
+        java.net.HttpURLConnection con=null;
+        long bytes=0;
+        long st=System.nanoTime();
+        try{
+            java.net.URL url=new java.net.URL("https://speed.cloudflare.com/__down?bytes=15000000&cache="+System.nanoTime());
+            con=(java.net.HttpURLConnection)url.openConnection();
+            con.setConnectTimeout(7000);
+            con.setReadTimeout(15000);
+            con.setUseCaches(false);
+            con.setRequestProperty("Cache-Control","no-cache");
+            con.setRequestProperty("Accept-Encoding","identity");
+            java.io.InputStream in=new java.io.BufferedInputStream(con.getInputStream(),65536);
+            byte[] buf=new byte[65536];
+            int n;
+            long last=st;
+            while((n=in.read(buf))!=-1){
+                bytes+=n;
+                long now=System.nanoTime();
+                if(now-last>250000000L){
+                    double sec=(now-st)/1_000_000_000.0;
+                    double mbps=sec<=0?0:(bytes*8.0/1_000_000.0)/sec;
+                    live.accept(mbps);
+                    last=now;
+                }
+            }
+            in.close();
+        }finally{
+            if(con!=null) con.disconnect();
+        }
+        double sec=(System.nanoTime()-st)/1_000_000_000.0;
+        return sec<=0?0:(bytes*8.0/1_000_000.0)/sec;
+    }
+
+    private double speedUpload(java.util.function.Consumer<Double> live) throws Exception{
+        java.net.HttpURLConnection con=null;
+        final int totalBytes=5000000;
+        long sent=0;
+        long st=System.nanoTime();
+        try{
+            java.net.URL url=new java.net.URL("https://speed.cloudflare.com/__up");
+            con=(java.net.HttpURLConnection)url.openConnection();
+            con.setConnectTimeout(7000);
+            con.setReadTimeout(15000);
+            con.setDoOutput(true);
+            con.setRequestMethod("POST");
+            con.setUseCaches(false);
+            con.setRequestProperty("Content-Type","application/octet-stream");
+            con.setFixedLengthStreamingMode(totalBytes);
+
+            java.io.OutputStream out=new java.io.BufferedOutputStream(con.getOutputStream(),65536);
+            byte[] buf=new byte[32768];
+            new java.security.SecureRandom().nextBytes(buf);
+            long last=st;
+            while(sent<totalBytes){
+                int n=(int)Math.min(buf.length,totalBytes-sent);
+                out.write(buf,0,n);
+                sent+=n;
+                long now=System.nanoTime();
+                if(now-last>250000000L){
+                    double sec=(now-st)/1_000_000_000.0;
+                    double mbps=sec<=0?0:(sent*8.0/1_000_000.0)/sec;
+                    live.accept(mbps);
+                    last=now;
+                }
+            }
+            out.flush();
+            out.close();
+
+            java.io.InputStream in=(con.getResponseCode()>=400)?con.getErrorStream():con.getInputStream();
+            if(in!=null){
+                byte[] drain=new byte[1024];
+                while(in.read(drain)>0){}
+                in.close();
+            }
+        }finally{
+            if(con!=null) con.disconnect();
+        }
+        double sec=(System.nanoTime()-st)/1_000_000_000.0;
+        return sec<=0?0:(sent*8.0/1_000_000.0)/sec;
+    }
+
+    private void openSpeedTest(){
+        currentTool="SPEED";
+        shell(L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"));
+
+        TextView status=tv(L("Ready to test your connection","कनेक्शन टेस्ट के लिए तैयार"),17,SOFT);
+        status.setGravity(Gravity.CENTER);
+        root.addView(status,controlParams(48));
+
+        SpeedometerView meter=new SpeedometerView(this);
+        meter.setBackground(grad(Color.rgb(12,31,51),Color.rgb(18,47,72),16));
+        root.addView(meter,new LinearLayout.LayoutParams(-1,0,1));
+
+        LinearLayout metrics=new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView ping=tv("PING\n-- ms",16,WHITE);
+        TextView down=tv("DOWNLOAD\n-- Mbps",16,WHITE);
+        TextView up=tv("UPLOAD\n-- Mbps",16,WHITE);
+        for(TextView t:new TextView[]{ping,down,up}){
+            t.setGravity(Gravity.CENTER);
+            t.setTypeface(null,1);
+            t.setBackground(bg(PANEL,10));
+        }
+        metrics.addView(ping,new LinearLayout.LayoutParams(0,dp(72),1));
+        metrics.addView(down,new LinearLayout.LayoutParams(0,dp(72),1));
+        metrics.addView(up,new LinearLayout.LayoutParams(0,dp(72),1));
+        root.addView(metrics,controlParams(74));
+
+        TextView result=tv(L("Run a test to create a result","टेस्ट चलाकर परिणाम बनाएं"),17,WHITE);
+        styleResult(result);
+        root.addView(result,controlParams(70));
+
+        addHistoryShareBar(root,"speed",L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),result);
+
+        Button start=btn(L("START SPEED TEST","स्पीड टेस्ट शुरू करें"));
+        root.addView(start,controlParams(62));
+
+        start.setOnClickListener(v->{
+            start.setEnabled(false);
+            start.setText(L("TESTING...","टेस्ट चल रहा है..."));
+            status.setText(L("Measuring ping...","पिंग माप रहे हैं..."));
+            ping.setText("PING\n-- ms");
+            down.setText("DOWNLOAD\n-- Mbps");
+            up.setText("UPLOAD\n-- Mbps");
+            meter.setSpeed(0);
+            result.setText(L("Testing connection...","कनेक्शन टेस्ट हो रहा है..."));
+
+            new Thread(()->{
+                double pms=0,dm=0,um=0;
+                String error=null;
+                try{
+                    pms=speedPing();
+                    final double fp=pms;
+                    runOnUiThread(()->{
+                        ping.setText("PING\n"+new DecimalFormat("0").format(fp)+" ms");
+                        status.setText(L("Testing download speed...","डाउनलोड स्पीड टेस्ट हो रही है..."));
+                    });
+
+                    dm=speedDownload(value->runOnUiThread(()->{
+                        meter.setSpeed(value);
+                        down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(value)+" Mbps");
+                    }));
+
+                    final double fd=dm;
+                    runOnUiThread(()->{
+                        meter.setSpeed(fd);
+                        down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(fd)+" Mbps");
+                        status.setText(L("Testing upload speed...","अपलोड स्पीड टेस्ट हो रही है..."));
+                    });
+
+                    um=speedUpload(value->runOnUiThread(()->{
+                        meter.setSpeed(value);
+                        up.setText("UPLOAD\n"+new DecimalFormat("0.0").format(value)+" Mbps");
+                    }));
+                }catch(Exception e){
+                    error=e.getClass().getSimpleName();
+                }
+
+                final double fp=pms,fd=dm,fu=um;
+                final String ferr=error;
+                runOnUiThread(()->{
+                    start.setEnabled(true);
+                    start.setText(L("TEST AGAIN","फिर से टेस्ट करें"));
+                    if(ferr==null){
+                        meter.setSpeed(fd);
+                        ping.setText("PING\n"+new DecimalFormat("0").format(fp)+" ms");
+                        down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(fd)+" Mbps");
+                        up.setText("UPLOAD\n"+new DecimalFormat("0.0").format(fu)+" Mbps");
+                        status.setText(L("Test completed","टेस्ट पूरा हुआ"));
+                        String summary="Ping: "+new DecimalFormat("0").format(fp)+" ms"
+                                +"\nDownload: "+new DecimalFormat("0.0").format(fd)+" Mbps"
+                                +"\nUpload: "+new DecimalFormat("0.0").format(fu)+" Mbps";
+                        result.setText(summary);
+                        savePanelHistory("speed",L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),summary);
+                    }else{
+                        status.setText(L("Speed test failed. Check internet and retry.","स्पीड टेस्ट नहीं हो सका। इंटरनेट जांचकर फिर कोशिश करें।"));
+                        result.setText(L("Unable to complete test","टेस्ट पूरा नहीं हो सका"));
+                    }
+                });
+            }).start();
+        });
+    }
 
     private void showQuickBill(){
         currentTool="BILL";
