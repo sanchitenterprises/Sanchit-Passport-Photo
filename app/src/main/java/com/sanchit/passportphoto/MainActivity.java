@@ -34,8 +34,9 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
-        getWindow().setStatusBarColor(Color.rgb(73,146,194));
+        getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         devMode=sp.getBoolean("devMode",false);
         vibrationEnabled=sp.getBoolean("vibration",true);
@@ -61,31 +62,51 @@ public class MainActivity extends Activity {
     private EditText input(String hint){
         EditText e=new EditText(this); e.setHint(hint); e.setHintTextColor(SOFT); e.setTextColor(WHITE);
         e.setTextSize(18); e.setSingleLine(true); e.setPadding(dp(12),dp(8),dp(12),dp(8));
-        e.setBackground(bg(PANEL,10)); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(6),0,dp(6)); e.setLayoutParams(p); return e;
+        e.setBackground(bg(PANEL,0)); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(2),0,dp(2)); e.setLayoutParams(p); return e;
+    }
+
+    private Spinner dropdown(String[] items){
+        Spinner s=new Spinner(this);
+        ArrayAdapter<String> a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,items){
+            @Override public View getView(int pos, View convert, android.view.ViewGroup parent){
+                TextView t=(TextView)super.getView(pos,convert,parent);
+                t.setTextColor(WHITE); t.setTextSize(18); t.setPadding(dp(14),0,dp(14),0);
+                t.setBackgroundColor(PANEL2); return t;
+            }
+            @Override public View getDropDownView(int pos, View convert, android.view.ViewGroup parent){
+                TextView t=(TextView)super.getDropDownView(pos,convert,parent);
+                t.setTextColor(WHITE); t.setTextSize(18); t.setPadding(dp(14),dp(14),dp(14),dp(14));
+                t.setBackgroundColor(PANEL); return t;
+            }
+        };
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        s.setAdapter(a);
+        s.setBackground(bg(PANEL2,0));
+        return s;
     }
     private ScrollView shell(String name){
         LinearLayout outer=new LinearLayout(this); outer.setOrientation(LinearLayout.VERTICAL); outer.setBackgroundColor(BG);
-        LinearLayout head=new LinearLayout(this); head.setGravity(Gravity.CENTER_VERTICAL); head.setPadding(dp(10),dp(8),dp(10),dp(8));
+        LinearLayout head=new LinearLayout(this); head.setGravity(Gravity.CENTER_VERTICAL); head.setPadding(0,0,0,0); head.setBackgroundColor(PANEL2);
         Button back=btn("‹"); back.setTextSize(28); head.addView(back,new LinearLayout.LayoutParams(dp(54),dp(50)));
         title=tv(name,22,WHITE); title.setGravity(Gravity.CENTER); head.addView(title,new LinearLayout.LayoutParams(0,dp(50),1));
         outer.addView(head);
-        ScrollView sc=new ScrollView(this); root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(dp(14),dp(8),dp(14),dp(18));
+        ScrollView sc=new ScrollView(this); root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(0,0,0,0);
         sc.addView(root); outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(outer);
         back.setOnClickListener(v->showHome()); return sc;
     }
 
     private void showHome(){
         LinearLayout outer=new LinearLayout(this); outer.setOrientation(LinearLayout.VERTICAL); outer.setBackgroundColor(BG);
-        LinearLayout top=new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(18),dp(14),dp(18),dp(10));
+        LinearLayout top=new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(0,0,0,0); top.setBackgroundColor(BG);
         TextView logo=tv("▣",28,WHITE); logo.setGravity(Gravity.CENTER); logo.setBackground(bg(Color.rgb(225,225,225),40));
         logo.setTextColor(Color.rgb(20,65,110)); top.addView(logo,new LinearLayout.LayoutParams(dp(58),dp(58)));
         TextView name=tv("STS DigiKit",27,WHITE); name.setTypeface(null,1); top.addView(name,new LinearLayout.LayoutParams(0,dp(58),1));
         TextView menu=tv("⋮",36,WHITE); menu.setGravity(Gravity.CENTER); top.addView(menu,new LinearLayout.LayoutParams(dp(50),dp(58)));
         menu.setOnClickListener(v->showTopMenu(menu));
         outer.addView(top);
-        ScrollView sc=new ScrollView(this); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); list.setPadding(dp(12),dp(8),dp(12),dp(20));
-        TextView section=tv("CALCULATOR                                      ▲",22,WHITE); section.setGravity(Gravity.CENTER); section.setTypeface(null,1); section.setBackground(bg(PANEL2,12));
+        ScrollView sc=new ScrollView(this); sc.setFillViewport(true); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); list.setPadding(0,0,0,0);
+        TextView section=tv("CALCULATOR                                      ▲",22,WHITE); section.setGravity(Gravity.CENTER); section.setTypeface(null,1); section.setBackground(bg(PANEL2,0));
         list.addView(section,new LinearLayout.LayoutParams(-1,dp(62)));
 
         LinearLayout calcItems=new LinearLayout(this);
@@ -115,8 +136,8 @@ public class MainActivity extends Activity {
         sc.addView(list); outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(outer);
     }
     private void addMenu(LinearLayout list,String s,Runnable r){
-        TextView row=tv(s,20,WHITE); row.setGravity(Gravity.CENTER); row.setTypeface(null,1); row.setBackground(bg(PANEL,4));
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72)); p.setMargins(0,dp(2),0,0); list.addView(row,p);
+        TextView row=tv(s,20,WHITE); row.setGravity(Gravity.CENTER); row.setTypeface(null,1); row.setBackground(bg(PANEL,0));
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72)); p.setMargins(0,0,0,0); list.addView(row,p);
         row.setOnClickListener(v->{logEvent("Open: "+s); haptic(); r.run();});
     }
 
@@ -161,7 +182,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.3\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.4\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
     }
 
@@ -253,9 +274,14 @@ public class MainActivity extends Activity {
 
     private void showSavings(){
         shell("RD / FD / SIP CALCULATOR");
-        LinearLayout tabs=new LinearLayout(this); Button rd=btn("RD");Button fd=btn("FD");Button sip=btn("SIP");tabs.addView(rd,new LinearLayout.LayoutParams(0,dp(58),1));tabs.addView(fd,new LinearLayout.LayoutParams(0,dp(58),1));tabs.addView(sip,new LinearLayout.LayoutParams(0,dp(58),1));root.addView(tabs);
+        Spinner mode=dropdown(new String[]{"SIP","RD","FD"});
+        root.addView(mode,new LinearLayout.LayoutParams(-1,dp(58)));
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);root.addView(box);
-        rd.setOnClickListener(v->financeBox(box,"RD"));fd.setOnClickListener(v->financeBox(box,"FD"));sip.setOnClickListener(v->financeBox(box,"SIP"));financeBox(box,"SIP");
+        mode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){ financeBox(box,String.valueOf(mode.getSelectedItem())); }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> p){}
+        });
+        financeBox(box,"SIP");
     }
     private void financeBox(LinearLayout box,String mode){
         box.removeAllViews();
@@ -266,12 +292,21 @@ public class MainActivity extends Activity {
 
     private void showEmiInterest(){
         shell("EMI / INTEREST CALCULATOR");
+        Spinner mode=dropdown(new String[]{"EMI","SIMPLE INTEREST"});
+        root.addView(mode,new LinearLayout.LayoutParams(-1,dp(58)));
         EditText loan=input("Loan / Principal Amount");EditText rate=input("Annual Interest %");EditText months=input("Tenure in Months");
         root.addView(loan);root.addView(rate);root.addView(months);
-        Button emi=btn("CALCULATE EMI");Button simple=btn("SIMPLE INTEREST");root.addView(emi,new LinearLayout.LayoutParams(-1,dp(58)));root.addView(simple,new LinearLayout.LayoutParams(-1,dp(58)));
-        TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(120)));
-        emi.setOnClickListener(v->{double P=val(loan),i=val(rate)/1200.0;int n=(int)val(months);double e=i==0?(n==0?0:P/n):P*i*Math.pow(1+i,n)/(Math.pow(1+i,n)-1);double total=e*n;out.setText("EMI: ₹"+df.format(e)+"\nInterest: ₹"+df.format(total-P)+"\nTotal: ₹"+df.format(total));});
-        simple.setOnClickListener(v->{double P=val(loan),r=val(rate)/100.0,t=val(months)/12.0;double si=P*r*t;out.setText("Interest: ₹"+df.format(si)+"\nTotal: ₹"+df.format(P+si));});
+        Button calc=btn("CALCULATE");root.addView(calc,new LinearLayout.LayoutParams(-1,dp(58)));
+        TextView out=tv("",20,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,0));root.addView(out,new LinearLayout.LayoutParams(-1,dp(120)));
+        calc.setOnClickListener(v->{
+            double P=val(loan);
+            if(mode.getSelectedItemPosition()==0){
+                double i=val(rate)/1200.0;int n=(int)val(months);double e=i==0?(n==0?0:P/n):P*i*Math.pow(1+i,n)/(Math.pow(1+i,n)-1);double total=e*n;
+                out.setText("EMI: ₹"+df.format(e)+"\nInterest: ₹"+df.format(total-P)+"\nTotal: ₹"+df.format(total));
+            }else{
+                double r=val(rate)/100.0,t=val(months)/12.0;double si=P*r*t;out.setText("Interest: ₹"+df.format(si)+"\nTotal: ₹"+df.format(P+si));
+            }
+        });
     }
 
     private void showNumberWords(){
@@ -308,7 +343,7 @@ public class MainActivity extends Activity {
 
     private void showUnitConverter(){
         shell("UNIT CONVERTER");
-        Spinner type=new Spinner(this);String[] types={"Kilometer → Mile","Mile → Kilometer","Kilogram → Pound","Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"};type.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,types));root.addView(type,new LinearLayout.LayoutParams(-1,dp(56)));
+        Spinner type=dropdown(new String[]{"Kilometer → Mile","Mile → Kilometer","Kilogram → Pound","Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"});root.addView(type,new LinearLayout.LayoutParams(-1,dp(58)));
         EditText in=input("Value");root.addView(in);Button go=btn("CONVERT");root.addView(go,new LinearLayout.LayoutParams(-1,dp(60)));TextView out=tv("",24,WHITE);out.setGravity(Gravity.CENTER);out.setBackground(bg(PANEL2,12));root.addView(out,new LinearLayout.LayoutParams(-1,dp(110)));
         go.setOnClickListener(v->{double x=val(in),y=0;switch(type.getSelectedItemPosition()){case 0:y=x*0.621371;break;case 1:y=x/0.621371;break;case 2:y=x*2.20462;break;case 3:y=x/2.20462;break;case 4:y=x*9/5+32;break;case 5:y=(x-32)*5/9;break;}out.setText(trim(y));});
     }
