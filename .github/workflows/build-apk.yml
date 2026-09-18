@@ -15,6 +15,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Apply package version
+        run: |
+          source app/version.properties
+          sed -i "s/versionCode [0-9][0-9]*/versionCode $VERSION_CODE/" app/build.gradle
+          sed -i "s/versionName '[^']*'/versionName '$VERSION_NAME'/" app/build.gradle
       - name: Build debug APK
         run: gradle assembleDebug
       - uses: actions/upload-artifact@v4
