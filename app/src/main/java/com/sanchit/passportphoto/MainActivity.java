@@ -52,6 +52,7 @@ public class MainActivity extends Activity {
     private TextView scannerDetails;
     private boolean scannerActive=false;
     private boolean scannerResultLocked=false;
+    private boolean scannerFullScreen=false;
     private String lastScannerRaw="";
     private String lastScannerDetails="";
 
@@ -496,8 +497,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.27\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.27\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.28\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.28\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -527,7 +528,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.27\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.28\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2647,6 +2648,25 @@ public class MainActivity extends Activity {
         return b.toString();
     }
 
+    private void setScannerSystemFullscreen(boolean full){
+        scannerFullScreen=full;
+        try{
+            if(full){
+                getWindow().getDecorView().setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                                |View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                |View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                |View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                |View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                |View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            }else{
+                getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+                getWindow().setStatusBarColor(BG);
+                getWindow().setNavigationBarColor(BG);
+            }
+        }catch(Throwable ignored){}
+    }
+
     private void handleScannerResult(String value,com.google.zxing.BarcodeFormat format){
         if(value==null || value.trim().isEmpty()) return;
 
@@ -2658,13 +2678,31 @@ public class MainActivity extends Activity {
         lastScannerRaw=value;
         lastScannerDetails=details;
 
-        if(scannerDetails!=null){
-            scannerDetails.setText(details);
-            scannerDetails.setTextColor(WHITE);
-        }
-
         savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),details);
         haptic();
+        showScannerResultFullScreen(details);
+    }
+
+    private void showScannerResultFullScreen(String details){
+        setScannerSystemFullscreen(true);
+        scannerActive=false;
+        scannerResultLocked=true;
+
+        LinearLayout resultRoot=new LinearLayout(this);
+        resultRoot.setOrientation(LinearLayout.VERTICAL);
+        resultRoot.setBackground(screenBg());
+        resultRoot.setPadding(dp(16),dp(18),dp(16),dp(18));
+
+        ScrollView scroll=new ScrollView(this);
+        TextView result=tv(details,19,WHITE);
+        result.setGravity(Gravity.TOP|Gravity.LEFT);
+        result.setTextIsSelectable(true);
+        result.setPadding(dp(18),dp(18),dp(18),dp(18));
+        result.setBackground(grad(PANEL,Color.rgb(23,52,88),16));
+        scroll.addView(result,new ScrollView.LayoutParams(-1,-1));
+        resultRoot.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+
+        setContentView(resultRoot);
     }
 
     private android.graphics.Bitmap loadGalleryBitmap(android.net.Uri uri) throws Exception{
@@ -2763,11 +2801,70 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void configureEmbeddedScanner(){
+        if(embeddedScanner==null) return;
+
+        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> scanHints=
+                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
+        scanHints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
+        scanHints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
+
+        java.util.Collection<com.google.zxing.BarcodeFormat> allFormats=
+                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class);
+
+        embeddedScanner.getBarcodeView().setDecoderFactory(
+                new com.journeyapps.barcodescanner.DefaultDecoderFactory(
+                        allFormats,scanHints,"UTF-8",2));
+
+        embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
+            @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
+                if(result==null || result.getText()==null || scannerResultLocked) return;
+                handleScannerResult(result.getText(),result.getBarcodeFormat());
+            }
+            @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
+        });
+    }
+
+    private void showScannerCameraFullScreen(){
+        currentTool="SCAN";
+        setScannerSystemFullscreen(true);
+        scannerResultLocked=false;
+        scannerActive=true;
+
+        LinearLayout cameraRoot=new LinearLayout(this);
+        cameraRoot.setOrientation(LinearLayout.VERTICAL);
+        cameraRoot.setBackgroundColor(Color.BLACK);
+
+        embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
+        embeddedScanner.setBackgroundColor(Color.BLACK);
+        embeddedScanner.setStatusText("");
+        configureEmbeddedScanner();
+
+        cameraRoot.addView(embeddedScanner,new LinearLayout.LayoutParams(-1,-1));
+        setContentView(cameraRoot);
+
+        try{
+            embeddedScanner.resume();
+        }catch(Throwable e){
+            scannerActive=false;
+            setScannerSystemFullscreen(false);
+            showScanner();
+            if(scannerDetails!=null){
+                scannerDetails.setText(L(
+                        "Camera could not start. Close other camera apps and try again.",
+                        "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"));
+            }
+        }
+    }
+
     private void showScanner(){
         currentTool="SCAN";
         toolPickerOpen=false;
         scannerActive=false;
         scannerResultLocked=false;
+        try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
+        embeddedScanner=null;
+        setScannerSystemFullscreen(false);
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
@@ -2792,39 +2889,13 @@ public class MainActivity extends Activity {
         scannerDetails.setBackground(grad(PANEL,Color.rgb(23,52,88),0));
         body.addView(scannerDetails,new LinearLayout.LayoutParams(-1,dp(150)));
 
-        embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
-        embeddedScanner.setBackgroundColor(Color.BLACK);
-        embeddedScanner.setStatusText("");
+        Space spacer=new Space(this);
+        body.addView(spacer,new LinearLayout.LayoutParams(-1,0,1));
 
-        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> scanHints=
-                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
-        scanHints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
-        scanHints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
-
-        java.util.Collection<com.google.zxing.BarcodeFormat> allFormats=
-                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class);
-
-        embeddedScanner.getBarcodeView().setDecoderFactory(
-                new com.journeyapps.barcodescanner.DefaultDecoderFactory(
-                        allFormats,scanHints,"UTF-8",2));
-
-        embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
-            @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
-                if(result==null || result.getText()==null || scannerResultLocked) return;
-                handleScannerResult(result.getText(),result.getBarcodeFormat());
-            }
-            @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
-        });
-
-        body.addView(embeddedScanner,new LinearLayout.LayoutParams(-1,0,1));
-
-        LinearLayout primary=new LinearLayout(this);
-        primary.setOrientation(LinearLayout.HORIZONTAL);
         Button start=btn(L("START SCANNER","स्कैनर शुरू करें"));
         Button gallery=btn(L("GALLERY PICKUP","गैलरी से चुनें"));
-        primary.addView(start,new LinearLayout.LayoutParams(0,dp(60),1));
-        primary.addView(gallery,new LinearLayout.LayoutParams(0,dp(60),1));
-        body.addView(primary,new LinearLayout.LayoutParams(-1,dp(62)));
+        body.addView(start,controlParams(60));
+        body.addView(gallery,controlParams(60));
 
         LinearLayout secondary=new LinearLayout(this);
         secondary.setOrientation(LinearLayout.HORIZONTAL);
@@ -2852,8 +2923,6 @@ public class MainActivity extends Activity {
     }
 
     private void startEmbeddedScanner(){
-        if(embeddedScanner==null) return;
-
         if(!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)){
             if(scannerDetails!=null){
                 scannerDetails.setText(L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"));
@@ -2877,22 +2946,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        try{
-            scannerResultLocked=false;
-            scannerActive=true;
-            if(scannerDetails!=null){
-                scannerDetails.setText(L("Scanning... QR / Barcode detect होते ही result automatically दिखाई देगा.",
-                        "Scanning... QR / Barcode detect होते ही result automatically दिखाई देगा."));
-                scannerDetails.setTextColor(SOFT);
-            }
-            embeddedScanner.resume();
-        }catch(Throwable e){
-            scannerActive=false;
-            if(scannerDetails!=null){
-                scannerDetails.setText(L("Camera could not start. Close other camera apps and try again.",
-                        "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"));
-            }
-        }
+        showScannerCameraFullScreen();
     }
 
     private void stopEmbeddedScanner(){
@@ -2975,6 +3029,14 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed(){
+        if("SCAN".equals(currentTool) && scannerFullScreen){
+            try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
+            embeddedScanner=null;
+            scannerActive=false;
+            scannerResultLocked=false;
+            showScanner();
+            return;
+        }
         if("SCAN".equals(currentTool) && embeddedScanner!=null){
             try{embeddedScanner.pause();}catch(Throwable ignored){}
             embeddedScanner=null;
