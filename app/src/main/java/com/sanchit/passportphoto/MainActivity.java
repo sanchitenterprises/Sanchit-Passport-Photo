@@ -43,6 +43,14 @@ public class MainActivity extends Activity {
     private boolean toolPickerOpen = false;
     private final StringBuilder appLogs = new StringBuilder();
     private final DecimalFormat df = new DecimalFormat("#,##0.00");
+    private AndroidTvV2 androidTvV2;
+
+    private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
+    private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
+    private TextView scannerStatus;
+    private boolean scannerActive=false;
+    private boolean scannerResultLocked=false;
+
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
@@ -484,8 +492,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.22\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.22\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.23\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.23\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -515,7 +523,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.22\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.23\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1560,6 +1568,8 @@ public class MainActivity extends Activity {
                     if(all.contains("roku")) type="ROKU";
                     else if(all.contains("samsung")) type="SAMSUNG";
                     else if(all.contains("webos") || all.contains("lg electronics")) type="LG";
+                    else if(all.contains("android tv") || all.contains("google tv")
+                            || portOpen(ip,6466,450) || portOpen(ip,6467,450)) type="ANDROID_TV";
 
                     String friendly=xmlTag(description,"friendlyName");
                     String manufacturer=xmlTag(description,"manufacturer");
@@ -1600,6 +1610,7 @@ public class MainActivity extends Activity {
             return !x.isEmpty();
         }
         if("SAMSUNG".equals(d.type)) return portOpen(d.ip,8001,1000) || portOpen(d.ip,8002,1000);
+        if("ANDROID_TV".equals(d.type)) return portOpen(d.ip,6466,1200) || portOpen(d.ip,6467,1200);
         if("LG".equals(d.type)) return portOpen(d.ip,3000,1000) || portOpen(d.ip,3001,1000);
         return portOpen(d.ip,80,900) || portOpen(d.ip,8000,900);
     }
@@ -1749,15 +1760,137 @@ public class MainActivity extends Activity {
         return sendSamsungWs(ip,8002,true,key);
     }
 
+    private int androidTvKeyCode(String key){
+        if("POWER".equals(key)) return 26;
+        if("HOME".equals(key)) return 3;
+        if("BACK".equals(key)) return 4;
+        if("UP".equals(key)) return 19;
+        if("DOWN".equals(key)) return 20;
+        if("LEFT".equals(key)) return 21;
+        if("RIGHT".equals(key)) return 22;
+        if("OK".equals(key)) return 23;
+        if("VOL_UP".equals(key)) return 24;
+        if("VOL_DOWN".equals(key)) return 25;
+        if("MUTE".equals(key)) return 164;
+        if("CH_UP".equals(key)) return 166;
+        if("CH_DOWN".equals(key)) return 167;
+        if("PLAY".equals(key)) return 85;
+        return 0;
+    }
+
     private boolean sendTvKey(TvDevice d,String key){
         if(d==null) return false;
         if("ROKU".equals(d.type)) return sendRokuKey(d.ip,key);
         if("SAMSUNG".equals(d.type)) return sendSamsungKey(d.ip,key);
+        if("ANDROID_TV".equals(d.type)){
+            int code=androidTvKeyCode(key);
+            return code!=0 && androidTvV2!=null && androidTvV2.sendKey(code);
+        }
         return false;
+    }
+
+    private void saveConnectedTv(TvDevice d){
+        getSharedPreferences("sts",0).edit()
+                .putString("tv_name",d.name)
+                .putString("tv_ip",d.ip)
+                .putString("tv_type",d.type)
+                .apply();
+    }
+
+    private void connectAndroidTv(TvDevice d,TextView status,Runnable connected){
+        if(androidTvV2==null) androidTvV2=new AndroidTvV2(this);
+        status.setText(L("Connecting to Android TV...","Android TV से कनेक्ट कर रहे हैं..."));
+
+        new Thread(()->{
+            try{
+                if(androidTvV2.connect(d.ip)){
+                    runOnUiThread(()->{
+                        saveConnectedTv(d);
+                        status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+                        connected.run();
+                    });
+                    return;
+                }
+            }catch(Exception ignored){}
+
+            try{
+                androidTvV2.startPairing(d.ip);
+                runOnUiThread(()->{
+                    final EditText pin=new EditText(this);
+                    pin.setHint("A1B2C3");
+                    pin.setSingleLine(true);
+                    pin.setTextSize(22);
+                    pin.setGravity(Gravity.CENTER);
+                    pin.setAllCaps(true);
+                    pin.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(6)});
+                    pin.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                            |android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+                    pin.setPadding(dp(16),dp(12),dp(16),dp(12));
+                    pin.setBackground(fieldBg());
+
+                    AlertDialog dialog=new AlertDialog.Builder(this)
+                            .setTitle(L("PAIR ANDROID TV","ANDROID TV PAIR करें"))
+                            .setMessage(L(
+                                    "A 6-character code should now be visible on the TV. Enter that code below.",
+                                    "TV स्क्रीन पर अब 6-character code दिखना चाहिए। वही code नीचे दर्ज करें।"))
+                            .setView(pin)
+                            .setPositiveButton(L("PAIR","PAIR करें"),null)
+                            .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                            .create();
+
+                    dialog.setOnShowListener(x->{
+                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                            String code=pin.getText().toString().trim().toUpperCase(java.util.Locale.US);
+                            if(code.length()!=6 || !code.matches("[0-9A-F]{6}")){
+                                pin.setError(L("Enter the 6-character TV code","TV का 6-character code दर्ज करें"));
+                                return;
+                            }
+                            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+                            status.setText(L("Pairing with Android TV...","Android TV pair हो रहा है..."));
+
+                            new Thread(()->{
+                                try{
+                                    boolean ok=androidTvV2.finishPairing(code);
+                                    runOnUiThread(()->{
+                                        dialog.dismiss();
+                                        if(ok){
+                                            saveConnectedTv(d);
+                                            status.setText(L("Paired & connected: ","Pair और कनेक्टेड: ")+d.name);
+                                            connected.run();
+                                        }else{
+                                            status.setText(L("Pairing completed but connection failed. Tap Connect again.",
+                                                    "Pairing हुआ, लेकिन connection नहीं हुआ। फिर Connect दबाएं।"));
+                                        }
+                                    });
+                                }catch(Exception ex){
+                                    runOnUiThread(()->{
+                                        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(true);
+                                        status.setText(L("Pairing failed: ","Pairing failed: ")+
+                                                (ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage()));
+                                    });
+                                }
+                            }).start();
+                        });
+                        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
+                            try{androidTvV2.closePairing();}catch(Exception ignored){}
+                            dialog.dismiss();
+                            status.setText(L("Pairing cancelled","Pairing रद्द किया गया"));
+                        });
+                    });
+                    dialog.show();
+                });
+            }catch(Exception ex){
+                runOnUiThread(()->status.setText(
+                        L("Android TV pairing could not start. Make sure TV Remote Service is enabled and both devices are on the same Wi-Fi. ",
+                          "Android TV pairing शुरू नहीं हुआ। TV Remote Service चालू रखें और दोनों device एक ही Wi-Fi पर रखें। ")
+                                +(ex.getMessage()==null?"":ex.getMessage())));
+            }
+        }).start();
     }
 
     private void showRemote(){
         currentTool="REMOTE";
+        if(androidTvV2==null) androidTvV2=new AndroidTvV2(this);
         shell(L("SMART TV REMOTE","स्मार्ट TV रिमोट"));
 
         TextView status=tv(L("Same Wi-Fi TV remote","एक ही Wi-Fi पर TV रिमोट"),17,SOFT);
@@ -1851,14 +1984,9 @@ public class MainActivity extends Activity {
                     scan.setEnabled(true);
                     if(found.isEmpty()){
                         status.setText(L("No compatible TV discovered. Phone and TV must be on the same Wi-Fi.","TV नहीं मिला। Phone और TV एक ही Wi-Fi पर होना चाहिए।"));
-                    }else if(found.size()==1 && ("ROKU".equals(found.get(0).type) || "SAMSUNG".equals(found.get(0).type))){
-                        active[0]=found.get(0);
-                        TvDevice d=active[0];
-                        getSharedPreferences("sts",0).edit()
-                                .putString("tv_name",d.name).putString("tv_ip",d.ip).putString("tv_type",d.type).apply();
-                        status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+d.name);
                     }else{
-                        status.setText(found.size()+" "+L("TV device(s) found. Select one and connect.","TV मिले। एक चुनकर connect करें।"));
+                        status.setText(found.size()+" "+L("TV device(s) found. Select one and tap Connect.",
+                                "TV मिले। एक चुनें और Connect दबाएं।"));
                     }
                 });
             }).start();
@@ -1869,39 +1997,74 @@ public class MainActivity extends Activity {
                 scan.performClick();
                 return;
             }
+
             int pos=devices.getSelectedItemPosition();
             if(pos<0 || pos>=found.size()) pos=0;
             TvDevice d=found.get(pos);
-            if(!("ROKU".equals(d.type) || "SAMSUNG".equals(d.type))){
-                status.setText(d.name+" "+L("was found, but this model needs its brand pairing protocol. Roku and Samsung Wi-Fi control are enabled in this build.","मिला है, लेकिन इस model के लिए brand pairing protocol चाहिए। इस build में Roku और Samsung Wi-Fi control चालू है।"));
+
+            if("UPNP".equals(d.type) && (portOpen(d.ip,6466,600) || portOpen(d.ip,6467,600))){
+                d.type="ANDROID_TV";
+                refreshSpinner.run();
+            }
+
+            if("ANDROID_TV".equals(d.type)){
+                final TvDevice selected=d;
+                connectAndroidTv(selected,status,()->active[0]=selected);
                 return;
             }
-            active[0]=d;
-            getSharedPreferences("sts",0).edit()
-                    .putString("tv_name",d.name).putString("tv_ip",d.ip).putString("tv_type",d.type).apply();
-            status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+
+            if("ROKU".equals(d.type) || "SAMSUNG".equals(d.type)){
+                active[0]=d;
+                saveConnectedTv(d);
+                status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+                return;
+            }
+
+            status.setText(d.name+" "+L(
+                    "was detected, but this TV uses a different Wi-Fi remote protocol.",
+                    "detect हुआ है, लेकिन यह TV अलग Wi-Fi remote protocol इस्तेमाल करता है।"));
         });
 
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         String savedIp=sp.getString("tv_ip","");
         String savedType=sp.getString("tv_type","");
         String savedName=sp.getString("tv_name","Saved TV");
-        if(!savedIp.isEmpty() && ("ROKU".equals(savedType) || "SAMSUNG".equals(savedType))){
+
+        if(!savedIp.isEmpty()){
             TvDevice saved=new TvDevice(savedName,savedIp,savedType);
             found.add(saved);
             refreshSpinner.run();
             status.setText(L("Reconnecting saved TV...","सेव TV दोबारा कनेक्ट कर रहे हैं..."));
-            new Thread(()->{
-                boolean ok=checkTvDevice(saved);
-                runOnUiThread(()->{
-                    if(ok){
-                        active[0]=saved;
-                        status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+saved.name);
-                    }else{
-                        status.setText(L("Saved TV not reachable. Tap Auto Find TV.","सेव TV नहीं मिला। Auto Find TV दबाएं।"));
-                    }
-                });
-            }).start();
+
+            if("ANDROID_TV".equals(savedType)){
+                new Thread(()->{
+                    boolean ok=false;
+                    try{ok=androidTvV2.connect(saved.ip);}catch(Exception ignored){}
+                    final boolean connectedOk=ok;
+                    runOnUiThread(()->{
+                        if(connectedOk){
+                            active[0]=saved;
+                            status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+saved.name);
+                        }else{
+                            status.setText(L("Saved Android TV needs pairing/reconnect. Tap CONNECT / SAVE TV.",
+                                    "सेव Android TV को pairing/reconnect चाहिए। CONNECT / SAVE TV दबाएं।"));
+                        }
+                    });
+                }).start();
+            }else{
+                new Thread(()->{
+                    boolean ok=checkTvDevice(saved);
+                    runOnUiThread(()->{
+                        if(ok){
+                            active[0]=saved;
+                            status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+saved.name);
+                        }else{
+                            status.setText(L("Saved TV not reachable. Tap Auto Find TV.",
+                                    "सेव TV नहीं मिला। Auto Find TV दबाएं।"));
+                        }
+                    });
+                }).start();
+            }
         }else{
             scan.performClick();
         }
@@ -2332,95 +2495,45 @@ public class MainActivity extends Activity {
         });
     }
 
-    private boolean scanLaunching=false;
-    private TextView scannerStatus;
-
     private void showScanner(){
         currentTool="SCAN";
         toolPickerOpen=false;
-        shell(L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"));
+        scannerActive=false;
+        scannerResultLocked=false;
+
+        LinearLayout outer=new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackground(screenBg());
+        addFixedDropdown(outer,L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"));
+
+        LinearLayout body=new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setBackground(screenBg());
+        body.setPadding(dp(8),dp(8),dp(8),dp(8));
+        outer.addView(body,new LinearLayout.LayoutParams(-1,0,1));
 
         scannerStatus=tv(
-                L("Ready. Tap START SCANNER and point the camera at a QR code or barcode.",
-                  "तैयार। START SCANNER दबाएं और कैमरा QR code या barcode की ओर करें।"),
-                18,WHITE);
+                L("Camera is off. Tap START SCANNER.",
+                  "Camera बंद है। START SCANNER दबाएं।"),
+                17,WHITE);
         scannerStatus.setGravity(Gravity.CENTER);
         styleResult(scannerStatus);
-        root.addView(scannerStatus,new LinearLayout.LayoutParams(-1,0,1));
+        body.addView(scannerStatus,controlParams(58));
 
-        Button startScan=btn(L("START SCANNER","स्कैनर शुरू करें"));
-        root.addView(startScan,controlParams(64));
+        embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
+        embeddedScanner.setBackgroundColor(Color.BLACK);
+        embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
+            @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
+                if(result==null || result.getText()==null || scannerResultLocked) return;
+                scannerResultLocked=true;
+                scannerActive=false;
+                try{embeddedScanner.pause();}catch(Throwable ignored){}
 
-        LinearLayout actions=new LinearLayout(this);
-        Button history=btn(L("HISTORY","हिस्ट्री"));
-        Button help=btn(L("CAMERA HELP","कैमरा मदद"));
-        actions.addView(history,new LinearLayout.LayoutParams(0,dp(52),1));
-        actions.addView(help,new LinearLayout.LayoutParams(0,dp(52),1));
-        root.addView(actions,controlParams(54));
-
-        startScan.setOnClickListener(v->launchScanner());
-
-        history.setOnClickListener(v->
-                showPanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर")));
-
-        help.setOnClickListener(v->new AlertDialog.Builder(this)
-                .setTitle(L("CAMERA PERMISSION","कैमरा अनुमति"))
-                .setMessage(L(
-                        "When the scanner opens, Android may ask for Camera permission. Allow it to scan QR codes and barcodes. If permission was previously blocked, enable Camera for STS DigiKit from Android App Settings.",
-                        "Scanner खुलने पर Android Camera permission मांग सकता है। QR और barcode scan करने के लिए Allow करें। अगर permission पहले block की गई है, तो Android App Settings में STS DigiKit के लिए Camera चालू करें।"))
-                .setPositiveButton("OK",null)
-                .show());
-    }
-
-    private void launchScanner(){
-        if(scanLaunching) return;
-
-        if(!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)){
-            if(scannerStatus!=null) scannerStatus.setText(
-                    L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"));
-            Toast.makeText(this,
-                    L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"),
-                    Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        scanLaunching=true;
-        if(scannerStatus!=null) scannerStatus.setText(
-                L("Opening camera scanner...","कैमरा scanner खोल रहे हैं..."));
-
-        try{
-            IntentIntegrator in=new IntentIntegrator(this);
-            in.setDesiredBarcodeFormats(IntentIntegrator.ALL_CODE_TYPES);
-            in.setPrompt(L("Scan QR / Barcode","QR / बारकोड स्कैन करें"));
-            in.setBeepEnabled(true);
-            in.setOrientationLocked(true);
-            in.setBarcodeImageEnabled(false);
-            in.initiateScan();
-        }catch(Throwable e){
-            scanLaunching=false;
-            if(scannerStatus!=null) scannerStatus.setText(
-                    L("Scanner could not start. Try again or check Camera permission.",
-                      "Scanner शुरू नहीं हो सका। फिर कोशिश करें या Camera permission जांचें।"));
-            Toast.makeText(this,
-                    L("Scanner could not start. App is still safe.",
-                      "Scanner शुरू नहीं हो सका। App बंद नहीं होगा।"),
-                    Toast.LENGTH_LONG).show();
-        }
-    }
-
-    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
-        IntentResult r=IntentIntegrator.parseActivityResult(requestCode,resultCode,data);
-        if(r!=null){
-            scanLaunching=false;
-            currentTool="SCAN";
-            showScanner();
-
-            if(r.getContents()!=null){
-                String value=r.getContents();
-                if(scannerStatus!=null) scannerStatus.setText(L("Scan successful","स्कैन सफल"));
+                String value=result.getText();
+                scannerStatus.setText(L("Scan successful","स्कैन सफल"));
                 savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),value);
 
-                new AlertDialog.Builder(this)
+                new AlertDialog.Builder(MainActivity.this)
                         .setTitle(L("Scan Result","स्कैन परिणाम"))
                         .setMessage(value)
                         .setPositiveButton(L("COPY","कॉपी"),(d,w)->{
@@ -2432,18 +2545,120 @@ public class MainActivity extends Activity {
                         .setNeutralButton(L("SHARE","शेयर"),(d,w)->
                                 sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),value))
                         .setNegativeButton(L("CLOSE","बंद करें"),null)
+                        .setOnDismissListener(d->scannerStatus.setText(
+                                L("Tap START SCANNER to scan again.","फिर scan करने के लिए START SCANNER दबाएं।")))
                         .show();
-            }else{
-                if(scannerStatus!=null) scannerStatus.setText(
-                        L("Scan cancelled. Tap START SCANNER to try again.",
-                          "Scan रद्द हुआ। फिर कोशिश के लिए START SCANNER दबाएं।"));
+            }
+            @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
+        });
+        body.addView(embeddedScanner,new LinearLayout.LayoutParams(-1,0,1));
+
+        LinearLayout row=new LinearLayout(this);
+        Button start=btn(L("START SCANNER","स्कैनर शुरू करें"));
+        Button stop=btn(L("STOP","बंद करें"));
+        row.addView(start,new LinearLayout.LayoutParams(0,dp(58),1));
+        row.addView(stop,new LinearLayout.LayoutParams(0,dp(58),1));
+        body.addView(row,controlParams(60));
+
+        LinearLayout actions=new LinearLayout(this);
+        Button history=btn(L("HISTORY","हिस्ट्री"));
+        Button help=btn(L("CAMERA HELP","कैमरा मदद"));
+        actions.addView(history,new LinearLayout.LayoutParams(0,dp(52),1));
+        actions.addView(help,new LinearLayout.LayoutParams(0,dp(52),1));
+        body.addView(actions,controlParams(54));
+
+        start.setOnClickListener(v->startEmbeddedScanner());
+        stop.setOnClickListener(v->stopEmbeddedScanner());
+        history.setOnClickListener(v->showPanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर")));
+        help.setOnClickListener(v->new AlertDialog.Builder(this)
+                .setTitle(L("CAMERA PERMISSION","कैमरा अनुमति"))
+                .setMessage(L(
+                        "Allow Camera permission when Android asks. The scanner now runs inside STS DigiKit instead of opening a separate scanner activity.",
+                        "Android जब Camera permission मांगे तो Allow करें। अब scanner अलग activity खोलने के बजाय STS DigiKit के अंदर ही चलता है।"))
+                .setPositiveButton("OK",null)
+                .show());
+
+        setContentView(outer);
+    }
+
+    private void startEmbeddedScanner(){
+        if(embeddedScanner==null) return;
+
+        if(!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)){
+            scannerStatus.setText(L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"));
+            return;
+        }
+
+        if(Build.VERSION.SDK_INT>=23 &&
+                checkSelfPermission(android.Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){
+            scannerStatus.setText(L("Waiting for Camera permission...","Camera permission का इंतजार है..."));
+            try{
+                requestPermissions(new String[]{android.Manifest.permission.CAMERA},REQ_EMBEDDED_SCANNER_CAMERA);
+            }catch(Throwable e){
+                scannerStatus.setText(L("Camera permission request failed.","Camera permission request नहीं हो सकी।"));
             }
             return;
         }
+
+        try{
+            scannerResultLocked=false;
+            scannerActive=true;
+            scannerStatus.setText(L("Scanning... Point camera at QR / Barcode.",
+                    "Scanning... Camera QR / Barcode की ओर करें।"));
+            embeddedScanner.resume();
+        }catch(Throwable e){
+            scannerActive=false;
+            scannerStatus.setText(L("Camera could not start. Close other camera apps and try again.",
+                    "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"));
+        }
+    }
+
+    private void stopEmbeddedScanner(){
+        scannerActive=false;
+        try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
+        if(scannerStatus!=null) scannerStatus.setText(L("Scanner stopped","Scanner बंद है"));
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+        if(requestCode==REQ_EMBEDDED_SCANNER_CAMERA){
+            if(grantResults.length>0 && grantResults[0]==PackageManager.PERMISSION_GRANTED){
+                if("SCAN".equals(currentTool)) startEmbeddedScanner();
+            }else{
+                scannerActive=false;
+                if(scannerStatus!=null) scannerStatus.setText(
+                        L("Camera permission denied. Scanner remains open and the app will not close.",
+                          "Camera permission नहीं मिली। Scanner panel खुला रहेगा और app बंद नहीं होगा।"));
+            }
+        }
+    }
+
+    @Override protected void onPause(){
+        super.onPause();
+        if(embeddedScanner!=null){
+            try{embeddedScanner.pause();}catch(Throwable ignored){}
+        }
+    }
+
+    @Override protected void onResume(){
+        super.onResume();
+        if("SCAN".equals(currentTool) && scannerActive && embeddedScanner!=null){
+            if(Build.VERSION.SDK_INT<23 || checkSelfPermission(android.Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED){
+                try{embeddedScanner.resume();}catch(Throwable ignored){}
+            }
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
     }
 
     @Override public void onBackPressed(){
+        if("SCAN".equals(currentTool) && embeddedScanner!=null){
+            try{embeddedScanner.pause();}catch(Throwable ignored){}
+            embeddedScanner=null;
+            scannerActive=false;
+        }
         if(toolPickerOpen){
             toolPickerOpen=false;
             reopenCurrentTool();
