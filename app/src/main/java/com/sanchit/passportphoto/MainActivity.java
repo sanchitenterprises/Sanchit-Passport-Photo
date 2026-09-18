@@ -2685,7 +2685,7 @@ public class MainActivity extends Activity {
             try{current.recycle();}catch(Exception ignored){}
         }
         if(last!=null) throw last;
-        throw new com.google.zxing.NotFoundException();
+        throw com.google.zxing.NotFoundException.getNotFoundInstance();
     }
 
     private void pickScannerImageFromGallery(){
