@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.32\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.32\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.33\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.33\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.32\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.33\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2537,7 +2537,35 @@ public class MainActivity extends Activity {
         });
     }
 
-    private String buildQuickBillPreview(EditText customer,EditText item,EditText qty,EditText rate,EditText gst){
+    private String qbCenter(String s,int width){
+        String x=s==null?"":s;
+        if(x.length()>=width) return x;
+        int left=(width-x.length())/2;
+        StringBuilder b=new StringBuilder();
+        for(int i=0;i<left;i++) b.append(' ');
+        b.append(x);
+        return b.toString();
+    }
+
+    private String qbPadRight(String s,int width){
+        String x=s==null?"":s;
+        if(x.length()>width) x=x.substring(0,width);
+        StringBuilder b=new StringBuilder(x);
+        while(b.length()<width) b.append(' ');
+        return b.toString();
+    }
+
+    private String qbPadLeft(String s,int width){
+        String x=s==null?"":s;
+        if(x.length()>width) x=x.substring(x.length()-width);
+        StringBuilder b=new StringBuilder();
+        while(b.length()+x.length()<width) b.append(' ');
+        b.append(x);
+        return b.toString();
+    }
+
+    private String buildQuickBillPreview(EditText customer,EditText item,EditText qty,EditText rate,EditText gst,
+                                         String billNo,String billDate){
         String customerName=customer.getText().toString().trim();
         String itemName=item.getText().toString().trim();
         String qRaw=qty.getText().toString().trim();
@@ -2552,17 +2580,50 @@ public class MainActivity extends Activity {
         double r=val(rate);
         double base=q*r;
         double gstRate=val(gst);
-        double g=base*gstRate/100.0;
+        double gstAmount=base*gstRate/100.0;
+        double total=base+gstAmount;
+
+        final int W=32;
+        String line="--------------------------------";
+        String itemLabel=itemName.isEmpty()?L("Item","आइटम"):itemName;
+        String qtyText=trim(q);
+        String amountText=df.format(base);
 
         StringBuilder res=new StringBuilder();
+        res.append(qbCenter("STS DIGIKIT",W)).append("\n");
+        res.append(qbCenter(L("Retail Invoice","रिटेल इनवॉइस"),W)).append("\n");
+        res.append(line).append("\n");
+        res.append(L("Date: ","दिनांक: ")).append(billDate).append("\n");
+        res.append(L("Bill No: ","बिल नं: ")).append(billNo).append("\n");
         if(!customerName.isEmpty()){
-            res.append(L("Customer: ","ग्राहक: ")).append(customerName).append("\n\n");
+            res.append(L("Customer: ","ग्राहक: ")).append(customerName).append("\n");
         }
-        res.append(itemName.isEmpty()?L("Item","आइटम"):itemName)
-                .append("\nQty: ").append(trim(q)).append(" × ₹").append(df.format(r))
-                .append("\n").append(L("Subtotal: ₹","उप-योग: ₹")).append(df.format(base))
-                .append("\nGST ").append(trim(gstRate)).append("%: ₹").append(df.format(g))
-                .append("\n").append(L("TOTAL: ₹","कुल: ₹")).append(df.format(base+g));
+        res.append(line).append("\n");
+        res.append(qbPadRight(L("Item","आइटम"),18))
+                .append(qbPadLeft(L("Qty","मात्रा"),5))
+                .append(qbPadLeft(L("Amt","राशि"),9)).append("\n");
+        res.append(line).append("\n");
+        res.append(qbPadRight(itemLabel,18))
+                .append(qbPadLeft(qtyText,5))
+                .append(qbPadLeft(amountText,9)).append("\n");
+        res.append(line).append("\n");
+        res.append(qbPadRight(L("Sub Total","उप-योग"),21))
+                .append(qbPadLeft(df.format(base),11)).append("\n");
+
+        if(gstRate>0){
+            String gstLabel="GST @ "+trim(gstRate)+"%";
+            res.append(qbPadRight(gstLabel,21))
+                    .append(qbPadLeft(df.format(gstAmount),11)).append("\n");
+        }
+
+        res.append(line).append("\n");
+        res.append(qbPadRight(L("TOTAL","कुल"),20))
+                .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
+        res.append(line).append("\n");
+        res.append(qbPadRight(L("Cash","नकद"),20))
+                .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
+        res.append(qbPadRight(L("Cash tendered","दिया गया नकद"),20))
+                .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         return res.toString();
     }
 
@@ -2590,7 +2651,7 @@ public class MainActivity extends Activity {
                         callback.onLayoutCancelled();
                         return;
                     }
-                    android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder("STS-DigiKit-58mm-Bill.pdf")
+                    android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder("STS-DigiKit-Bill.pdf")
                             .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
                             .setPageCount(1)
                             .build();
@@ -2606,7 +2667,7 @@ public class MainActivity extends Activity {
                         String[] lines=receipt.split("\\n",-1);
                         int width=164;
                         int lineHeight=14;
-                        int height=Math.max(220,24+(lines.length*lineHeight)+34);
+                        int height=Math.max(260,24+(lines.length*lineHeight)+30);
                         android.graphics.pdf.PdfDocument.PageInfo pageInfo=
                                 new android.graphics.pdf.PdfDocument.PageInfo.Builder(width,height,1).create();
                         android.graphics.pdf.PdfDocument.Page page=pdf.startPage(pageInfo);
@@ -2633,16 +2694,15 @@ public class MainActivity extends Activity {
                             }
 
                             while(remaining.length()>0){
-                                int fit=paint.breakText(remaining,true,width-16,null);
+                                int fit=paint.breakText(remaining,true,width-12,null);
                                 if(fit<=0) fit=Math.min(1,remaining.length());
                                 String part=remaining.substring(0,fit);
-                                canvas.drawText(part,8f,y,paint);
+                                canvas.drawText(part,6f,y,paint);
                                 y+=lineHeight;
                                 remaining=remaining.substring(fit);
                             }
                         }
 
-                        canvas.drawText("--------------------------------",8f,y+4,paint);
                         pdf.finishPage(page);
 
                         java.io.FileOutputStream out=new java.io.FileOutputStream(destination.getFileDescriptor());
@@ -2659,12 +2719,12 @@ public class MainActivity extends Activity {
 
             android.print.PrintAttributes attrs=new android.print.PrintAttributes.Builder()
                     .setMediaSize(new android.print.PrintAttributes.MediaSize(
-                            "STS_58MM","58 mm Thermal",2283,8000))
+                            "STS_58MM","Receipt",2283,8000))
                     .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
                     .setColorMode(android.print.PrintAttributes.COLOR_MODE_MONOCHROME)
                     .build();
 
-            pm.print("STS DigiKit - 58 mm Bill",adapter,attrs);
+            pm.print("STS DigiKit Bill",adapter,attrs);
         }catch(Exception e){
             Toast.makeText(this,L("Could not open print screen","Print screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
         }
@@ -2673,6 +2733,9 @@ public class MainActivity extends Activity {
     private void showQuickBill(){
         currentTool="BILL";
         shell(L("QUICK BILL","क्विक बिल"));
+
+        final String billNo="QB"+new java.text.SimpleDateFormat("ddHHmmss",java.util.Locale.US).format(new java.util.Date());
+        final String billDate=new java.text.SimpleDateFormat("dd/MM/yyyy, hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date());
 
         EditText customer=input(L("Customer Name","ग्राहक का नाम"));
         customer.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
@@ -2690,17 +2753,20 @@ public class MainActivity extends Activity {
         root.addView(rate);
         root.addView(gst);
 
-        TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),20,WHITE);
-        styleResult(out);
-        out.setGravity(Gravity.CENTER);
+        TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),15,WHITE);
+        out.setTypeface(android.graphics.Typeface.MONOSPACE);
+        out.setGravity(Gravity.TOP|Gravity.LEFT);
+        out.setTextIsSelectable(true);
+        out.setPadding(dp(14),dp(14),dp(14),dp(14));
+        out.setBackground(grad(PANEL2,Color.rgb(28,96,132),12));
         root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
 
         addHistoryShareBar(root,"bill",L("QUICK BILL","क्विक बिल"),out);
 
-        Button print=btn(L("PRINT - 58 mm THERMAL","PRINT - 58 mm THERMAL"));
+        Button print=btn(L("PRINT","PRINT"));
         root.addView(print,controlParams(60));
 
-        Runnable updateBill=()->out.setText(buildQuickBillPreview(customer,name,qty,rate,gst));
+        Runnable updateBill=()->out.setText(buildQuickBillPreview(customer,name,qty,rate,gst,billNo,billDate));
 
         android.text.TextWatcher watcher=new android.text.TextWatcher(){
             @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
@@ -2715,7 +2781,7 @@ public class MainActivity extends Activity {
         gst.addTextChangedListener(watcher);
 
         print.setOnClickListener(v->{
-            String bill=buildQuickBillPreview(customer,name,qty,rate,gst);
+            String bill=buildQuickBillPreview(customer,name,qty,rate,gst,billNo,billDate);
             out.setText(bill);
             if(meaningfulResult(bill)){
                 savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),bill);
@@ -2724,282 +2790,6 @@ public class MainActivity extends Activity {
         });
 
         updateBill.run();
-    }
-
-    private String scanParam(android.net.Uri uri,String key){
-        try{
-            String v=uri.getQueryParameter(key);
-            return v==null?"":v.trim();
-        }catch(Exception e){
-            return "";
-        }
-    }
-
-    private String parseWifiPart(String raw,String key){
-        try{
-            String body=raw.substring(5);
-            java.util.regex.Matcher m=java.util.regex.Pattern
-                    .compile("(?:^|;)"+java.util.regex.Pattern.quote(key)+":((?:\\\\.|[^;])*)")
-                    .matcher(body);
-            if(m.find()) return m.group(1).replace("\\;",";").replace("\\:"," : ").replace("\\\\","\\");
-        }catch(Exception ignored){}
-        return "";
-    }
-
-    private String scanDetails(String raw,com.google.zxing.BarcodeFormat format){
-        String value=raw==null?"":raw.trim();
-        StringBuilder b=new StringBuilder();
-        b.append(L("FORMAT: ","फॉर्मेट: ")).append(format==null?"UNKNOWN":format.toString()).append("\n");
-
-        try{
-            android.net.Uri uri=android.net.Uri.parse(value);
-            String scheme=uri.getScheme()==null?"":uri.getScheme().toLowerCase(java.util.Locale.US);
-
-            if("upi".equals(scheme)){
-                String pa=scanParam(uri,"pa");
-                String pn=scanParam(uri,"pn");
-                String am=scanParam(uri,"am");
-                String cu=scanParam(uri,"cu");
-                String tn=scanParam(uri,"tn");
-                String tr=scanParam(uri,"tr");
-                String mc=scanParam(uri,"mc");
-
-                b.append(L("TYPE: UPI PAYMENT QR","प्रकार: UPI PAYMENT QR")).append("\n");
-                if(!pn.isEmpty()) b.append(L("Name: ","नाम: ")).append(pn).append("\n");
-                if(!pa.isEmpty()) b.append("UPI ID: ").append(pa).append("\n");
-                if(!am.isEmpty()) b.append(L("Amount: ₹","राशि: ₹")).append(am).append("\n");
-                if(!cu.isEmpty()) b.append(L("Currency: ","मुद्रा: ")).append(cu).append("\n");
-                if(!tn.isEmpty()) b.append(L("Note: ","नोट: ")).append(tn).append("\n");
-                if(!tr.isEmpty()) b.append(L("Reference: ","रेफरेंस: ")).append(tr).append("\n");
-                if(!mc.isEmpty()) b.append(L("Merchant Category: ","मर्चेंट कैटेगरी: ")).append(mc).append("\n");
-            }else if(value.startsWith("WIFI:")){
-                b.append(L("TYPE: WI-FI QR","प्रकार: WI-FI QR")).append("\n");
-                String ssid=parseWifiPart(value,"S");
-                String type=parseWifiPart(value,"T");
-                String pass=parseWifiPart(value,"P");
-                if(!ssid.isEmpty()) b.append("SSID: ").append(ssid).append("\n");
-                if(!type.isEmpty()) b.append(L("Security: ","सिक्योरिटी: ")).append(type).append("\n");
-                if(!pass.isEmpty()) b.append(L("Password: ","पासवर्ड: ")).append(pass).append("\n");
-            }else if("http".equals(scheme) || "https".equals(scheme)){
-                b.append(L("TYPE: WEBSITE / URL","प्रकार: WEBSITE / URL")).append("\n");
-                b.append("URL: ").append(value).append("\n");
-            }else if("tel".equals(scheme)){
-                b.append(L("TYPE: PHONE NUMBER","प्रकार: फोन नंबर")).append("\n");
-                b.append(L("Number: ","नंबर: ")).append(uri.getSchemeSpecificPart()).append("\n");
-            }else if("mailto".equals(scheme)){
-                b.append(L("TYPE: EMAIL","प्रकार: ईमेल")).append("\n");
-                b.append("Email: ").append(uri.getSchemeSpecificPart()).append("\n");
-            }else if(format!=null && format!=com.google.zxing.BarcodeFormat.QR_CODE){
-                b.append(L("TYPE: BARCODE","प्रकार: BARCODE")).append("\n");
-                b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
-            }else{
-                b.append(L("TYPE: QR DATA","प्रकार: QR DATA")).append("\n");
-                b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
-            }
-        }catch(Exception e){
-            b.append(L("Value: ","वैल्यू: ")).append(value).append("\n");
-        }
-
-        b.append("\n").append(L("RAW DATA:","RAW DATA:")).append("\n").append(value);
-        return b.toString();
-    }
-
-    private String scannerWebLink(String value){
-        if(value==null) return "";
-        String s=value.trim();
-        if(s.matches("(?i)^https?://\\S+$")) return s;
-        if(s.matches("(?i)^www\\.\\S+$")) return "https://"+s;
-        try{
-            java.util.regex.Matcher m=java.util.regex.Pattern
-                    .compile("(?i)https?://[^\\s]+")
-                    .matcher(s);
-            if(m.find()) return m.group();
-        }catch(Exception ignored){}
-        return "";
-    }
-
-    private void renderScannerDetails(String details,String raw){
-        if(scannerViewport==null) return;
-
-        scannerViewport.removeAllViews();
-
-        ScrollView scroll=new ScrollView(this);
-        scroll.setFillViewport(true);
-        TextView result=tv("",19,WHITE);
-        result.setGravity(Gravity.CENTER);
-        result.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
-        result.setPadding(dp(18),dp(18),dp(18),dp(18));
-        result.setBackground(grad(PANEL,Color.rgb(23,52,88),0));
-
-        String link=scannerWebLink(raw);
-        if(link.isEmpty()){
-            result.setText(details);
-            result.setTextIsSelectable(true);
-        }else{
-            String label=details+"\n\n"+L("LINK: ","लिंक: ")+link;
-            android.text.SpannableString span=new android.text.SpannableString(label);
-            int pos=label.lastIndexOf(link);
-            if(pos>=0){
-                span.setSpan(new android.text.style.ClickableSpan(){
-                    @Override public void onClick(View widget){
-                        try{
-                            Intent open=new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(link));
-                            startActivity(open);
-                        }catch(Exception e){
-                            Toast.makeText(MainActivity.this,L("Browser could not open this link","Browser इस link को नहीं खोल सका"),Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                    @Override public void updateDrawState(android.text.TextPaint ds){
-                        super.updateDrawState(ds);
-                        ds.setColor(Color.rgb(40,145,255));
-                        ds.setUnderlineText(true);
-                    }
-                },pos,pos+link.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            result.setText(span);
-            result.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
-            result.setHighlightColor(Color.TRANSPARENT);
-        }
-
-        scannerDetails=result;
-        scroll.addView(result,new ScrollView.LayoutParams(-1,-1));
-        scannerViewport.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
-    }
-
-    private void handleScannerResult(String value,com.google.zxing.BarcodeFormat format){
-        if(value==null || value.trim().isEmpty()) return;
-
-        scannerResultLocked=true;
-        scannerActive=false;
-        try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
-
-        String details=scanDetails(value,format);
-        lastScannerRaw=value;
-        lastScannerDetails=details;
-
-        savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),details);
-        haptic();
-        renderScannerDetails(details,value);
-    }
-
-    private android.graphics.Bitmap loadGalleryBitmap(android.net.Uri uri) throws Exception{
-        android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options();
-        bounds.inJustDecodeBounds=true;
-
-        java.io.InputStream first=getContentResolver().openInputStream(uri);
-        if(first==null) throw new java.io.IOException("Image could not be opened");
-        android.graphics.BitmapFactory.decodeStream(first,null,bounds);
-        first.close();
-
-        int sample=1;
-        int max=Math.max(bounds.outWidth,bounds.outHeight);
-        while(max/sample>2200) sample*=2;
-
-        android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
-        opts.inSampleSize=Math.max(1,sample);
-        opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
-
-        java.io.InputStream in=getContentResolver().openInputStream(uri);
-        if(in==null) throw new java.io.IOException("Image could not be opened");
-        android.graphics.Bitmap bm=android.graphics.BitmapFactory.decodeStream(in,null,opts);
-        in.close();
-
-        if(bm==null) throw new java.io.IOException("Unsupported image");
-        return bm;
-    }
-
-    private com.google.zxing.Result decodeBitmapOnce(android.graphics.Bitmap bm) throws Exception{
-        int w=bm.getWidth(),h=bm.getHeight();
-        int[] pixels=new int[w*h];
-        bm.getPixels(pixels,0,w,0,0,w,h);
-
-        com.google.zxing.RGBLuminanceSource source=
-                new com.google.zxing.RGBLuminanceSource(w,h,pixels);
-
-        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> hints=
-                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
-        hints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
-        hints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
-        hints.put(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS,
-                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class));
-
-        com.google.zxing.MultiFormatReader reader=new com.google.zxing.MultiFormatReader();
-        reader.setHints(hints);
-
-        try{
-            return reader.decodeWithState(new com.google.zxing.BinaryBitmap(
-                    new com.google.zxing.common.HybridBinarizer(source)));
-        }catch(Exception first){
-            reader.reset();
-            com.google.zxing.LuminanceSource inv=source.invert();
-            return reader.decode(new com.google.zxing.BinaryBitmap(
-                    new com.google.zxing.common.HybridBinarizer(inv)),hints);
-        }
-    }
-
-    private com.google.zxing.Result decodeGalleryImage(android.graphics.Bitmap original) throws Exception{
-        Exception last=null;
-        android.graphics.Bitmap current=original;
-
-        for(int i=0;i<4;i++){
-            try{
-                return decodeBitmapOnce(current);
-            }catch(Exception e){
-                last=e;
-            }
-
-            if(i<3){
-                android.graphics.Matrix m=new android.graphics.Matrix();
-                m.postRotate(90);
-                android.graphics.Bitmap rotated=android.graphics.Bitmap.createBitmap(
-                        current,0,0,current.getWidth(),current.getHeight(),m,true);
-                if(current!=original && current!=rotated) current.recycle();
-                current=rotated;
-            }
-        }
-
-        if(current!=original){
-            try{current.recycle();}catch(Exception ignored){}
-        }
-        if(last!=null) throw last;
-        throw com.google.zxing.NotFoundException.getNotFoundInstance();
-    }
-
-    private void pickScannerImageFromGallery(){
-        try{
-            Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            pick.addCategory(Intent.CATEGORY_OPENABLE);
-            pick.setType("image/*");
-            startActivityForResult(pick,REQ_GALLERY_SCAN);
-        }catch(Exception e){
-            if(scannerDetails!=null){
-                scannerDetails.setText(L("Gallery could not be opened.","Gallery नहीं खुल सकी।"));
-            }
-        }
-    }
-
-    private void configureEmbeddedScanner(){
-        if(embeddedScanner==null) return;
-
-        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> scanHints=
-                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
-        scanHints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
-        scanHints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
-
-        java.util.Collection<com.google.zxing.BarcodeFormat> allFormats=
-                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class);
-
-        embeddedScanner.getBarcodeView().setDecoderFactory(
-                new com.journeyapps.barcodescanner.DefaultDecoderFactory(
-                        allFormats,scanHints,"UTF-8",2));
-
-        embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
-            @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
-                if(result==null || result.getText()==null || scannerResultLocked) return;
-                handleScannerResult(result.getText(),result.getBarcodeFormat());
-            }
-            @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
-        });
     }
 
     private void showScannerCameraInViewport(){
