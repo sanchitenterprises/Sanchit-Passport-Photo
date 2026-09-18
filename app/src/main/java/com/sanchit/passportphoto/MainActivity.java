@@ -1024,6 +1024,126 @@ public class MainActivity extends Activity {
         setContentView(outer);
     }
 
+    private boolean meaningfulResult(String s){
+        if(s==null) return false;
+        String x=s.trim();
+        if(x.isEmpty() || "0".equals(x)) return false;
+        String l=x.toLowerCase(java.util.Locale.US);
+        return !(l.startsWith("select ") || l.startsWith("enter ") || l.equals("error"));
+    }
+
+    private String panelHistoryKey(String key){
+        return "panel_history_"+key;
+    }
+
+    private void savePanelHistory(String key,String title,String content){
+        if(!meaningfulResult(content)) return;
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String pref=panelHistoryKey(key);
+        String old=sp.getString(pref,"");
+        String stamp=new java.text.SimpleDateFormat("dd/MM/yyyy hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date());
+        String raw=stamp+"\n"+title+"\n"+content.trim();
+        String payload=android.util.Base64.encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8),android.util.Base64.NO_WRAP);
+
+        if(old!=null && !old.isEmpty()){
+            String[] top=old.split("\\u001e",-1);
+            if(top.length>0 && top[0].equals(payload)) return;
+        }
+
+        String merged=(old==null||old.isEmpty())?payload:payload+"\u001e"+old;
+        String[] rows=merged.split("\\u001e",-1);
+        StringBuilder keep=new StringBuilder();
+        for(int i=0;i<rows.length && i<30;i++){
+            if(i>0) keep.append("\u001e");
+            keep.append(rows[i]);
+        }
+        sp.edit().putString(pref,keep.toString()).apply();
+    }
+
+    private void showPanelHistory(String key,String title){
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String raw=sp.getString(panelHistoryKey(key),"");
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8),dp(8),dp(8),dp(8));
+        box.setBackgroundColor(BG);
+
+        ScrollView sc=new ScrollView(this);
+        TextView content=tv("",16,WHITE);
+        content.setGravity(Gravity.LEFT|Gravity.TOP);
+        content.setTextIsSelectable(true);
+        content.setBackground(bg(PANEL,10));
+
+        if(raw==null || raw.isEmpty()){
+            content.setText(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"));
+        }else{
+            StringBuilder out=new StringBuilder();
+            String[] rows=raw.split("\\u001e",-1);
+            for(String row:rows){
+                try{
+                    String item=new String(android.util.Base64.decode(row,android.util.Base64.NO_WRAP),java.nio.charset.StandardCharsets.UTF_8);
+                    if(out.length()>0) out.append("\n\n--------------------\n\n");
+                    out.append(item);
+                }catch(Exception ignored){}
+            }
+            content.setText(out.toString());
+        }
+
+        sc.addView(content,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(430)));
+
+        AlertDialog dialog=new AlertDialog.Builder(this)
+                .setTitle(title+" - "+L("HISTORY","हिस्ट्री"))
+                .setView(box)
+                .setPositiveButton(L("CLOSE","बंद करें"),null)
+                .setNegativeButton(L("CLEAR HISTORY","हिस्ट्री साफ करें"),null)
+                .create();
+        dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
+            sp.edit().remove(panelHistoryKey(key)).apply();
+            content.setText(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"));
+        }));
+        dialog.show();
+    }
+
+    private void sharePanelText(String title,String content){
+        if(!meaningfulResult(content)){
+            Toast.makeText(this,L("Nothing to share yet","अभी शेयर करने के लिए कोई परिणाम नहीं है"),Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Intent send=new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT,title);
+        send.putExtra(Intent.EXTRA_TEXT,title+"\n\n"+content.trim());
+        try{
+            startActivity(Intent.createChooser(send,L("Share Result","परिणाम शेयर करें")));
+        }catch(Exception e){
+            Toast.makeText(this,L("No sharing app found","शेयर करने वाला ऐप नहीं मिला"),Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private LinearLayout addHistoryShareBar(LinearLayout parent,String key,String title,TextView result){
+        LinearLayout bar=new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        Button history=btn(L("HISTORY","हिस्ट्री"));
+        Button share=btn(L("SHARE","शेयर"));
+        bar.addView(history,new LinearLayout.LayoutParams(0,dp(50),1));
+        bar.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
+        parent.addView(bar,controlParams(52));
+
+        history.setOnClickListener(v->{
+            String value=result==null?"":result.getText().toString();
+            if(meaningfulResult(value)) savePanelHistory(key,title,value);
+            showPanelHistory(key,title);
+        });
+        share.setOnClickListener(v->{
+            String value=result==null?"":result.getText().toString();
+            if(meaningfulResult(value)) savePanelHistory(key,title,value);
+            sharePanelText(title,value);
+        });
+        return bar;
+    }
+
     private void showAge(){
         currentTool="AGE"; shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
         final Calendar dob=Calendar.getInstance(), asof=Calendar.getInstance();
