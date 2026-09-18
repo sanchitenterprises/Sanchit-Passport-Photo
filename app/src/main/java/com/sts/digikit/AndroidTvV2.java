@@ -1,8 +1,8 @@
 package com.sts.digikit;
 
 import android.content.Context;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
+import android.content.SharedPreferences;
+import android.util.Base64;
 import android.util.Log;
 
 import com.google.polo.wire.protobuf.PoloProto;
@@ -13,14 +13,17 @@ import java.io.OutputStream;
 import java.math.BigInteger;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.security.KeyFactory;
+import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.Principal;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
@@ -35,9 +38,22 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509ExtendedKeyManager;
 import javax.net.ssl.X509TrustManager;
 
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+
 public class AndroidTvV2 {
     private static final String TAG="STS-AndroidTV";
     private static final String KEY_ALIAS="sts_digikit_android_tv_remote";
+    private static final String ID_PREFS="sts_android_tv_identity_v2";
+    private static final String ID_CERT="client_cert_der";
+    private static final String ID_KEY="client_key_pkcs8";
     private static final int PAIR_PORT=6467;
     private static final int REMOTE_PORT=6466;
     private static final int REQUESTED_FEATURES=1|2|32|64|512;
@@ -88,42 +104,69 @@ public class AndroidTvV2 {
         @Override public String chooseEngineServerAlias(String keyType,Principal[] issuers,SSLEngine engine){return null;}
     }
 
-    private synchronized void ensureIdentity() throws Exception{
-        KeyStore ks=KeyStore.getInstance("AndroidKeyStore");
-        ks.load(null);
-        if(!ks.containsAlias(KEY_ALIAS)){
-            KeyPairGenerator gen=KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA,"AndroidKeyStore");
-            Date start=new Date(System.currentTimeMillis()-86400000L);
-            Date end=new Date(System.currentTimeMillis()+10L*365L*86400000L);
-            KeyGenParameterSpec spec=new KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_SIGN|KeyProperties.PURPOSE_VERIFY)
-                    .setKeySize(2048)
-                    .setDigests(KeyProperties.DIGEST_SHA256,KeyProperties.DIGEST_SHA512)
-                    .setSignaturePaddings(KeyProperties.SIGNATURE_PADDING_RSA_PKCS1)
-                    .setCertificateSubject(new javax.security.auth.x500.X500Principal("CN=STS DigiKit"))
-                    .setCertificateSerialNumber(new BigInteger(64,new SecureRandom()).abs().add(BigInteger.ONE))
-                    .setCertificateNotBefore(start)
-                    .setCertificateNotAfter(end)
-                    .build();
-            gen.initialize(spec);
-            gen.generateKeyPair();
-        }
+    private static class Identity {
+        final PrivateKey key;
+        final X509Certificate cert;
+        Identity(PrivateKey key,X509Certificate cert){this.key=key;this.cert=cert;}
     }
 
-    private KeyStore.PrivateKeyEntry identity() throws Exception{
-        ensureIdentity();
-        KeyStore ks=KeyStore.getInstance("AndroidKeyStore");
-        ks.load(null);
-        KeyStore.Entry e=ks.getEntry(KEY_ALIAS,null);
-        if(!(e instanceof KeyStore.PrivateKeyEntry)) throw new IllegalStateException("TV identity unavailable");
-        return (KeyStore.PrivateKeyEntry)e;
+    private volatile Identity cachedIdentity;
+
+    private synchronized Identity identity() throws Exception{
+        if(cachedIdentity!=null) return cachedIdentity;
+
+        SharedPreferences sp=context.getSharedPreferences(ID_PREFS,Context.MODE_PRIVATE);
+        String certB64=sp.getString(ID_CERT,"");
+        String keyB64=sp.getString(ID_KEY,"");
+
+        if(!certB64.isEmpty() && !keyB64.isEmpty()){
+            try{
+                byte[] certBytes=Base64.decode(certB64,Base64.NO_WRAP);
+                byte[] keyBytes=Base64.decode(keyB64,Base64.NO_WRAP);
+                CertificateFactory cf=CertificateFactory.getInstance("X.509");
+                X509Certificate cert=(X509Certificate)cf.generateCertificate(new java.io.ByteArrayInputStream(certBytes));
+                PrivateKey key=KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(keyBytes));
+                cert.checkValidity();
+                cachedIdentity=new Identity(key,cert);
+                return cachedIdentity;
+            }catch(Exception e){
+                sp.edit().clear().apply();
+            }
+        }
+
+        KeyPairGenerator gen=KeyPairGenerator.getInstance("RSA");
+        gen.initialize(2048,new SecureRandom());
+        KeyPair kp=gen.generateKeyPair();
+
+        long now=System.currentTimeMillis();
+        Date notBefore=new Date(now-86400000L);
+        Date notAfter=new Date(now+10L*365L*86400000L);
+        X500Name subject=new X500Name("CN=STS DigiKit");
+        BigInteger serial=new BigInteger(64,new SecureRandom()).abs().add(BigInteger.ONE);
+
+        JcaX509v3CertificateBuilder builder=new JcaX509v3CertificateBuilder(
+                subject,serial,notBefore,notAfter,subject,kp.getPublic());
+        builder.addExtension(Extension.basicConstraints,false,new BasicConstraints(true));
+        builder.addExtension(Extension.subjectAlternativeName,false,
+                new GeneralNames(new GeneralName(GeneralName.dNSName,"sts-digikit")));
+
+        ContentSigner signer=new JcaContentSignerBuilder("SHA256withRSA").build(kp.getPrivate());
+        X509Certificate cert=new JcaX509CertificateConverter().getCertificate(builder.build(signer));
+        cert.checkValidity();
+        cert.verify(kp.getPublic());
+
+        sp.edit()
+                .putString(ID_CERT,Base64.encodeToString(cert.getEncoded(),Base64.NO_WRAP))
+                .putString(ID_KEY,Base64.encodeToString(kp.getPrivate().getEncoded(),Base64.NO_WRAP))
+                .apply();
+
+        cachedIdentity=new Identity(kp.getPrivate(),cert);
+        return cachedIdentity;
     }
 
     private SSLContext sslContext() throws Exception{
-        KeyStore.PrivateKeyEntry e=identity();
-        X509Certificate cert=(X509Certificate)e.getCertificate();
-        KeyManager km=new SingleKeyManager(KEY_ALIAS,e.getPrivateKey(),cert);
+        Identity id=identity();
+        KeyManager km=new SingleKeyManager(KEY_ALIAS,id.key,id.cert);
         SSLContext ctx=SSLContext.getInstance("TLS");
         ctx.init(new KeyManager[]{km},new TrustManager[]{new TrustAll()},new SecureRandom());
         return ctx;
@@ -131,13 +174,25 @@ public class AndroidTvV2 {
 
     private SSLSocket openTls(String ip,int port,int timeout) throws Exception{
         Socket plain=new Socket();
-        plain.connect(new InetSocketAddress(ip,port),timeout);
-        SSLSocketFactory factory=sslContext().getSocketFactory();
-        SSLSocket ssl=(SSLSocket)factory.createSocket(plain,ip,port,true);
-        ssl.setUseClientMode(true);
-        ssl.setSoTimeout(timeout);
-        ssl.startHandshake();
-        return ssl;
+        try{
+            plain.connect(new InetSocketAddress(ip,port),timeout);
+            SSLSocketFactory factory=sslContext().getSocketFactory();
+            SSLSocket ssl=(SSLSocket)factory.createSocket(plain,ip,port,true);
+            ssl.setUseClientMode(true);
+            ssl.setSoTimeout(timeout);
+
+            java.util.ArrayList<String> allowed=new java.util.ArrayList<>();
+            for(String p:ssl.getSupportedProtocols()){
+                if("TLSv1.2".equals(p) || "TLSv1.3".equals(p)) allowed.add(p);
+            }
+            if(!allowed.isEmpty()) ssl.setEnabledProtocols(allowed.toArray(new String[0]));
+
+            ssl.startHandshake();
+            return ssl;
+        }catch(Exception e){
+            try{plain.close();}catch(Exception ignored){}
+            throw new java.io.IOException("TLS "+ip+":"+port+" - "+e.getClass().getSimpleName()+": "+e.getMessage(),e);
+        }
     }
 
     private PoloProto.OuterMessage basePolo(){
@@ -164,7 +219,11 @@ public class AndroidTvV2 {
         closePairing();
         pairingIp=ip;
 
-        pairingSocket=openTls(ip,PAIR_PORT,10000);
+        try{
+            pairingSocket=openTls(ip,PAIR_PORT,10000);
+        }catch(Exception e){
+            throw new java.io.IOException("Android TV pairing port 6467 failed: "+e.getMessage(),e);
+        }
         X509Certificate[] peer=(X509Certificate[])pairingSocket.getSession().getPeerCertificates();
         if(peer.length==0) throw new SecurityException("TV certificate missing");
         pairingServerCert=peer[0];
@@ -179,7 +238,12 @@ public class AndroidTvV2 {
         m.writeDelimitedTo(pairingOut);
         pairingOut.flush();
 
-        PoloProto.OuterMessage ack=PoloProto.OuterMessage.parseDelimitedFrom(pairingIn);
+        PoloProto.OuterMessage ack;
+        try{
+            ack=PoloProto.OuterMessage.parseDelimitedFrom(pairingIn);
+        }catch(Exception e){
+            throw new java.io.IOException("TV did not answer pairing request: "+e.getMessage(),e);
+        }
         validatePolo(ack);
         if(!ack.hasPairingRequestAck()) throw new SecurityException("Unexpected TV pairing response");
 
@@ -239,7 +303,7 @@ public class AndroidTvV2 {
             throw new IllegalArgumentException("TV code must be 6 hexadecimal characters");
         }
 
-        X509Certificate clientCert=(X509Certificate)identity().getCertificate();
+        X509Certificate clientCert=identity().cert;
         if(!(clientCert.getPublicKey() instanceof RSAPublicKey) || !(pairingServerCert.getPublicKey() instanceof RSAPublicKey)){
             throw new SecurityException("TV pairing requires RSA certificates");
         }
