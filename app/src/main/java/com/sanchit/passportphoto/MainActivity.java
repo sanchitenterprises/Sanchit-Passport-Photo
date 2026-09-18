@@ -115,21 +115,138 @@ public class MainActivity extends Activity {
         openTool(currentTool);
     }
 
-    private String currentToolName(){
-        if("CASH_COUNTER".equals(currentTool)) return L("CASH COUNTER","कैश काउंटर");
-        if("AGE".equals(currentTool)) return L("AGE CALCULATOR","आयु कैलकुलेटर");
-        if("SAVINGS".equals(currentTool)) return L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर");
-        if("EMI".equals(currentTool)) return L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर");
-        if("WORDS".equals(currentTool)) return L("NUMBER TO WORDS","संख्या शब्दों में");
-        if("QR".equals(currentTool)) return L("QR CODE GENERATOR","QR कोड जनरेटर");
-        if("GST".equals(currentTool)) return L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर");
-        if("WIFI_QR".equals(currentTool)) return L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर");
-        if("REMOTE".equals(currentTool)) return L("REMOTE","रिमोट");
-        if("UNIT".equals(currentTool)) return L("UNIT CONVERTER","यूनिट कन्वर्टर");
-        if("SPEED".equals(currentTool)) return L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट");
-        if("BILL".equals(currentTool)) return L("QUICK BILL","क्विक बिल");
-        if("SCAN".equals(currentTool)) return L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर");
+    private String toolName(String key){
+        if("CASH_COUNTER".equals(key)) return L("CASH COUNTER","कैश काउंटर");
+        if("AGE".equals(key)) return L("AGE CALCULATOR","आयु कैलकुलेटर");
+        if("SAVINGS".equals(key)) return L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर");
+        if("EMI".equals(key)) return L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर");
+        if("WORDS".equals(key)) return L("NUMBER TO WORDS","संख्या शब्दों में");
+        if("QR".equals(key)) return L("QR CODE GENERATOR","QR कोड जनरेटर");
+        if("GST".equals(key)) return L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर");
+        if("WIFI_QR".equals(key)) return L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर");
+        if("REMOTE".equals(key)) return L("REMOTE","रिमोट");
+        if("UNIT".equals(key)) return L("UNIT CONVERTER","यूनिट कन्वर्टर");
+        if("SPEED".equals(key)) return L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट");
+        if("BILL".equals(key)) return L("QUICK BILL","क्विक बिल");
+        if("SCAN".equals(key)) return L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर");
         return L("CALCULATOR","कैलकुलेटर");
+    }
+
+    private String currentToolName(){
+        return toolName(currentTool);
+    }
+
+    private String[] defaultToolOrder(){
+        return new String[]{"CALCULATOR","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","GST","WIFI_QR","REMOTE","UNIT","SPEED","BILL","SCAN"};
+    }
+
+    private String[] getToolOrder(){
+        String saved=getSharedPreferences("sts",0).getString("toolOrder","");
+        String[] def=defaultToolOrder();
+        if(saved==null || saved.trim().isEmpty()) return def;
+        String[] arr=saved.split(",");
+        if(arr.length!=def.length) return def;
+        java.util.HashSet<String> valid=new java.util.HashSet<>();
+        for(String x:def) valid.add(x);
+        java.util.HashSet<String> seen=new java.util.HashSet<>();
+        for(String x:arr) if(!valid.contains(x) || !seen.add(x)) return def;
+        return arr;
+    }
+
+    private void saveToolOrder(String[] order){
+        StringBuilder b=new StringBuilder();
+        for(int i=0;i<order.length;i++){
+            if(i>0)b.append(",");
+            b.append(order[i]);
+        }
+        getSharedPreferences("sts",0).edit().putString("toolOrder",b.toString()).apply();
+    }
+
+    private void showOrderEditor(){
+        final String[] order=getToolOrder();
+        final int[] selected={0};
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(12),dp(10),dp(12),dp(10));
+        box.setBackgroundColor(BG);
+
+        TextView help=tv(L("Select an item, then move it UP or DOWN.","आइटम चुनें, फिर उसे ऊपर या नीचे करें।"),16,SOFT);
+        box.addView(help,new LinearLayout.LayoutParams(-1,dp(58)));
+
+        ListView list=new ListView(this);
+        list.setChoiceMode(ListView.CHOICE_MODE_SINGLE);
+        list.setDividerHeight(1);
+
+        java.util.ArrayList<String> names=new java.util.ArrayList<>();
+        for(String key:order) names.add(toolName(key));
+        ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_list_item_single_choice,names){
+            @Override public View getView(int pos,View convert,android.view.ViewGroup parent){
+                TextView t=(TextView)super.getView(pos,convert,parent);
+                t.setTextColor(WHITE);
+                t.setTextSize(17);
+                t.setBackgroundColor(PANEL);
+                t.setPadding(dp(12),dp(10),dp(12),dp(10));
+                return t;
+            }
+        };
+        list.setAdapter(adapter);
+        list.setItemChecked(0,true);
+        list.setOnItemClickListener((p,v,pos,id)->selected[0]=pos);
+        box.addView(list,new LinearLayout.LayoutParams(-1,0,1));
+
+        LinearLayout controls=new LinearLayout(this);
+        Button up=btn("▲  "+L("UP","ऊपर"));
+        Button down=btn("▼  "+L("DOWN","नीचे"));
+        controls.addView(up,new LinearLayout.LayoutParams(0,dp(58),1));
+        controls.addView(down,new LinearLayout.LayoutParams(0,dp(58),1));
+        box.addView(controls,new LinearLayout.LayoutParams(-1,dp(58)));
+
+        AlertDialog dialog=new AlertDialog.Builder(this)
+                .setTitle(L("DROPDOWN LIST ORDER","ड्रॉपडाउन लिस्ट क्रम"))
+                .setView(box)
+                .setPositiveButton(L("DONE","पूरा"),null)
+                .setNeutralButton(L("RESET","रीसेट"),null)
+                .create();
+
+        Runnable refresh=()->{
+            names.clear();
+            for(String key:order) names.add(toolName(key));
+            adapter.notifyDataSetChanged();
+            list.setItemChecked(selected[0],true);
+            list.smoothScrollToPosition(selected[0]);
+        };
+
+        up.setOnClickListener(v->{
+            int i=selected[0];
+            if(i<=0)return;
+            String t=order[i-1]; order[i-1]=order[i]; order[i]=t;
+            selected[0]=i-1;
+            saveToolOrder(order);
+            refresh.run();
+            haptic();
+        });
+
+        down.setOnClickListener(v->{
+            int i=selected[0];
+            if(i>=order.length-1)return;
+            String t=order[i+1]; order[i+1]=order[i]; order[i]=t;
+            selected[0]=i+1;
+            saveToolOrder(order);
+            refresh.run();
+            haptic();
+        });
+
+        dialog.setOnShowListener(x->{
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+                String[] def=defaultToolOrder();
+                for(int i=0;i<order.length;i++)order[i]=def[i];
+                selected[0]=0;
+                saveToolOrder(order);
+                refresh.run();
+            });
+        });
+        dialog.show();
     }
 
     private ScrollView shell(String name){
@@ -214,20 +331,10 @@ public class MainActivity extends Activity {
         tools.setOrientation(LinearLayout.VERTICAL);
         tools.setBackgroundColor(BG);
 
-        addMenu(tools,L("CALCULATOR","कैलकुलेटर"),()->{toolPickerOpen=false;openTool("CALCULATOR");});
-        addMenu(tools,L("CASH COUNTER","कैश काउंटर"),()->{toolPickerOpen=false;openTool("CASH_COUNTER");});
-        addMenu(tools,L("AGE CALCULATOR","आयु कैलकुलेटर"),()->{toolPickerOpen=false;openTool("AGE");});
-        addMenu(tools,L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"),()->{toolPickerOpen=false;openTool("SAVINGS");});
-        addMenu(tools,L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"),()->{toolPickerOpen=false;openTool("EMI");});
-        addMenu(tools,L("NUMBER TO WORDS","संख्या शब्दों में"),()->{toolPickerOpen=false;openTool("WORDS");});
-        addMenu(tools,L("QR CODE GENERATOR","QR कोड जनरेटर"),()->{toolPickerOpen=false;openTool("QR");});
-        addMenu(tools,L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"),()->{toolPickerOpen=false;openTool("GST");});
-        addMenu(tools,L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"),()->{toolPickerOpen=false;openTool("WIFI_QR");});
-        addMenu(tools,L("REMOTE","रिमोट"),()->{toolPickerOpen=false;openTool("REMOTE");});
-        addMenu(tools,L("UNIT CONVERTER","यूनिट कन्वर्टर"),()->{toolPickerOpen=false;openTool("UNIT");});
-        addMenu(tools,L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),()->{toolPickerOpen=false;openTool("SPEED");});
-        addMenu(tools,L("QUICK BILL","क्विक बिल"),()->{toolPickerOpen=false;openTool("BILL");});
-        addMenu(tools,L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),()->{toolPickerOpen=false;openTool("SCAN");});
+        for(String key:getToolOrder()){
+            final String k=key;
+            addMenu(tools,toolName(k),()->{toolPickerOpen=false;openTool(k);});
+        }
 
         listScroll.addView(tools,new ScrollView.LayoutParams(-1,-2));
         outer.addView(listScroll,new LinearLayout.LayoutParams(-1,0,1));
@@ -252,6 +359,7 @@ public class MainActivity extends Activity {
     private void showTopMenu(View anchor){
         PopupMenu p=new PopupMenu(this,anchor);
         p.getMenu().add(L("LANGUAGE","भाषा"));
+        p.getMenu().add(L("DROPDOWN LIST ORDER","ड्रॉपडाउन लिस्ट क्रम"));
         p.getMenu().add(L("ABOUT","ऐप के बारे में"));
         p.setOnMenuItemClickListener(item->{
             String s=item.getTitle().toString();
@@ -273,12 +381,17 @@ public class MainActivity extends Activity {
                 return true;
             }
 
+            if(s.equals(L("DROPDOWN LIST ORDER","ड्रॉपडाउन लिस्ट क्रम"))){
+                showOrderEditor();
+                return true;
+            }
+
             if(s.equals(L("ABOUT","ऐप के बारे में"))){
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.10\nOffline utility toolkit\nTap the current tool name to open the full-screen list, then swipe the list up or down.",
-                                "संस्करण 1.0.10\nऑफलाइन यूटिलिटी टूलकिट\nपूरी लिस्ट खोलने के लिए ऊपर के टूल नाम पर टैप करें, फिर लिस्ट को उंगली से ऊपर-नीचे स्क्रॉल करें।"))
+                                "Version 1.0.11\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.11\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -308,7 +421,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.10\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.11\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
     }
 
