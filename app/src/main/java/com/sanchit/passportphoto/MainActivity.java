@@ -484,8 +484,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.19\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.19\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.20\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.20\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -515,7 +515,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.19\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.20\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2044,85 +2044,130 @@ public class MainActivity extends Activity {
     }
 
     private double speedDownload(java.util.function.Consumer<Double> live) throws Exception{
-        java.net.HttpURLConnection con=null;
-        long bytes=0;
-        long st=System.nanoTime();
-        try{
-            java.net.URL url=new java.net.URL("https://speed.cloudflare.com/__down?bytes=15000000&cache="+System.nanoTime());
-            con=(java.net.HttpURLConnection)url.openConnection();
-            con.setConnectTimeout(7000);
-            con.setReadTimeout(15000);
-            con.setUseCaches(false);
-            con.setRequestProperty("Cache-Control","no-cache");
-            con.setRequestProperty("Accept-Encoding","identity");
-            java.io.InputStream in=new java.io.BufferedInputStream(con.getInputStream(),65536);
-            byte[] buf=new byte[65536];
-            int n;
-            long last=st;
-            while((n=in.read(buf))!=-1){
-                bytes+=n;
-                long now=System.nanoTime();
-                if(now-last>250000000L){
-                    double sec=(now-st)/1_000_000_000.0;
-                    double mbps=sec<=0?0:(bytes*8.0/1_000_000.0)/sec;
-                    live.accept(mbps);
-                    last=now;
+        int[] sizes={10000000,5000000,2000000,1000000};
+        Exception last=null;
+
+        for(int bytesWanted:sizes){
+            java.net.HttpURLConnection con=null;
+            long bytes=0;
+            long st=System.nanoTime();
+            try{
+                java.net.URL url=new java.net.URL("https://speed.cloudflare.com/__down?bytes="+bytesWanted+"&cache="+System.nanoTime());
+                con=(java.net.HttpURLConnection)url.openConnection();
+                con.setConnectTimeout(8000);
+                con.setReadTimeout(18000);
+                con.setUseCaches(false);
+                con.setInstanceFollowRedirects(true);
+                con.setRequestProperty("Cache-Control","no-cache");
+                con.setRequestProperty("Pragma","no-cache");
+                con.setRequestProperty("Accept","*/*");
+                con.setRequestProperty("Accept-Encoding","identity");
+                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) STS-DigiKit/1.0.20");
+                con.setRequestProperty("Referer","https://speed.cloudflare.com/");
+                con.setRequestProperty("Origin","https://speed.cloudflare.com");
+
+                int code=con.getResponseCode();
+                if(code<200 || code>=400) throw new java.io.IOException("HTTP "+code);
+
+                java.io.InputStream in=new java.io.BufferedInputStream(con.getInputStream(),65536);
+                byte[] buf=new byte[65536];
+                int n;
+                long lastUpdate=st;
+
+                while((n=in.read(buf))!=-1){
+                    bytes+=n;
+                    long now=System.nanoTime();
+                    if(now-lastUpdate>220000000L){
+                        double sec=(now-st)/1_000_000_000.0;
+                        double mbps=sec<=0?0:(bytes*8.0/1_000_000.0)/sec;
+                        live.accept(mbps);
+                        lastUpdate=now;
+                    }
                 }
+                in.close();
+
+                double sec=(System.nanoTime()-st)/1_000_000_000.0;
+                double mbps=sec<=0?0:(bytes*8.0/1_000_000.0)/sec;
+                if(bytes>0 && mbps>0) return mbps;
+                throw new java.io.IOException("No download data");
+            }catch(Exception e){
+                last=e;
+            }finally{
+                if(con!=null) con.disconnect();
             }
-            in.close();
-        }finally{
-            if(con!=null) con.disconnect();
         }
-        double sec=(System.nanoTime()-st)/1_000_000_000.0;
-        return sec<=0?0:(bytes*8.0/1_000_000.0)/sec;
+
+        if(last!=null) throw last;
+        throw new java.io.IOException("Download test failed");
     }
 
     private double speedUpload(java.util.function.Consumer<Double> live) throws Exception{
-        java.net.HttpURLConnection con=null;
-        final int totalBytes=5000000;
-        long sent=0;
-        long st=System.nanoTime();
-        try{
-            java.net.URL url=new java.net.URL("https://speed.cloudflare.com/__up");
-            con=(java.net.HttpURLConnection)url.openConnection();
-            con.setConnectTimeout(7000);
-            con.setReadTimeout(15000);
-            con.setDoOutput(true);
-            con.setRequestMethod("POST");
-            con.setUseCaches(false);
-            con.setRequestProperty("Content-Type","application/octet-stream");
-            con.setFixedLengthStreamingMode(totalBytes);
+        int[] sizes={3000000,1500000,750000};
+        Exception last=null;
 
-            java.io.OutputStream out=new java.io.BufferedOutputStream(con.getOutputStream(),65536);
-            byte[] buf=new byte[32768];
-            new java.security.SecureRandom().nextBytes(buf);
-            long last=st;
-            while(sent<totalBytes){
-                int n=(int)Math.min(buf.length,totalBytes-sent);
-                out.write(buf,0,n);
-                sent+=n;
-                long now=System.nanoTime();
-                if(now-last>250000000L){
-                    double sec=(now-st)/1_000_000_000.0;
-                    double mbps=sec<=0?0:(sent*8.0/1_000_000.0)/sec;
-                    live.accept(mbps);
-                    last=now;
+        for(int totalBytes:sizes){
+            java.net.HttpURLConnection con=null;
+            long sent=0;
+            long st=System.nanoTime();
+            try{
+                java.net.URL url=new java.net.URL("https://speed.cloudflare.com/__up");
+                con=(java.net.HttpURLConnection)url.openConnection();
+                con.setConnectTimeout(8000);
+                con.setReadTimeout(18000);
+                con.setDoOutput(true);
+                con.setRequestMethod("POST");
+                con.setUseCaches(false);
+                con.setInstanceFollowRedirects(true);
+                con.setRequestProperty("Content-Type","application/octet-stream");
+                con.setRequestProperty("Accept","*/*");
+                con.setRequestProperty("Cache-Control","no-cache");
+                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) STS-DigiKit/1.0.20");
+                con.setRequestProperty("Referer","https://speed.cloudflare.com/");
+                con.setRequestProperty("Origin","https://speed.cloudflare.com");
+                con.setFixedLengthStreamingMode(totalBytes);
+
+                java.io.OutputStream out=new java.io.BufferedOutputStream(con.getOutputStream(),65536);
+                byte[] buf=new byte[32768];
+                new java.security.SecureRandom().nextBytes(buf);
+                long lastUpdate=st;
+
+                while(sent<totalBytes){
+                    int n=(int)Math.min(buf.length,totalBytes-sent);
+                    out.write(buf,0,n);
+                    sent+=n;
+                    long now=System.nanoTime();
+                    if(now-lastUpdate>220000000L){
+                        double sec=(now-st)/1_000_000_000.0;
+                        double mbps=sec<=0?0:(sent*8.0/1_000_000.0)/sec;
+                        live.accept(mbps);
+                        lastUpdate=now;
+                    }
                 }
-            }
-            out.flush();
-            out.close();
+                out.flush();
+                out.close();
 
-            java.io.InputStream in=(con.getResponseCode()>=400)?con.getErrorStream():con.getInputStream();
-            if(in!=null){
-                byte[] drain=new byte[1024];
-                while(in.read(drain)>0){}
-                in.close();
+                int code=con.getResponseCode();
+                java.io.InputStream in=(code>=400)?con.getErrorStream():con.getInputStream();
+                if(in!=null){
+                    byte[] drain=new byte[1024];
+                    while(in.read(drain)>0){}
+                    in.close();
+                }
+                if(code<200 || code>=400) throw new java.io.IOException("HTTP "+code);
+
+                double sec=(System.nanoTime()-st)/1_000_000_000.0;
+                double mbps=sec<=0?0:(sent*8.0/1_000_000.0)/sec;
+                if(sent>0 && mbps>0) return mbps;
+                throw new java.io.IOException("No upload data");
+            }catch(Exception e){
+                last=e;
+            }finally{
+                if(con!=null) con.disconnect();
             }
-        }finally{
-            if(con!=null) con.disconnect();
         }
-        double sec=(System.nanoTime()-st)/1_000_000_000.0;
-        return sec<=0?0:(sent*8.0/1_000_000.0)/sec;
+
+        if(last!=null) throw last;
+        throw new java.io.IOException("Upload test failed");
     }
 
     private void openSpeedTest(){
@@ -2174,55 +2219,80 @@ public class MainActivity extends Activity {
 
             new Thread(()->{
                 double pms=0,dm=0,um=0;
-                String error=null;
+                String pingError=null,downloadError=null,uploadError=null;
+
                 try{
                     pms=speedPing();
-                    final double fp=pms;
-                    runOnUiThread(()->{
-                        ping.setText("PING\n"+new DecimalFormat("0").format(fp)+" ms");
-                        status.setText(L("Testing download speed...","डाउनलोड स्पीड टेस्ट हो रही है..."));
-                    });
+                }catch(Exception e){
+                    pingError=e.getClass().getSimpleName();
+                }
 
+                final double fpNow=pms;
+                final String pe=pingError;
+                runOnUiThread(()->{
+                    if(pe==null) ping.setText("PING\n"+new DecimalFormat("0").format(fpNow)+" ms");
+                    else ping.setText("PING\n-- ms");
+                    status.setText(L("Testing download speed...","डाउनलोड स्पीड टेस्ट हो रही है..."));
+                });
+
+                try{
                     dm=speedDownload(value->runOnUiThread(()->{
                         meter.setSpeed(value);
                         down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(value)+" Mbps");
                     }));
+                }catch(Exception e){
+                    downloadError=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
+                }
 
-                    final double fd=dm;
-                    runOnUiThread(()->{
-                        meter.setSpeed(fd);
-                        down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(fd)+" Mbps");
-                        status.setText(L("Testing upload speed...","अपलोड स्पीड टेस्ट हो रही है..."));
-                    });
+                final double fdNow=dm;
+                final String de=downloadError;
+                runOnUiThread(()->{
+                    if(de==null){
+                        meter.setSpeed(fdNow);
+                        down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(fdNow)+" Mbps");
+                    }else{
+                        down.setText("DOWNLOAD\nFAILED");
+                    }
+                    status.setText(L("Testing upload speed...","अपलोड स्पीड टेस्ट हो रही है..."));
+                });
 
+                try{
                     um=speedUpload(value->runOnUiThread(()->{
                         meter.setSpeed(value);
                         up.setText("UPLOAD\n"+new DecimalFormat("0.0").format(value)+" Mbps");
                     }));
                 }catch(Exception e){
-                    error=e.getClass().getSimpleName();
+                    uploadError=e.getMessage()==null?e.getClass().getSimpleName():e.getMessage();
                 }
 
                 final double fp=pms,fd=dm,fu=um;
-                final String ferr=error;
+                final String fpe=pingError,fde=downloadError,fue=uploadError;
                 runOnUiThread(()->{
                     start.setEnabled(true);
                     start.setText(L("TEST AGAIN","फिर से टेस्ट करें"));
-                    if(ferr==null){
+
+                    boolean any=(fpe==null)||(fde==null)||(fue==null);
+                    boolean all=(fpe==null)&&(fde==null)&&(fue==null);
+
+                    if(fpe==null) ping.setText("PING\n"+new DecimalFormat("0").format(fp)+" ms");
+                    if(fde==null) down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(fd)+" Mbps");
+                    if(fue==null) up.setText("UPLOAD\n"+new DecimalFormat("0.0").format(fu)+" Mbps");
+
+                    if(all){
                         meter.setSpeed(fd);
-                        ping.setText("PING\n"+new DecimalFormat("0").format(fp)+" ms");
-                        down.setText("DOWNLOAD\n"+new DecimalFormat("0.0").format(fd)+" Mbps");
-                        up.setText("UPLOAD\n"+new DecimalFormat("0.0").format(fu)+" Mbps");
                         status.setText(L("Test completed","टेस्ट पूरा हुआ"));
-                        String summary="Ping: "+new DecimalFormat("0").format(fp)+" ms"
-                                +"\nDownload: "+new DecimalFormat("0.0").format(fd)+" Mbps"
-                                +"\nUpload: "+new DecimalFormat("0.0").format(fu)+" Mbps";
-                        result.setText(summary);
-                        savePanelHistory("speed",L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),summary);
+                    }else if(any){
+                        status.setText(L("Test partially completed. Retry for missing values.","टेस्ट आंशिक रूप से पूरा हुआ। जो value नहीं आई उसके लिए फिर टेस्ट करें।"));
                     }else{
                         status.setText(L("Speed test failed. Check internet and retry.","स्पीड टेस्ट नहीं हो सका। इंटरनेट जांचकर फिर कोशिश करें।"));
-                        result.setText(L("Unable to complete test","टेस्ट पूरा नहीं हो सका"));
                     }
+
+                    String summary="Ping: "+(fpe==null?new DecimalFormat("0").format(fp)+" ms":"Failed")
+                            +"\nDownload: "+(fde==null?new DecimalFormat("0.0").format(fd)+" Mbps":"Failed")
+                            +"\nUpload: "+(fue==null?new DecimalFormat("0.0").format(fu)+" Mbps":"Failed");
+
+                    result.setText(summary);
+                    if(any) savePanelHistory("speed",L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),summary);
                 });
             }).start();
         });
