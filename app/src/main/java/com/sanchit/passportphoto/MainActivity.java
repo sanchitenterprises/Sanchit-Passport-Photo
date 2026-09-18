@@ -46,11 +46,14 @@ public class MainActivity extends Activity {
     private AndroidTvV2 androidTvV2;
 
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
+    private static final int REQ_GALLERY_SCAN=9013;
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private TextView scannerStatus;
     private TextView scannerDetails;
     private boolean scannerActive=false;
     private boolean scannerResultLocked=false;
+    private String lastScannerRaw="";
+    private String lastScannerDetails="";
 
 
     @Override public void onCreate(Bundle b){
@@ -493,8 +496,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.24\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.24\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.25\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.25\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -524,7 +527,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.24\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.25\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2582,6 +2585,122 @@ public class MainActivity extends Activity {
         return b.toString();
     }
 
+    private void handleScannerResult(String value,com.google.zxing.BarcodeFormat format){
+        if(value==null || value.trim().isEmpty()) return;
+
+        scannerResultLocked=true;
+        scannerActive=false;
+        try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
+
+        String details=scanDetails(value,format);
+        lastScannerRaw=value;
+        lastScannerDetails=details;
+
+        if(scannerDetails!=null){
+            scannerDetails.setText(details);
+            scannerDetails.setTextColor(WHITE);
+        }
+
+        savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),details);
+        haptic();
+    }
+
+    private android.graphics.Bitmap loadGalleryBitmap(android.net.Uri uri) throws Exception{
+        android.graphics.BitmapFactory.Options bounds=new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds=true;
+
+        java.io.InputStream first=getContentResolver().openInputStream(uri);
+        if(first==null) throw new java.io.IOException("Image could not be opened");
+        android.graphics.BitmapFactory.decodeStream(first,null,bounds);
+        first.close();
+
+        int sample=1;
+        int max=Math.max(bounds.outWidth,bounds.outHeight);
+        while(max/sample>2200) sample*=2;
+
+        android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+        opts.inSampleSize=Math.max(1,sample);
+        opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+
+        java.io.InputStream in=getContentResolver().openInputStream(uri);
+        if(in==null) throw new java.io.IOException("Image could not be opened");
+        android.graphics.Bitmap bm=android.graphics.BitmapFactory.decodeStream(in,null,opts);
+        in.close();
+
+        if(bm==null) throw new java.io.IOException("Unsupported image");
+        return bm;
+    }
+
+    private com.google.zxing.Result decodeBitmapOnce(android.graphics.Bitmap bm) throws Exception{
+        int w=bm.getWidth(),h=bm.getHeight();
+        int[] pixels=new int[w*h];
+        bm.getPixels(pixels,0,w,0,0,w,h);
+
+        com.google.zxing.RGBLuminanceSource source=
+                new com.google.zxing.RGBLuminanceSource(w,h,pixels);
+
+        java.util.EnumMap<com.google.zxing.DecodeHintType,Object> hints=
+                new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
+        hints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
+        hints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
+        hints.put(com.google.zxing.DecodeHintType.POSSIBLE_FORMATS,
+                java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class));
+
+        com.google.zxing.MultiFormatReader reader=new com.google.zxing.MultiFormatReader();
+        reader.setHints(hints);
+
+        try{
+            return reader.decodeWithState(new com.google.zxing.BinaryBitmap(
+                    new com.google.zxing.common.HybridBinarizer(source)));
+        }catch(Exception first){
+            reader.reset();
+            com.google.zxing.LuminanceSource inv=source.invert();
+            return reader.decode(new com.google.zxing.BinaryBitmap(
+                    new com.google.zxing.common.HybridBinarizer(inv)),hints);
+        }
+    }
+
+    private com.google.zxing.Result decodeGalleryImage(android.graphics.Bitmap original) throws Exception{
+        Exception last=null;
+        android.graphics.Bitmap current=original;
+
+        for(int i=0;i<4;i++){
+            try{
+                return decodeBitmapOnce(current);
+            }catch(Exception e){
+                last=e;
+            }
+
+            if(i<3){
+                android.graphics.Matrix m=new android.graphics.Matrix();
+                m.postRotate(90);
+                android.graphics.Bitmap rotated=android.graphics.Bitmap.createBitmap(
+                        current,0,0,current.getWidth(),current.getHeight(),m,true);
+                if(current!=original && current!=rotated) current.recycle();
+                current=rotated;
+            }
+        }
+
+        if(current!=original){
+            try{current.recycle();}catch(Exception ignored){}
+        }
+        if(last!=null) throw last;
+        throw new com.google.zxing.NotFoundException();
+    }
+
+    private void pickScannerImageFromGallery(){
+        try{
+            Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            pick.setType("image/*");
+            startActivityForResult(pick,REQ_GALLERY_SCAN);
+        }catch(Exception e){
+            if(scannerDetails!=null){
+                scannerDetails.setText(L("Gallery could not be opened.","Gallery नहीं खुल सकी।"));
+            }
+        }
+    }
+
     private void showScanner(){
         currentTool="SCAN";
         toolPickerOpen=false;
@@ -2596,35 +2715,33 @@ public class MainActivity extends Activity {
         LinearLayout body=new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setBackground(screenBg());
-        body.setPadding(dp(8),dp(8),dp(8),dp(8));
+        body.setPadding(0,0,0,0);
         outer.addView(body,new LinearLayout.LayoutParams(-1,0,1));
 
-        scannerStatus=tv(
-                L("Camera is off. Tap START SCANNER.",
-                  "Camera बंद है। START SCANNER दबाएं।"),
-                17,WHITE);
-        scannerStatus.setGravity(Gravity.CENTER);
-        styleResult(scannerStatus);
-        body.addView(scannerStatus,controlParams(58));
-
         scannerDetails=tv(
-                L("After a scan, decoded details will appear here.",
-                  "Scan के बाद decoded details यहाँ दिखाई देंगी।"),
-                14,SOFT);
+                lastScannerDetails.isEmpty()
+                        ?L("Result will appear here automatically after QR / Barcode detection.",
+                           "QR / Barcode detect होते ही result यहाँ अपने-आप दिखाई देगा।")
+                        :lastScannerDetails,
+                15,lastScannerDetails.isEmpty()?SOFT:WHITE);
         scannerDetails.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
         scannerDetails.setTextIsSelectable(true);
-        scannerDetails.setBackground(bg(PANEL,10));
-        body.addView(scannerDetails,controlParams(104));
+        scannerDetails.setPadding(dp(16),dp(10),dp(16),dp(10));
+        scannerDetails.setBackground(grad(PANEL,Color.rgb(23,52,88),0));
+        body.addView(scannerDetails,new LinearLayout.LayoutParams(-1,dp(150)));
 
         embeddedScanner=new com.journeyapps.barcodescanner.DecoratedBarcodeView(this);
         embeddedScanner.setBackgroundColor(Color.BLACK);
+        embeddedScanner.setStatusText("");
 
         java.util.EnumMap<com.google.zxing.DecodeHintType,Object> scanHints=
                 new java.util.EnumMap<>(com.google.zxing.DecodeHintType.class);
         scanHints.put(com.google.zxing.DecodeHintType.TRY_HARDER,Boolean.TRUE);
         scanHints.put(com.google.zxing.DecodeHintType.CHARACTER_SET,"UTF-8");
+
         java.util.Collection<com.google.zxing.BarcodeFormat> allFormats=
                 java.util.EnumSet.allOf(com.google.zxing.BarcodeFormat.class);
+
         embeddedScanner.getBarcodeView().setDecoderFactory(
                 new com.journeyapps.barcodescanner.DefaultDecoderFactory(
                         allFormats,scanHints,"UTF-8",2));
@@ -2632,61 +2749,42 @@ public class MainActivity extends Activity {
         embeddedScanner.decodeContinuous(new com.journeyapps.barcodescanner.BarcodeCallback(){
             @Override public void barcodeResult(com.journeyapps.barcodescanner.BarcodeResult result){
                 if(result==null || result.getText()==null || scannerResultLocked) return;
-                scannerResultLocked=true;
-                scannerActive=false;
-                try{embeddedScanner.pause();}catch(Throwable ignored){}
-
-                String value=result.getText();
-                String details=scanDetails(value,result.getBarcodeFormat());
-                scannerStatus.setText(L("QR / Barcode detected - details ready","QR / Barcode मिला - details तैयार हैं"));
-                if(scannerDetails!=null) scannerDetails.setText(details);
-                savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),details);
-
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle(L("QR / Barcode Details","QR / Barcode Details"))
-                        .setMessage(details)
-                        .setPositiveButton(L("COPY RAW","RAW कॉपी"),(d,w)->{
-                            try{
-                                android.content.ClipboardManager cm=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                                cm.setPrimaryClip(android.content.ClipData.newPlainText("scan",value));
-                            }catch(Exception ignored){}
-                        })
-                        .setNeutralButton(L("SHARE DETAILS","DETAILS शेयर"),(d,w)->
-                                sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),details))
-                        .setNegativeButton(L("CLOSE","बंद करें"),null)
-                        .setOnDismissListener(d->scannerStatus.setText(
-                                L("Details shown below. Tap START SCANNER to scan again.",
-                                  "Details नीचे हैं। फिर scan करने के लिए START SCANNER दबाएं।")))
-                        .show();
+                handleScannerResult(result.getText(),result.getBarcodeFormat());
             }
             @Override public void possibleResultPoints(java.util.List<com.google.zxing.ResultPoint> resultPoints){}
         });
+
         body.addView(embeddedScanner,new LinearLayout.LayoutParams(-1,0,1));
 
-        LinearLayout row=new LinearLayout(this);
+        LinearLayout primary=new LinearLayout(this);
+        primary.setOrientation(LinearLayout.HORIZONTAL);
         Button start=btn(L("START SCANNER","स्कैनर शुरू करें"));
-        Button stop=btn(L("STOP","बंद करें"));
-        row.addView(start,new LinearLayout.LayoutParams(0,dp(58),1));
-        row.addView(stop,new LinearLayout.LayoutParams(0,dp(58),1));
-        body.addView(row,controlParams(60));
+        Button gallery=btn(L("GALLERY PICKUP","गैलरी से चुनें"));
+        primary.addView(start,new LinearLayout.LayoutParams(0,dp(60),1));
+        primary.addView(gallery,new LinearLayout.LayoutParams(0,dp(60),1));
+        body.addView(primary,new LinearLayout.LayoutParams(-1,dp(62)));
 
-        LinearLayout actions=new LinearLayout(this);
+        LinearLayout secondary=new LinearLayout(this);
+        secondary.setOrientation(LinearLayout.HORIZONTAL);
         Button history=btn(L("HISTORY","हिस्ट्री"));
-        Button help=btn(L("CAMERA HELP","कैमरा मदद"));
-        actions.addView(history,new LinearLayout.LayoutParams(0,dp(52),1));
-        actions.addView(help,new LinearLayout.LayoutParams(0,dp(52),1));
-        body.addView(actions,controlParams(54));
+        Button share=btn(L("SHARE RESULT","RESULT शेयर"));
+        secondary.addView(history,new LinearLayout.LayoutParams(0,dp(54),1));
+        secondary.addView(share,new LinearLayout.LayoutParams(0,dp(54),1));
+        body.addView(secondary,new LinearLayout.LayoutParams(-1,dp(56)));
 
         start.setOnClickListener(v->startEmbeddedScanner());
-        stop.setOnClickListener(v->stopEmbeddedScanner());
-        history.setOnClickListener(v->showPanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर")));
-        help.setOnClickListener(v->new AlertDialog.Builder(this)
-                .setTitle(L("CAMERA PERMISSION","कैमरा अनुमति"))
-                .setMessage(L(
-                        "Allow Camera permission when Android asks. The scanner now runs inside STS DigiKit instead of opening a separate scanner activity.",
-                        "Android जब Camera permission मांगे तो Allow करें। अब scanner अलग activity खोलने के बजाय STS DigiKit के अंदर ही चलता है।"))
-                .setPositiveButton("OK",null)
-                .show());
+        gallery.setOnClickListener(v->pickScannerImageFromGallery());
+
+        history.setOnClickListener(v->
+                showPanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर")));
+
+        share.setOnClickListener(v->{
+            if(lastScannerDetails==null || lastScannerDetails.trim().isEmpty()){
+                Toast.makeText(this,L("Scan something first","पहले QR / Barcode scan करें"),Toast.LENGTH_SHORT).show();
+            }else{
+                sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),lastScannerDetails);
+            }
+        });
 
         setContentView(outer);
     }
@@ -2695,17 +2793,24 @@ public class MainActivity extends Activity {
         if(embeddedScanner==null) return;
 
         if(!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)){
-            scannerStatus.setText(L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"));
+            if(scannerDetails!=null){
+                scannerDetails.setText(L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"));
+            }
             return;
         }
 
         if(Build.VERSION.SDK_INT>=23 &&
                 checkSelfPermission(android.Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){
-            scannerStatus.setText(L("Waiting for Camera permission...","Camera permission का इंतजार है..."));
+            if(scannerDetails!=null){
+                scannerDetails.setText(L("Allow Camera permission to start scanning.",
+                        "Scanning शुरू करने के लिए Camera permission Allow करें।"));
+            }
             try{
                 requestPermissions(new String[]{android.Manifest.permission.CAMERA},REQ_EMBEDDED_SCANNER_CAMERA);
             }catch(Throwable e){
-                scannerStatus.setText(L("Camera permission request failed.","Camera permission request नहीं हो सकी।"));
+                if(scannerDetails!=null){
+                    scannerDetails.setText(L("Camera permission request failed.","Camera permission request नहीं हो सकी।"));
+                }
             }
             return;
         }
@@ -2713,20 +2818,24 @@ public class MainActivity extends Activity {
         try{
             scannerResultLocked=false;
             scannerActive=true;
-            scannerStatus.setText(L("Scanning... Point camera at QR / Barcode.",
-                    "Scanning... Camera QR / Barcode की ओर करें।"));
+            if(scannerDetails!=null){
+                scannerDetails.setText(L("Scanning... QR / Barcode detect होते ही result automatically दिखाई देगा.",
+                        "Scanning... QR / Barcode detect होते ही result automatically दिखाई देगा."));
+                scannerDetails.setTextColor(SOFT);
+            }
             embeddedScanner.resume();
         }catch(Throwable e){
             scannerActive=false;
-            scannerStatus.setText(L("Camera could not start. Close other camera apps and try again.",
-                    "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"));
+            if(scannerDetails!=null){
+                scannerDetails.setText(L("Camera could not start. Close other camera apps and try again.",
+                        "Camera शुरू नहीं हुआ। दूसरे camera apps बंद करके फिर कोशिश करें।"));
+            }
         }
     }
 
     private void stopEmbeddedScanner(){
         scannerActive=false;
         try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
-        if(scannerStatus!=null) scannerStatus.setText(L("Scanner stopped","Scanner बंद है"));
     }
 
     @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
@@ -2736,9 +2845,11 @@ public class MainActivity extends Activity {
                 if("SCAN".equals(currentTool)) startEmbeddedScanner();
             }else{
                 scannerActive=false;
-                if(scannerStatus!=null) scannerStatus.setText(
-                        L("Camera permission denied. Scanner remains open and the app will not close.",
-                          "Camera permission नहीं मिली। Scanner panel खुला रहेगा और app बंद नहीं होगा।"));
+                if(scannerDetails!=null){
+                    scannerDetails.setText(L(
+                            "Camera permission denied. You can still use GALLERY PICKUP.",
+                            "Camera permission नहीं मिली। फिर भी GALLERY PICKUP से photo scan कर सकते हैं।"));
+                }
             }
         }
     }
@@ -2753,13 +2864,51 @@ public class MainActivity extends Activity {
     @Override protected void onResume(){
         super.onResume();
         if("SCAN".equals(currentTool) && scannerActive && embeddedScanner!=null){
-            if(Build.VERSION.SDK_INT<23 || checkSelfPermission(android.Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED){
+            if(Build.VERSION.SDK_INT<23 ||
+                    checkSelfPermission(android.Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED){
                 try{embeddedScanner.resume();}catch(Throwable ignored){}
             }
         }
     }
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        if(requestCode==REQ_GALLERY_SCAN){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
+                final android.net.Uri uri=data.getData();
+
+                if(scannerDetails!=null){
+                    scannerDetails.setText(L("Reading QR / Barcode from selected image...",
+                            "चुनी हुई photo से QR / Barcode पढ़ रहे हैं..."));
+                    scannerDetails.setTextColor(SOFT);
+                }
+
+                new Thread(()->{
+                    android.graphics.Bitmap bm=null;
+                    try{
+                        bm=loadGalleryBitmap(uri);
+                        com.google.zxing.Result result=decodeGalleryImage(bm);
+                        final String value=result.getText();
+                        final com.google.zxing.BarcodeFormat format=result.getBarcodeFormat();
+
+                        runOnUiThread(()->handleScannerResult(value,format));
+                    }catch(Exception e){
+                        runOnUiThread(()->{
+                            if(scannerDetails!=null){
+                                scannerDetails.setText(L(
+                                        "No readable QR / Barcode found in this image. Try a clearer or closer image.",
+                                        "इस photo में readable QR / Barcode नहीं मिला। साफ या नजदीक वाली photo चुनें।"));
+                                scannerDetails.setTextColor(WHITE);
+                            }
+                        });
+                    }finally{
+                        if(bm!=null){
+                            try{bm.recycle();}catch(Exception ignored){}
+                        }
+                    }
+                }).start();
+            }
+            return;
+        }
         super.onActivityResult(requestCode,resultCode,data);
     }
 
