@@ -27,12 +27,19 @@ public class MainActivity extends Activity {
     private final int WHITE = Color.WHITE;
     private LinearLayout root;
     private TextView title;
+    private boolean devMode = false;
+    private boolean vibrationEnabled = true;
+    private final StringBuilder appLogs = new StringBuilder();
     private final DecimalFormat df = new DecimalFormat("#,##0.00");
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         getWindow().setStatusBarColor(Color.rgb(73,146,194));
         getWindow().setNavigationBarColor(BG);
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        devMode=sp.getBoolean("devMode",false);
+        vibrationEnabled=sp.getBoolean("vibration",true);
+        logEvent("App started");
         showHome();
     }
 
@@ -75,6 +82,7 @@ public class MainActivity extends Activity {
         logo.setTextColor(Color.rgb(20,65,110)); top.addView(logo,new LinearLayout.LayoutParams(dp(58),dp(58)));
         TextView name=tv("STS DigiKit",27,WHITE); name.setTypeface(null,1); top.addView(name,new LinearLayout.LayoutParams(0,dp(58),1));
         TextView menu=tv("⋮",36,WHITE); menu.setGravity(Gravity.CENTER); top.addView(menu,new LinearLayout.LayoutParams(dp(50),dp(58)));
+        menu.setOnClickListener(v->showTopMenu(menu));
         outer.addView(top);
         ScrollView sc=new ScrollView(this); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); list.setPadding(dp(12),dp(8),dp(12),dp(20));
         TextView section=tv("CALCULATOR                                      ▲",22,WHITE); section.setGravity(Gravity.CENTER); section.setTypeface(null,1); section.setBackground(bg(PANEL2,12));
@@ -109,7 +117,74 @@ public class MainActivity extends Activity {
     private void addMenu(LinearLayout list,String s,Runnable r){
         TextView row=tv(s,20,WHITE); row.setGravity(Gravity.CENTER); row.setTypeface(null,1); row.setBackground(bg(PANEL,4));
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72)); p.setMargins(0,dp(2),0,0); list.addView(row,p);
-        row.setOnClickListener(v->r.run());
+        row.setOnClickListener(v->{logEvent("Open: "+s); haptic(); r.run();});
+    }
+
+    private void showTopMenu(View anchor){
+        PopupMenu p=new PopupMenu(this,anchor);
+        p.getMenu().add("Settings");
+        p.getMenu().add("View Logs");
+        p.getMenu().add("Dev Mode");
+        p.setOnMenuItemClickListener(item->{
+            String s=item.getTitle().toString();
+            if("Settings".equals(s)){ logEvent("Open: Settings"); showSettings(); return true; }
+            if("View Logs".equals(s)){ logEvent("Open: View Logs"); showLogs(); return true; }
+            if("Dev Mode".equals(s)){
+                devMode=!devMode;
+                getSharedPreferences("sts",0).edit().putBoolean("devMode",devMode).apply();
+                logEvent("Dev Mode: "+(devMode?"ON":"OFF"));
+                Toast.makeText(this,"Dev Mode "+(devMode?"ON":"OFF"),Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            return false;
+        });
+        p.show();
+    }
+
+    private void showSettings(){
+        shell("SETTINGS");
+        TextView h=tv("STS DigiKit Settings",24,WHITE); h.setGravity(Gravity.CENTER); h.setTypeface(null,1); root.addView(h,new LinearLayout.LayoutParams(-1,dp(70)));
+
+        Switch vib=new Switch(this); vib.setText("Vibration Feedback"); vib.setTextColor(WHITE); vib.setTextSize(18); vib.setChecked(vibrationEnabled);
+        vib.setPadding(dp(12),dp(8),dp(12),dp(8)); root.addView(vib,new LinearLayout.LayoutParams(-1,dp(62)));
+        vib.setOnCheckedChangeListener((b,on)->{
+            vibrationEnabled=on;
+            getSharedPreferences("sts",0).edit().putBoolean("vibration",on).apply();
+            logEvent("Vibration: "+(on?"ON":"OFF"));
+        });
+
+        Switch dev=new Switch(this); dev.setText("Developer Mode"); dev.setTextColor(WHITE); dev.setTextSize(18); dev.setChecked(devMode);
+        dev.setPadding(dp(12),dp(8),dp(12),dp(8)); root.addView(dev,new LinearLayout.LayoutParams(-1,dp(62)));
+        dev.setOnCheckedChangeListener((b,on)->{
+            devMode=on;
+            getSharedPreferences("sts",0).edit().putBoolean("devMode",on).apply();
+            logEvent("Dev Mode: "+(on?"ON":"OFF"));
+        });
+
+        TextView about=tv("Version 1.0.3\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
+    }
+
+    private void showLogs(){
+        shell("VIEW LOGS");
+        TextView logs=tv(appLogs.length()==0?"No logs yet":appLogs.toString(),15,WHITE);
+        logs.setGravity(Gravity.TOP|Gravity.LEFT); logs.setTextIsSelectable(true); logs.setBackground(bg(PANEL,10));
+        root.addView(logs,new LinearLayout.LayoutParams(-1,-2));
+        Button clear=btn("CLEAR LOGS"); root.addView(clear,new LinearLayout.LayoutParams(-1,dp(58)));
+        clear.setOnClickListener(v->{appLogs.setLength(0);logs.setText("No logs yet");});
+    }
+
+    private void logEvent(String s){
+        appLogs.append(new java.text.SimpleDateFormat("HH:mm:ss",java.util.Locale.US).format(new java.util.Date()))
+                .append("  ").append(s).append("\n");
+    }
+
+    private void haptic(){
+        if(vibrationEnabled) try{
+            if(Build.VERSION.SDK_INT>=26) ((android.os.Vibrator)getSystemService(VIBRATOR_SERVICE))
+                    .vibrate(android.os.VibrationEffect.createOneShot(25,80));
+            else ((android.os.Vibrator)getSystemService(VIBRATOR_SERVICE)).vibrate(25);
+        }catch(Exception ignored){}
     }
 
     private double val(EditText e){
