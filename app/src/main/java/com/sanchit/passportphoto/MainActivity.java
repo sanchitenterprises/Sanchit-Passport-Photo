@@ -17,6 +17,7 @@ import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 import java.text.DecimalFormat;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.RoundingMode;
 import java.util.Calendar;
 
@@ -717,18 +718,154 @@ public class MainActivity extends Activity {
 
     private String trim(double x){ if(x==(long)x)return String.valueOf((long)x); return new DecimalFormat("0.########").format(x); }
 
-    private void showCashCounter(){
-        currentTool="CASH_COUNTER"; shell(L("CASH COUNTER","कैश काउंटर"));
-        TextView total=tv("TOTAL ₹0",28,WHITE); styleResult(total); root.addView(total,resultParams(76));
-        int[] den={500,200,100,50,20,10,5,2,1}; java.util.ArrayList<EditText> qty=new java.util.ArrayList<>();
-        for(int d:den){
-            LinearLayout line=new LinearLayout(this); line.setGravity(Gravity.CENTER_VERTICAL);
-            TextView n=tv("₹"+d,20,WHITE); line.addView(n,new LinearLayout.LayoutParams(0,dp(58),1));
-            EditText q=input("Qty"); q.setInputType(android.text.InputType.TYPE_CLASS_NUMBER); qty.add(q); line.addView(q,new LinearLayout.LayoutParams(dp(130),dp(54)));
-            root.addView(line);
+    private String cashMoney(BigInteger n){
+        try{return new DecimalFormat("#,##0").format(n);}catch(Exception e){return n.toString();}
+    }
+
+    private String buildCashSummary(int[] den, java.util.ArrayList<EditText> qty, java.util.ArrayList<TextView> amounts){
+        StringBuilder b=new StringBuilder();
+        b.append("STS DigiKit - Cash Counter\n");
+        BigInteger total=BigInteger.ZERO;
+        for(int i=0;i<den.length;i++){
+            String qs=qty.get(i).getText().toString().trim();
+            BigInteger q=BigInteger.ZERO;
+            try{if(!qs.isEmpty()) q=new BigInteger(qs);}catch(Exception ignored){}
+            if(q.signum()>0){
+                BigInteger amount=q.multiply(BigInteger.valueOf(den[i]));
+                total=total.add(amount);
+                b.append("₹").append(den[i]).append(" × ").append(q)
+                        .append(" = ₹").append(cashMoney(amount)).append("\n");
+            }
         }
-        Button calc=btn("CALCULATE TOTAL"); root.addView(calc,controlParams(60));
-        calc.setOnClickListener(v->{long sum=0;for(int i=0;i<den.length;i++){long q=0;try{q=Long.parseLong(qty.get(i).getText().toString());}catch(Exception ignored){}sum+=q*den[i];} total.setText("TOTAL ₹"+String.format(java.util.Locale.US,"%,d",sum));});
+        b.append("----------------\nTOTAL = ₹").append(cashMoney(total));
+        return b.toString();
+    }
+
+    private void saveCashHistory(String summary){
+        if(summary==null || summary.trim().isEmpty() || summary.endsWith("TOTAL = ₹0")) return;
+        String stamp=new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm",java.util.Locale.US).format(new java.util.Date());
+        String entry=stamp+"\n"+summary;
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String old=sp.getString("cashHistory","");
+        String combined=entry+(old.isEmpty()?"":"\n\n====================\n\n"+old);
+        if(combined.length()>30000) combined=combined.substring(0,30000);
+        sp.edit().putString("cashHistory",combined).apply();
+    }
+
+    private void showCashHistory(String currentSummary){
+        saveCashHistory(currentSummary);
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String history=sp.getString("cashHistory","");
+        if(history.isEmpty()) history=L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।");
+
+        final String shown=history;
+        new AlertDialog.Builder(this)
+                .setTitle(L("CASH HISTORY","कैश हिस्ट्री"))
+                .setMessage(shown)
+                .setPositiveButton(L("CLOSE","बंद करें"),null)
+                .setNeutralButton(L("CLEAR","साफ करें"),(d,w)->{
+                    sp.edit().remove("cashHistory").apply();
+                    Toast.makeText(this,L("History cleared","हिस्ट्री साफ कर दी गई"),Toast.LENGTH_SHORT).show();
+                })
+                .show();
+    }
+
+    private void shareCashSummary(String summary){
+        saveCashHistory(summary);
+        Intent send=new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT,"STS DigiKit Cash Counter");
+        send.putExtra(Intent.EXTRA_TEXT,summary);
+        try{startActivity(Intent.createChooser(send,L("Share Cash Summary","कैश सारांश शेयर करें")));}
+        catch(Exception e){Toast.makeText(this,L("No share app found","शेयर करने वाला ऐप नहीं मिला"),Toast.LENGTH_SHORT).show();}
+    }
+
+    private void showCashCounter(){
+        currentTool="CASH_COUNTER";
+        shell(L("CASH COUNTER","कैश काउंटर"));
+
+        int[] den={500,200,100,50,20,10,5,2,1};
+        java.util.ArrayList<EditText> qty=new java.util.ArrayList<>();
+        java.util.ArrayList<TextView> amounts=new java.util.ArrayList<>();
+
+        TextView total=tv(L("TOTAL ₹0","कुल ₹0"),28,WHITE);
+        styleResult(total);
+        root.addView(total,resultParams(76));
+
+        LinearLayout actions=new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        Button history=btn(L("HISTORY","हिस्ट्री"));
+        Button share=btn(L("SHARE","शेयर"));
+        actions.addView(history,new LinearLayout.LayoutParams(0,dp(54),1));
+        actions.addView(share,new LinearLayout.LayoutParams(0,dp(54),1));
+        root.addView(actions,controlParams(58));
+
+        LinearLayout heading=new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView h1=tv(L("NOTE","नोट"),15,SOFT); h1.setGravity(Gravity.CENTER);
+        TextView h2=tv(L("QTY","मात्रा"),15,SOFT); h2.setGravity(Gravity.CENTER);
+        TextView h3=tv(L("AMOUNT","राशि"),15,SOFT); h3.setGravity(Gravity.CENTER);
+        heading.addView(h1,new LinearLayout.LayoutParams(0,dp(40),1));
+        heading.addView(h2,new LinearLayout.LayoutParams(0,dp(40),1.15f));
+        heading.addView(h3,new LinearLayout.LayoutParams(0,dp(40),1.35f));
+        root.addView(heading,new LinearLayout.LayoutParams(-1,dp(40)));
+
+        final Runnable[] recalc={null};
+
+        for(int d:den){
+            LinearLayout line=new LinearLayout(this);
+            line.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView note=tv("₹"+d,20,WHITE);
+            note.setGravity(Gravity.CENTER);
+            line.addView(note,new LinearLayout.LayoutParams(0,dp(56),1));
+
+            EditText q=input("Qty");
+            q.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+            q.setGravity(Gravity.CENTER);
+            q.setTextSize(18);
+            q.setPadding(dp(6),0,dp(6),0);
+            qty.add(q);
+            line.addView(q,new LinearLayout.LayoutParams(0,dp(52),1.15f));
+
+            TextView amount=tv("₹0",18,WHITE);
+            amount.setGravity(Gravity.CENTER);
+            amount.setTypeface(null,1);
+            amount.setBackground(bg(PANEL,8));
+            amounts.add(amount);
+            LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(0,dp(52),1.35f);
+            ap.setMargins(dp(4),dp(2),0,dp(2));
+            line.addView(amount,ap);
+
+            root.addView(line,new LinearLayout.LayoutParams(-1,dp(58)));
+        }
+
+        recalc[0]=()->{
+            BigInteger grand=BigInteger.ZERO;
+            for(int i=0;i<den.length;i++){
+                String qs=qty.get(i).getText().toString().trim();
+                BigInteger q=BigInteger.ZERO;
+                try{if(!qs.isEmpty()) q=new BigInteger(qs);}catch(Exception ignored){}
+                BigInteger amount=q.multiply(BigInteger.valueOf(den[i]));
+                amounts.get(i).setText("₹"+cashMoney(amount));
+                grand=grand.add(amount);
+            }
+            total.setText(L("TOTAL ₹","कुल ₹")+cashMoney(grand));
+        };
+
+        android.text.TextWatcher watcher=new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
+            @Override public void onTextChanged(CharSequence s,int st,int before,int count){
+                if(recalc[0]!=null) recalc[0].run();
+            }
+            @Override public void afterTextChanged(android.text.Editable e){}
+        };
+        for(EditText q:qty) q.addTextChangedListener(watcher);
+
+        history.setOnClickListener(v->showCashHistory(buildCashSummary(den,qty,amounts)));
+        share.setOnClickListener(v->shareCashSummary(buildCashSummary(den,qty,amounts)));
+
+        recalc[0].run();
     }
 
     private void showAge(){
