@@ -16,6 +16,8 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 import java.text.DecimalFormat;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Calendar;
 
 public class MainActivity extends Activity {
@@ -498,34 +500,43 @@ public class MainActivity extends Activity {
         return s;
     }
 
-    private double evaluateCalcExpression(String exp){
+    private BigDecimal evaluateCalcExpression(String exp){
         String s=calcCompleteExpression(exp);
-        if(s.isEmpty()) return 0;
+        if(s.isEmpty()) return BigDecimal.ZERO;
 
         String[] t=s.split("\\s+");
-        if(t.length==0) return 0;
+        if(t.length==0) return BigDecimal.ZERO;
 
-        double current=Double.parseDouble(t[0]);
-        double total=0;
+        BigDecimal current=new BigDecimal(t[0]);
+        BigDecimal total=BigDecimal.ZERO;
         char addOp='+';
 
         for(int i=1;i+1<t.length;i+=2){
             String op=t[i];
-            double n=Double.parseDouble(t[i+1]);
+            BigDecimal n=new BigDecimal(t[i+1]);
 
             if("×".equals(op)){
-                current*=n;
+                current=current.multiply(n);
             }else if("÷".equals(op)){
-                if(n==0) throw new ArithmeticException("divide by zero");
-                current/=n;
+                if(n.compareTo(BigDecimal.ZERO)==0) throw new ArithmeticException("divide by zero");
+                int scale=Math.max(50,Math.max(current.scale(),n.scale())+50);
+                current=current.divide(n,scale,RoundingMode.HALF_UP);
             }else if("+".equals(op) || "-".equals(op)){
-                total+=(addOp=='+')?current:-current;
+                total=(addOp=='+')?total.add(current):total.subtract(current);
                 current=n;
                 addOp=op.charAt(0);
             }
         }
-        total+=(addOp=='+')?current:-current;
+
+        total=(addOp=='+')?total.add(current):total.subtract(current);
         return total;
+    }
+
+    private String calcFormat(BigDecimal x){
+        if(x==null) return "0";
+        BigDecimal y=x.stripTrailingZeros();
+        if(y.compareTo(BigDecimal.ZERO)==0) return "0";
+        return y.toPlainString();
     }
 
     private void showCalculator(){
@@ -548,6 +559,9 @@ public class MainActivity extends Activity {
         typing.setPadding(dp(18),dp(16),dp(18),dp(16));
         typing.setBackgroundColor(BG);
         typing.setTextIsSelectable(false);
+        if(Build.VERSION.SDK_INT>=26){
+            typing.setAutoSizeTextTypeUniformWithConfiguration(14,28,1,android.util.TypedValue.COMPLEX_UNIT_SP);
+        }
         calcBody.addView(typing,new LinearLayout.LayoutParams(-1,0,1));
 
         final TextView display=tv("0",32,WHITE);
@@ -555,6 +569,9 @@ public class MainActivity extends Activity {
         display.setTypeface(null,1);
         display.setPadding(dp(18),dp(10),dp(18),dp(10));
         display.setBackground(bg(PANEL,8));
+        if(Build.VERSION.SDK_INT>=26){
+            display.setAutoSizeTextTypeUniformWithConfiguration(12,32,1,android.util.TypedValue.COMPLEX_UNIT_SP);
+        }
         LinearLayout.LayoutParams displayParams=new LinearLayout.LayoutParams(-1,dp(80));
         displayParams.setMargins(0,0,0,dp(4));
         calcBody.addView(display,displayParams);
@@ -570,7 +587,7 @@ public class MainActivity extends Activity {
                 return;
             }
             try{
-                display.setText(trim(evaluateCalcExpression(complete)));
+                display.setText(calcFormat(evaluateCalcExpression(complete)));
             }catch(Exception ex){
                 display.setText("Error");
             }
@@ -603,10 +620,11 @@ public class MainActivity extends Activity {
                 String complete=calcCompleteExpression(expression[0]);
                 if(complete.isEmpty()) return;
                 try{
-                    double ans=evaluateCalcExpression(complete);
+                    BigDecimal ans=evaluateCalcExpression(complete);
+                    String formatted=calcFormat(ans);
                     typing.setText(complete+" =");
-                    display.setText(trim(ans));
-                    expression[0]=trim(ans);
+                    display.setText(formatted);
+                    expression[0]=formatted;
                     justEvaluated[0]=true;
                 }catch(Exception ex){
                     display.setText("Error");
@@ -622,8 +640,8 @@ public class MainActivity extends Activity {
                 String number=s.substring(i+1);
                 if(number.isEmpty()) return;
                 try{
-                    double v=Double.parseDouble(number)/100.0;
-                    expression[0]=s.substring(0,i+1)+trim(v);
+                    BigDecimal v=new BigDecimal(number).divide(new BigDecimal("100"),50,RoundingMode.HALF_UP);
+                    expression[0]=s.substring(0,i+1)+calcFormat(v);
                     refreshLive.run();
                 }catch(Exception ignored){}
                 return;
