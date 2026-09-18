@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.29\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.29\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.30\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.30\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.29\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.30\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2669,6 +2669,7 @@ public class MainActivity extends Activity {
         scannerViewport.removeAllViews();
 
         ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
         TextView result=tv("",19,WHITE);
         result.setGravity(Gravity.TOP|Gravity.LEFT);
         result.setPadding(dp(18),dp(18),dp(18),dp(18));
@@ -2705,7 +2706,7 @@ public class MainActivity extends Activity {
         }
 
         scannerDetails=result;
-        scroll.addView(result,new ScrollView.LayoutParams(-1,-2));
+        scroll.addView(result,new ScrollView.LayoutParams(-1,-1));
         scannerViewport.addView(scroll,new FrameLayout.LayoutParams(-1,-1));
     }
 
