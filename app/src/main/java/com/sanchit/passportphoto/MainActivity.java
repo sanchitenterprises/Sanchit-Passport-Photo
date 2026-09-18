@@ -26,7 +26,13 @@ public class MainActivity extends Activity {
     private final int PANEL = Color.rgb(28,42,74);
     private final int PANEL2 = Color.rgb(31,70,104);
     private final int ACCENT = Color.rgb(38,183,255);
-    private final int SOFT = Color.rgb(155,174,210);
+    private final int PURPLE = Color.rgb(115,92,255);
+    private final int TEAL = Color.rgb(24,196,170);
+    private final int GREEN = Color.rgb(38,183,108);
+    private final int ORANGE = Color.rgb(244,154,48);
+    private final int RED = Color.rgb(232,83,95);
+    private final int SURFACE = Color.rgb(13,27,48);
+    private final int SOFT = Color.rgb(172,190,220);
     private final int WHITE = Color.WHITE;
     private LinearLayout root;
     private TextView title;
@@ -62,15 +68,64 @@ public class MainActivity extends Activity {
     private GradientDrawable bg(int color,float radius){
         GradientDrawable g=new GradientDrawable(); g.setColor(color); g.setCornerRadius(dp((int)radius)); return g;
     }
+
+    private GradientDrawable grad(int c1,int c2,float radius){
+        GradientDrawable g=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{c1,c2});
+        g.setCornerRadius(dp((int)radius));
+        return g;
+    }
+
+    private GradientDrawable fieldBg(){
+        GradientDrawable g=bg(PANEL,10);
+        g.setStroke(dp(1),Color.rgb(54,101,145));
+        return g;
+    }
+
+    private android.graphics.drawable.Drawable touchBg(int color,float radius){
+        GradientDrawable base=bg(color,radius);
+        if(Build.VERSION.SDK_INT>=21){
+            return new android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(Color.argb(90,255,255,255)),
+                    base,null);
+        }
+        return base;
+    }
+
+    private android.graphics.drawable.Drawable screenBg(){
+        return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{BG,SURFACE,BG});
+    }
+
+    private int actionColor(String s){
+        String x=s==null?"":s.toUpperCase(java.util.Locale.US);
+        if(x.contains("SHARE") || x.contains("शेयर")) return GREEN;
+        if(x.contains("HISTORY") || x.contains("हिस्ट्री")) return PURPLE;
+        if(x.contains("CLEAR") || "C".equals(x)) return RED;
+        if(x.contains("CALCULATE") || x.contains("CONVERT") || x.contains("GENERATE") || x.contains("MAKE")) return ACCENT;
+        if("=".equals(x)) return TEAL;
+        if("+".equals(x) || "-".equals(x) || "×".equals(x) || "÷".equals(x) || "%".equals(x)) return ORANGE;
+        return PANEL2;
+    }
     private Button btn(String s){
-        Button b=new Button(this); b.setText(s); b.setAllCaps(false); b.setTextColor(WHITE); b.setTextSize(16);
+        Button b=new Button(this);
+        b.setText(s);
+        b.setAllCaps(false);
+        b.setTextColor(WHITE);
+        b.setTextSize(16);
+        b.setTypeface(null,1);
+        b.setGravity(Gravity.CENTER);
         b.setPadding(dp(10),dp(8),dp(10),dp(8));
-        b.setBackground(bg(PANEL2,8)); return b;
+        b.setMinHeight(dp(48));
+        b.setBackground(touchBg(actionColor(s),10));
+        b.setOnTouchListener((v,e)->{
+            if(e.getAction()==MotionEvent.ACTION_DOWN) haptic();
+            return false;
+        });
+        return b;
     }
     private EditText input(String hint){
         EditText e=new EditText(this); e.setHint(hint); e.setHintTextColor(SOFT); e.setTextColor(WHITE);
         e.setTextSize(18); e.setSingleLine(true); e.setPadding(dp(14),dp(8),dp(14),dp(8));
-        e.setBackground(bg(PANEL,8)); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        e.setBackground(fieldBg()); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(4),0,dp(4)); e.setLayoutParams(p); return e;
     }
 
@@ -90,7 +145,7 @@ public class MainActivity extends Activity {
         t.setGravity(Gravity.CENTER);
         t.setTypeface(null,1);
         t.setPadding(dp(14),dp(12),dp(14),dp(12));
-        t.setBackground(bg(PANEL2,10));
+        t.setBackground(grad(PANEL2,Color.rgb(28,96,132),12));
     }
 
     private Spinner dropdown(String[] items){
@@ -109,7 +164,7 @@ public class MainActivity extends Activity {
         };
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         s.setAdapter(a);
-        s.setBackground(bg(PANEL2,8));
+        s.setBackground(touchBg(PANEL2,10));
         return s;
     }
     private String L(String en,String hi){
@@ -276,17 +331,22 @@ public class MainActivity extends Activity {
         toolPickerOpen=false;
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setBackgroundColor(BG);
+        outer.setBackground(screenBg());
 
         addFixedDropdown(outer,name);
 
         ScrollView sc=new ScrollView(this);
         sc.setFillViewport(true);
+        sc.setBackground(screenBg());
+        sc.setClipToPadding(false);
+
         root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.BOTTOM);
-        root.setPadding(0,0,0,0);
-        sc.addView(root,new ScrollView.LayoutParams(-1,-2));
+        root.setGravity(Gravity.TOP);
+        root.setPadding(dp(8),dp(8),dp(8),dp(8));
+        root.setBackground(screenBg());
+
+        sc.addView(root,new ScrollView.LayoutParams(-1,-1));
         outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
 
         setContentView(outer);
@@ -297,11 +357,11 @@ public class MainActivity extends Activity {
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0,0,0,0);
-        header.setBackgroundColor(PANEL2);
+        header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
 
         TextView menu=tv("⋮",34,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(bg(PANEL,0));
+        menu.setBackground(touchBg(Color.rgb(27,42,78),0));
         header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         TextView label=tv(currentName,21,WHITE);
@@ -314,9 +374,9 @@ public class MainActivity extends Activity {
 
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
 
-        menu.setOnClickListener(v->showTopMenu(menu));
-        label.setOnClickListener(v->showToolPicker(currentName));
-        spacer.setOnClickListener(v->showToolPicker(currentName));
+        menu.setOnClickListener(v->{haptic();showTopMenu(menu);});
+        label.setOnClickListener(v->{haptic();showToolPicker(currentName);});
+        spacer.setOnClickListener(v->{haptic();showToolPicker(currentName);});
     }
 
     private void showToolPicker(String currentName){
@@ -324,15 +384,15 @@ public class MainActivity extends Activity {
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setBackgroundColor(BG);
+        outer.setBackground(screenBg());
 
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setBackgroundColor(PANEL2);
+        header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
 
         TextView menu=tv("⋮",34,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(bg(PANEL,0));
+        menu.setBackground(touchBg(Color.rgb(27,42,78),0));
         header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         TextView label=tv(currentName,21,WHITE);
@@ -347,13 +407,13 @@ public class MainActivity extends Activity {
 
         ScrollView listScroll=new ScrollView(this);
         listScroll.setFillViewport(true);
-        listScroll.setBackgroundColor(BG);
+        listScroll.setBackground(screenBg());
         listScroll.setVerticalScrollBarEnabled(true);
         listScroll.setScrollbarFadingEnabled(false);
 
         LinearLayout tools=new LinearLayout(this);
         tools.setOrientation(LinearLayout.VERTICAL);
-        tools.setBackgroundColor(BG);
+        tools.setBackground(screenBg());
 
         for(String key:getToolOrder()){
             final String k=key;
@@ -382,7 +442,7 @@ public class MainActivity extends Activity {
         TextView row=tv(s,20,selected?BG:WHITE);
         row.setGravity(Gravity.CENTER);
         row.setTypeface(null,1);
-        row.setBackground(bg(selected?ACCENT:PANEL,0));
+        row.setBackground(selected?grad(TEAL,ACCENT,0):touchBg(PANEL,0));
         if(selected) row.setContentDescription(s+" selected");
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72));
         p.setMargins(0,0,0,dp(2));
@@ -424,8 +484,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.14\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.14\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.18\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.18\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -455,7 +515,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.14\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.18\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -546,19 +606,19 @@ public class MainActivity extends Activity {
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setBackgroundColor(BG);
+        outer.setBackground(screenBg());
 
         addFixedDropdown(outer,L("CALCULATOR","कैलकुलेटर"));
 
         LinearLayout calcBody=new LinearLayout(this);
         calcBody.setOrientation(LinearLayout.VERTICAL);
-        calcBody.setBackgroundColor(BG);
+        calcBody.setBackground(screenBg());
         outer.addView(calcBody,new LinearLayout.LayoutParams(-1,0,1));
 
         final TextView typing=tv("",28,WHITE);
         typing.setGravity(Gravity.RIGHT|Gravity.BOTTOM);
         typing.setPadding(dp(18),dp(16),dp(18),dp(16));
-        typing.setBackgroundColor(BG);
+        typing.setBackground(screenBg());
         typing.setTextIsSelectable(false);
         if(Build.VERSION.SDK_INT>=26){
             typing.setAutoSizeTextTypeUniformWithConfiguration(14,28,1,android.util.TypedValue.COMPLEX_UNIT_SP);
@@ -840,13 +900,13 @@ public class MainActivity extends Activity {
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
-        outer.setBackgroundColor(BG);
+        outer.setBackground(screenBg());
 
         addFixedDropdown(outer,L("CASH COUNTER","कैश काउंटर"));
 
         LinearLayout body=new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setBackgroundColor(BG);
+        body.setBackground(screenBg());
         outer.addView(body,new LinearLayout.LayoutParams(-1,0,1));
 
         LinearLayout actions=new LinearLayout(this);
@@ -905,7 +965,7 @@ public class MainActivity extends Activity {
             final int pos=i;
             LinearLayout line=new LinearLayout(this);
             line.setGravity(Gravity.CENTER_VERTICAL);
-            line.setBackgroundColor((i%2==0)?BG:Color.rgb(12,23,42));
+            line.setBackground(i%2==0?bg(Color.rgb(11,24,43),8):bg(Color.rgb(15,32,55),8));
 
             TextView note=tv("₹"+den[i],20,WHITE);
             note.setGravity(Gravity.CENTER);
@@ -921,7 +981,7 @@ public class MainActivity extends Activity {
             q.setSelectAllOnFocus(true);
             q.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
             q.setPadding(dp(6),dp(4),dp(6),dp(4));
-            q.setBackground(bg(PANEL,8));
+            q.setBackground(fieldBg());
             qty[i]=q;
             LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(0,dp(48),0.85f);
             qp.setMargins(dp(3),dp(3),dp(3),dp(3));
@@ -930,7 +990,7 @@ public class MainActivity extends Activity {
             TextView a=tv("₹0",18,WHITE);
             a.setGravity(Gravity.CENTER);
             a.setTypeface(null,1);
-            a.setBackground(bg(PANEL2,8));
+            a.setBackground(grad(Color.rgb(26,72,105),Color.rgb(29,107,116),8));
             amount[i]=a;
             LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(0,dp(48),1.25f);
             ap.setMargins(dp(3),dp(3),dp(3),dp(3));
@@ -972,7 +1032,7 @@ public class MainActivity extends Activity {
         TextView out=tv("Select date of birth",21,WHITE); styleResult(out); root.addView(out,resultParams(120));
         bd.setOnClickListener(v->pickDate(dob, c->bd.setText(date(c))));
         td.setOnClickListener(v->pickDate(asof, c->td.setText("UP TO: "+date(c))));
-        go.setOnClickListener(v->{Calendar a=(Calendar)asof.clone();Calendar b=(Calendar)dob.clone();if(a.before(b)){out.setText("Invalid date");return;}int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);if(d<0){m--;Calendar prev=(Calendar)a.clone();prev.add(Calendar.MONTH,-1);d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);}if(m<0){y--;m+=12;}long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;out.setText(y+" Years  "+m+" Months  "+d+" Days\nTotal Days: "+days);});
+        go.setOnClickListener(v->{haptic();Calendar a=(Calendar)asof.clone();Calendar b=(Calendar)dob.clone();if(a.before(b)){out.setText("Invalid date");return;}int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);if(d<0){m--;Calendar prev=(Calendar)a.clone();prev.add(Calendar.MONTH,-1);d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);}if(m<0){y--;m+=12;}long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;out.setText(y+" Years  "+m+" Months  "+d+" Days\nTotal Days: "+days);});
     }
     interface DateCb{void done(Calendar c);}
     private void pickDate(Calendar c,DateCb cb){new DatePickerDialog(this,(v,y,m,d)->{c.set(y,m,d,12,0,0);cb.done(c);},c.get(Calendar.YEAR),c.get(Calendar.MONTH),c.get(Calendar.DAY_OF_MONTH)).show();}
@@ -993,7 +1053,7 @@ public class MainActivity extends Activity {
         box.removeAllViews();
         EditText p=input(mode.equals("FD")?"Principal Amount":"Monthly Amount"); EditText rate=input("Annual Interest %"); EditText years=input("Years");
         box.addView(p);box.addView(rate);box.addView(years);Button calc=btn("CALCULATE "+mode);box.addView(calc,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);box.addView(out,resultParams(110));
-        calc.setOnClickListener(v->{double P=val(p),r=val(rate)/100.0,t=val(years),fv=0,invested=0;if(mode.equals("FD")){fv=P*Math.pow(1+r/4.0,4*t);invested=P;}else{double i=r/12.0;int n=(int)Math.round(t*12);invested=P*n;if(i==0)fv=invested;else fv=P*((Math.pow(1+i,n)-1)/i)*(mode.equals("SIP")?(1+i):1);}out.setText("Invested: ₹"+df.format(invested)+"\nMaturity: ₹"+df.format(fv)+"\nGain: ₹"+df.format(fv-invested));});
+        calc.setOnClickListener(v->{haptic();double P=val(p),r=val(rate)/100.0,t=val(years),fv=0,invested=0;if(mode.equals("FD")){fv=P*Math.pow(1+r/4.0,4*t);invested=P;}else{double i=r/12.0;int n=(int)Math.round(t*12);invested=P*n;if(i==0)fv=invested;else fv=P*((Math.pow(1+i,n)-1)/i)*(mode.equals("SIP")?(1+i):1);}out.setText("Invested: ₹"+df.format(invested)+"\nMaturity: ₹"+df.format(fv)+"\nGain: ₹"+df.format(fv-invested));});
     }
 
     private void showEmiInterest(){
