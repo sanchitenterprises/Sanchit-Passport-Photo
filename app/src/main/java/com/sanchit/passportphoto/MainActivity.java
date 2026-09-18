@@ -486,74 +486,179 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2); p.setMargins(0,dp(12),0,dp(6)); root.addView(r,p);
     }
 
+    private boolean isCalcOperatorChar(char ch){
+        return ch=='+' || ch=='-' || ch=='×' || ch=='÷';
+    }
+
+    private String calcCompleteExpression(String exp){
+        String s=exp==null?"":exp.trim();
+        while(!s.isEmpty() && isCalcOperatorChar(s.charAt(s.length()-1))){
+            s=s.substring(0,s.length()-1).trim();
+        }
+        return s;
+    }
+
+    private double evaluateCalcExpression(String exp){
+        String s=calcCompleteExpression(exp);
+        if(s.isEmpty()) return 0;
+
+        String[] t=s.split("\\s+");
+        if(t.length==0) return 0;
+
+        double current=Double.parseDouble(t[0]);
+        double total=0;
+        char addOp='+';
+
+        for(int i=1;i+1<t.length;i+=2){
+            String op=t[i];
+            double n=Double.parseDouble(t[i+1]);
+
+            if("×".equals(op)){
+                current*=n;
+            }else if("÷".equals(op)){
+                if(n==0) throw new ArithmeticException("divide by zero");
+                current/=n;
+            }else if("+".equals(op) || "-".equals(op)){
+                total+=(addOp=='+')?current:-current;
+                current=n;
+                addOp=op.charAt(0);
+            }
+        }
+        total+=(addOp=='+')?current:-current;
+        return total;
+    }
+
     private void showCalculator(){
         currentTool="CALCULATOR";
-        shell(L("CALCULATOR","कैलकुलेटर"));
+        toolPickerOpen=false;
+
+        LinearLayout outer=new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackgroundColor(BG);
+
+        addFixedDropdown(outer,L("CALCULATOR","कैलकुलेटर"));
+
+        LinearLayout calcBody=new LinearLayout(this);
+        calcBody.setOrientation(LinearLayout.VERTICAL);
+        calcBody.setBackgroundColor(BG);
+        outer.addView(calcBody,new LinearLayout.LayoutParams(-1,0,1));
+
+        final TextView typing=tv("",28,WHITE);
+        typing.setGravity(Gravity.RIGHT|Gravity.BOTTOM);
+        typing.setPadding(dp(18),dp(16),dp(18),dp(16));
+        typing.setBackgroundColor(BG);
+        typing.setTextIsSelectable(false);
+        calcBody.addView(typing,new LinearLayout.LayoutParams(-1,0,1));
 
         final TextView display=tv("0",32,WHITE);
         display.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
         display.setTypeface(null,1);
+        display.setPadding(dp(18),dp(10),dp(18),dp(10));
         display.setBackground(bg(PANEL,8));
-        root.addView(display,resultParams(80));
+        LinearLayout.LayoutParams displayParams=new LinearLayout.LayoutParams(-1,dp(80));
+        displayParams.setMargins(0,0,0,dp(4));
+        calcBody.addView(display,displayParams);
 
-        final String[] expr={""};
-        final double[] first={0};
-        final String[] op={""};
+        final String[] expression={""};
+        final boolean[] justEvaluated={false};
+
+        Runnable refreshLive=()->{
+            typing.setText(expression[0]);
+            String complete=calcCompleteExpression(expression[0]);
+            if(complete.isEmpty()){
+                display.setText("0");
+                return;
+            }
+            try{
+                display.setText(trim(evaluateCalcExpression(complete)));
+            }catch(Exception ex){
+                display.setText("Error");
+            }
+        };
 
         java.util.function.Consumer<String> press=(String x)->{
             if("C".equals(x)){
-                expr[0]="";
-                first[0]=0;
-                op[0]="";
-                display.setText("0");
+                expression[0]="";
+                justEvaluated[0]=false;
+                refreshLive.run();
                 return;
             }
 
             if("⌫".equals(x)){
-                if(expr[0].length()>0) expr[0]=expr[0].substring(0,expr[0].length()-1);
-                display.setText(expr[0].isEmpty()?"0":expr[0]);
-                return;
-            }
-
-            if("%".equals(x)){
-                try{
-                    double v=Double.parseDouble(expr[0]);
-                    v=v/100.0;
-                    expr[0]=String.valueOf(v);
-                    display.setText(trim(v));
-                }catch(Exception ignored){}
+                if(justEvaluated[0]){
+                    expression[0]="";
+                    justEvaluated[0]=false;
+                }else{
+                    String s=expression[0];
+                    if(!s.isEmpty()){
+                        s=s.substring(0,s.length()-1).trim();
+                        expression[0]=s;
+                    }
+                }
+                refreshLive.run();
                 return;
             }
 
             if("=".equals(x)){
-                double second;
-                try{second=Double.parseDouble(expr[0]);}catch(Exception z){second=0;}
-                double ans=second;
-                if("+".equals(op[0])) ans=first[0]+second;
-                else if("-".equals(op[0])) ans=first[0]-second;
-                else if("×".equals(op[0])) ans=first[0]*second;
-                else if("÷".equals(op[0])) ans=second==0?0:first[0]/second;
-                expr[0]=String.valueOf(ans);
-                display.setText(trim(ans));
-                op[0]="";
+                String complete=calcCompleteExpression(expression[0]);
+                if(complete.isEmpty()) return;
+                try{
+                    double ans=evaluateCalcExpression(complete);
+                    typing.setText(complete+" =");
+                    display.setText(trim(ans));
+                    expression[0]=trim(ans);
+                    justEvaluated[0]=true;
+                }catch(Exception ex){
+                    display.setText("Error");
+                }
                 return;
             }
 
-            if("+".equals(x) || "-".equals(x) || "×".equals(x) || "÷".equals(x)){
-                try{first[0]=Double.parseDouble(expr[0]);}catch(Exception z){first[0]=0;}
-                op[0]=x;
-                expr[0]="";
-                display.setText(x);
+            if("%".equals(x)){
+                if(justEvaluated[0]) justEvaluated[0]=false;
+                String s=expression[0].trim();
+                int i=s.length()-1;
+                while(i>=0 && (Character.isDigit(s.charAt(i)) || s.charAt(i)=='.')) i--;
+                String number=s.substring(i+1);
+                if(number.isEmpty()) return;
+                try{
+                    double v=Double.parseDouble(number)/100.0;
+                    expression[0]=s.substring(0,i+1)+trim(v);
+                    refreshLive.run();
+                }catch(Exception ignored){}
                 return;
             }
 
+            boolean operator="+".equals(x) || "-".equals(x) || "×".equals(x) || "÷".equals(x);
+            if(operator){
+                if(justEvaluated[0]) justEvaluated[0]=false;
+
+                String s=expression[0].trim();
+                if(s.isEmpty()) return;
+
+                if(isCalcOperatorChar(s.charAt(s.length()-1))){
+                    s=s.substring(0,s.length()-1).trim();
+                }
+                expression[0]=s+" "+x+" ";
+                refreshLive.run();
+                return;
+            }
+
+            if(justEvaluated[0]){
+                expression[0]="";
+                justEvaluated[0]=false;
+            }
+
+            String s=expression[0];
             if(".".equals(x)){
-                if(expr[0].contains(".")) return;
-                if(expr[0].isEmpty()) expr[0]="0";
+                int lastSpace=s.lastIndexOf(' ');
+                String last=lastSpace>=0?s.substring(lastSpace+1):s;
+                if(last.contains(".")) return;
+                if(last.isEmpty()) x="0.";
             }
 
-            expr[0]+=x;
-            display.setText(expr[0]);
+            expression[0]+=x;
+            refreshLive.run();
         };
 
         String[][] rows={
@@ -586,8 +691,10 @@ public class MainActivity extends Activity {
                     press.accept(((Button)v).getText().toString());
                 });
             }
-            root.addView(line,new LinearLayout.LayoutParams(-1,dp(64)));
+            calcBody.addView(line,new LinearLayout.LayoutParams(-1,dp(64)));
         }
+
+        setContentView(outer);
     }
 
     private String trim(double x){ if(x==(long)x)return String.valueOf((long)x); return new DecimalFormat("0.########").format(x); }
