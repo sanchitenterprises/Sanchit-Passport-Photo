@@ -135,15 +135,15 @@ public class MainActivity extends Activity {
         label.setTypeface(null,1);
         header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
 
-        TextView arrow=tv(openByDefault?"▲":"▼",26,ACCENT);
-        arrow.setGravity(Gravity.CENTER);
-        header.addView(arrow,new LinearLayout.LayoutParams(dp(58),dp(64)));
+        TextView grip=tv("≡",32,ACCENT);
+        grip.setGravity(Gravity.CENTER);
+        grip.setContentDescription("Drag tools");
+        header.addView(grip,new LinearLayout.LayoutParams(dp(58),dp(64)));
 
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
 
         LinearLayout tools=new LinearLayout(this);
         tools.setOrientation(LinearLayout.VERTICAL);
-        tools.setVisibility(openByDefault?View.VISIBLE:View.GONE);
         tools.setBackgroundColor(BG);
 
         addMenu(tools,"CALCULATOR",()->showCalculator());
@@ -164,22 +164,53 @@ public class MainActivity extends Activity {
         ScrollView dropScroll=new ScrollView(this);
         dropScroll.addView(tools);
         dropScroll.setVisibility(openByDefault?View.VISIBLE:View.GONE);
-        LinearLayout.LayoutParams dpParams=new LinearLayout.LayoutParams(-1,0);
-        dpParams.weight=openByDefault?1f:0f;
-        outer.addView(dropScroll,dpParams);
+        LinearLayout.LayoutParams dropParams=new LinearLayout.LayoutParams(-1,0);
+        dropParams.weight=openByDefault?1f:0f;
+        outer.addView(dropScroll,dropParams);
 
         View.OnClickListener toggle=v->{
             boolean opening=dropScroll.getVisibility()!=View.VISIBLE;
             dropScroll.setVisibility(opening?View.VISIBLE:View.GONE);
-            arrow.setText(opening?"▲":"▼");
             LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
-            p.height=opening?0:0;
+            p.height=0;
             p.weight=opening?1f:0f;
             dropScroll.setLayoutParams(p);
         };
         label.setOnClickListener(toggle);
-        arrow.setOnClickListener(toggle);
-        header.setOnClickListener(toggle);
+
+        final float[] downY={0f};
+        final boolean[] dragged={false};
+        grip.setOnTouchListener((v,e)->{
+            if(e.getAction()==MotionEvent.ACTION_DOWN){
+                downY[0]=e.getRawY();
+                dragged[0]=false;
+                return true;
+            }
+            if(e.getAction()==MotionEvent.ACTION_MOVE){
+                float dy=e.getRawY()-downY[0];
+                if(Math.abs(dy)>dp(18)) dragged[0]=true;
+                if(dy>dp(42) && dropScroll.getVisibility()!=View.VISIBLE){
+                    dropScroll.setVisibility(View.VISIBLE);
+                    LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
+                    p.height=0; p.weight=1f; dropScroll.setLayoutParams(p);
+                    downY[0]=e.getRawY();
+                    haptic();
+                }else if(dy<-dp(42) && dropScroll.getVisibility()==View.VISIBLE){
+                    dropScroll.setVisibility(View.GONE);
+                    LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)dropScroll.getLayoutParams();
+                    p.height=0; p.weight=0f; dropScroll.setLayoutParams(p);
+                    downY[0]=e.getRawY();
+                    haptic();
+                }
+                return true;
+            }
+            if(e.getAction()==MotionEvent.ACTION_UP){
+                if(!dragged[0]) toggle.onClick(v);
+                return true;
+            }
+            return true;
+        });
+
         menu.setOnClickListener(v->showTopMenu(menu));
     }
 
@@ -199,18 +230,23 @@ public class MainActivity extends Activity {
 
     private void showTopMenu(View anchor){
         PopupMenu p=new PopupMenu(this,anchor);
-        p.getMenu().add("Settings");
-        p.getMenu().add("View Logs");
-        p.getMenu().add("Dev Mode");
+        android.view.SubMenu lang=p.getMenu().addSubMenu("LANGUAGE");
+        lang.add("ENGLISH");
+        lang.add("HINDI");
+        p.getMenu().add("ABOUT");
         p.setOnMenuItemClickListener(item->{
             String s=item.getTitle().toString();
-            if("Settings".equals(s)){ logEvent("Open: Settings"); showSettings(); return true; }
-            if("View Logs".equals(s)){ logEvent("Open: View Logs"); showLogs(); return true; }
-            if("Dev Mode".equals(s)){
-                devMode=!devMode;
-                getSharedPreferences("sts",0).edit().putBoolean("devMode",devMode).apply();
-                logEvent("Dev Mode: "+(devMode?"ON":"OFF"));
-                Toast.makeText(this,"Dev Mode "+(devMode?"ON":"OFF"),Toast.LENGTH_SHORT).show();
+            if("ENGLISH".equals(s) || "HINDI".equals(s)){
+                getSharedPreferences("sts",0).edit().putString("language",s).apply();
+                Toast.makeText(this,"Language: "+s,Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            if("ABOUT".equals(s)){
+                new AlertDialog.Builder(this)
+                        .setTitle("STS DigiKit")
+                        .setMessage("Version 1.0.6\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools")
+                        .setPositiveButton("OK",null)
+                        .show();
                 return true;
             }
             return false;
@@ -238,7 +274,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.5\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.6\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,new LinearLayout.LayoutParams(-1,dp(120)));
     }
 
