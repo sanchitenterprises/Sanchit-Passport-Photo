@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.31\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.31\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.32\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.32\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.31\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.32\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2537,38 +2537,193 @@ public class MainActivity extends Activity {
         });
     }
 
+    private String buildQuickBillPreview(EditText customer,EditText item,EditText qty,EditText rate,EditText gst){
+        String customerName=customer.getText().toString().trim();
+        String itemName=item.getText().toString().trim();
+        String qRaw=qty.getText().toString().trim();
+        String rRaw=rate.getText().toString().trim();
+        String gRaw=gst.getText().toString().trim();
+
+        if(customerName.isEmpty() && itemName.isEmpty() && qRaw.isEmpty() && rRaw.isEmpty() && gRaw.isEmpty()){
+            return L("Bill preview will appear here","बिल यहाँ दिखाई देगा");
+        }
+
+        double q=val(qty);
+        double r=val(rate);
+        double base=q*r;
+        double gstRate=val(gst);
+        double g=base*gstRate/100.0;
+
+        StringBuilder res=new StringBuilder();
+        if(!customerName.isEmpty()){
+            res.append(L("Customer: ","ग्राहक: ")).append(customerName).append("\n\n");
+        }
+        res.append(itemName.isEmpty()?L("Item","आइटम"):itemName)
+                .append("\nQty: ").append(trim(q)).append(" × ₹").append(df.format(r))
+                .append("\n").append(L("Subtotal: ₹","उप-योग: ₹")).append(df.format(base))
+                .append("\nGST ").append(trim(gstRate)).append("%: ₹").append(df.format(g))
+                .append("\n").append(L("TOTAL: ₹","कुल: ₹")).append(df.format(base+g));
+        return res.toString();
+    }
+
+    private void printQuickBill58mm(String content){
+        if(!meaningfulResult(content)){
+            Toast.makeText(this,L("Nothing to print yet","अभी print करने के लिए bill नहीं है"),Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try{
+            android.print.PrintManager pm=(android.print.PrintManager)getSystemService(Context.PRINT_SERVICE);
+            if(pm==null){
+                Toast.makeText(this,L("Print service is not available","Print service उपलब्ध नहीं है"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            final String receipt=content.trim();
+            android.print.PrintDocumentAdapter adapter=new android.print.PrintDocumentAdapter(){
+                @Override public void onLayout(android.print.PrintAttributes oldAttributes,
+                                               android.print.PrintAttributes newAttributes,
+                                               android.os.CancellationSignal cancellationSignal,
+                                               LayoutResultCallback callback,
+                                               Bundle extras){
+                    if(cancellationSignal.isCanceled()){
+                        callback.onLayoutCancelled();
+                        return;
+                    }
+                    android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder("STS-DigiKit-58mm-Bill.pdf")
+                            .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                            .setPageCount(1)
+                            .build();
+                    callback.onLayoutFinished(info,true);
+                }
+
+                @Override public void onWrite(android.print.PageRange[] pages,
+                                              android.os.ParcelFileDescriptor destination,
+                                              android.os.CancellationSignal cancellationSignal,
+                                              WriteResultCallback callback){
+                    android.graphics.pdf.PdfDocument pdf=new android.graphics.pdf.PdfDocument();
+                    try{
+                        String[] lines=receipt.split("\\n",-1);
+                        int width=164;
+                        int lineHeight=14;
+                        int height=Math.max(220,24+(lines.length*lineHeight)+34);
+                        android.graphics.pdf.PdfDocument.PageInfo pageInfo=
+                                new android.graphics.pdf.PdfDocument.PageInfo.Builder(width,height,1).create();
+                        android.graphics.pdf.PdfDocument.Page page=pdf.startPage(pageInfo);
+                        android.graphics.Canvas canvas=page.getCanvas();
+
+                        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                        paint.setColor(Color.BLACK);
+                        paint.setTextSize(9f);
+                        paint.setTypeface(android.graphics.Typeface.MONOSPACE);
+
+                        float y=18f;
+                        for(String line:lines){
+                            if(cancellationSignal.isCanceled()){
+                                pdf.finishPage(page);
+                                callback.onWriteCancelled();
+                                pdf.close();
+                                return;
+                            }
+
+                            String remaining=line;
+                            if(remaining.length()==0){
+                                y+=lineHeight;
+                                continue;
+                            }
+
+                            while(remaining.length()>0){
+                                int fit=paint.breakText(remaining,true,width-16,null);
+                                if(fit<=0) fit=Math.min(1,remaining.length());
+                                String part=remaining.substring(0,fit);
+                                canvas.drawText(part,8f,y,paint);
+                                y+=lineHeight;
+                                remaining=remaining.substring(fit);
+                            }
+                        }
+
+                        canvas.drawText("--------------------------------",8f,y+4,paint);
+                        pdf.finishPage(page);
+
+                        java.io.FileOutputStream out=new java.io.FileOutputStream(destination.getFileDescriptor());
+                        pdf.writeTo(out);
+                        out.close();
+                        callback.onWriteFinished(new android.print.PageRange[]{android.print.PageRange.ALL_PAGES});
+                    }catch(Exception e){
+                        callback.onWriteFailed(e.getMessage());
+                    }finally{
+                        try{pdf.close();}catch(Exception ignored){}
+                    }
+                }
+            };
+
+            android.print.PrintAttributes attrs=new android.print.PrintAttributes.Builder()
+                    .setMediaSize(new android.print.PrintAttributes.MediaSize(
+                            "STS_58MM","58 mm Thermal",2283,8000))
+                    .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
+                    .setColorMode(android.print.PrintAttributes.COLOR_MODE_MONOCHROME)
+                    .build();
+
+            pm.print("STS DigiKit - 58 mm Bill",adapter,attrs);
+        }catch(Exception e){
+            Toast.makeText(this,L("Could not open print screen","Print screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void showQuickBill(){
         currentTool="BILL";
         shell(L("QUICK BILL","क्विक बिल"));
 
+        EditText customer=input(L("Customer Name","ग्राहक का नाम"));
+        customer.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+
         EditText name=input(L("Item Name","आइटम नाम"));
-        name.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        name.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+
         EditText qty=input(L("Quantity","मात्रा"));
         EditText rate=input(L("Rate ₹","दर ₹"));
         EditText gst=input("GST %");
+
+        root.addView(customer);
         root.addView(name);
         root.addView(qty);
         root.addView(rate);
         root.addView(gst);
 
-        Button go=btn(L("MAKE BILL","बिल बनाएं"));
-        root.addView(go,controlParams(60));
-
         TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),20,WHITE);
         styleResult(out);
+        out.setGravity(Gravity.CENTER);
         root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+
         addHistoryShareBar(root,"bill",L("QUICK BILL","क्विक बिल"),out);
 
-        go.setOnClickListener(v->{
-            double q=val(qty),r=val(rate),base=q*r,g=base*val(gst)/100.0;
-            String res=(name.getText().length()>0?name.getText().toString():L("Item","आइटम"))
-                    +"\nQty: "+trim(q)+" × ₹"+df.format(r)
-                    +"\n"+L("Subtotal: ₹","उप-योग: ₹")+df.format(base)
-                    +"\nGST: ₹"+df.format(g)
-                    +"\n"+L("TOTAL: ₹","कुल: ₹")+df.format(base+g);
-            out.setText(res);
-            savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),res);
+        Button print=btn(L("PRINT - 58 mm THERMAL","PRINT - 58 mm THERMAL"));
+        root.addView(print,controlParams(60));
+
+        Runnable updateBill=()->out.setText(buildQuickBillPreview(customer,name,qty,rate,gst));
+
+        android.text.TextWatcher watcher=new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
+            @Override public void onTextChanged(CharSequence s,int st,int before,int count){ updateBill.run(); }
+            @Override public void afterTextChanged(android.text.Editable e){}
+        };
+
+        customer.addTextChangedListener(watcher);
+        name.addTextChangedListener(watcher);
+        qty.addTextChangedListener(watcher);
+        rate.addTextChangedListener(watcher);
+        gst.addTextChangedListener(watcher);
+
+        print.setOnClickListener(v->{
+            String bill=buildQuickBillPreview(customer,name,qty,rate,gst);
+            out.setText(bill);
+            if(meaningfulResult(bill)){
+                savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),bill);
+                printQuickBill58mm(bill);
+            }
         });
+
+        updateBill.run();
     }
 
     private String scanParam(android.net.Uri uri,String key){
