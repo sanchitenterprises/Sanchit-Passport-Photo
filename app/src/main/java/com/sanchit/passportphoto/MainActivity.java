@@ -1145,61 +1145,180 @@ public class MainActivity extends Activity {
     }
 
     private void showAge(){
-        currentTool="AGE"; shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
+        currentTool="AGE";
+        shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
+
         final Calendar dob=Calendar.getInstance(), asof=Calendar.getInstance();
-        Button bd=btn("SELECT DATE OF BIRTH"); Button td=btn("CALCULATE UP TO TODAY"); Button go=btn("CALCULATE AGE");
-        root.addView(bd,controlParams(60)); root.addView(td,controlParams(60)); root.addView(go,controlParams(60));
-        TextView out=tv("Select date of birth",21,WHITE); styleResult(out); root.addView(out,resultParams(120));
-        bd.setOnClickListener(v->pickDate(dob, c->bd.setText(date(c))));
-        td.setOnClickListener(v->pickDate(asof, c->td.setText("UP TO: "+date(c))));
-        go.setOnClickListener(v->{haptic();Calendar a=(Calendar)asof.clone();Calendar b=(Calendar)dob.clone();if(a.before(b)){out.setText("Invalid date");return;}int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);if(d<0){m--;Calendar prev=(Calendar)a.clone();prev.add(Calendar.MONTH,-1);d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);}if(m<0){y--;m+=12;}long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;out.setText(y+" Years  "+m+" Months  "+d+" Days\nTotal Days: "+days);});
+        TextView out=tv(L("Select date of birth","जन्म तिथि चुनें"),21,WHITE);
+        styleResult(out);
+        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+
+        Button bd=btn(L("SELECT DATE OF BIRTH","जन्म तिथि चुनें"));
+        Button td=btn(L("CALCULATE UP TO TODAY","आज तक गणना"));
+        Button go=btn(L("CALCULATE AGE","आयु गणना"));
+        root.addView(bd,controlParams(58));
+        root.addView(td,controlParams(58));
+        root.addView(go,controlParams(60));
+        addHistoryShareBar(root,"age",L("AGE CALCULATOR","आयु कैलकुलेटर"),out);
+
+        bd.setOnClickListener(v->pickDate(dob, x->bd.setText(date(x))));
+        td.setOnClickListener(v->pickDate(asof, x->td.setText(L("UP TO: ","तक: ")+date(x))));
+        go.setOnClickListener(v->{
+            Calendar a=(Calendar)asof.clone();
+            Calendar b=(Calendar)dob.clone();
+            if(a.before(b)){out.setText(L("Invalid date","अमान्य तिथि"));return;}
+            int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);
+            int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);
+            int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);
+            if(d<0){
+                m--;
+                Calendar prev=(Calendar)a.clone();
+                prev.add(Calendar.MONTH,-1);
+                d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);
+            }
+            if(m<0){y--;m+=12;}
+            long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;
+            String res=y+" "+L("Years","वर्ष")+"  "+m+" "+L("Months","महीने")+"  "+d+" "+L("Days","दिन")
+                    +"\n"+L("Total Days: ","कुल दिन: ")+days;
+            out.setText(res);
+            savePanelHistory("age",L("AGE CALCULATOR","आयु कैलकुलेटर"),res);
+        });
     }
     interface DateCb{void done(Calendar c);}
     private void pickDate(Calendar c,DateCb cb){new DatePickerDialog(this,(v,y,m,d)->{c.set(y,m,d,12,0,0);cb.done(c);},c.get(Calendar.YEAR),c.get(Calendar.MONTH),c.get(Calendar.DAY_OF_MONTH)).show();}
     private String date(Calendar c){return String.format(java.util.Locale.US,"%02d/%02d/%04d",c.get(Calendar.DAY_OF_MONTH),c.get(Calendar.MONTH)+1,c.get(Calendar.YEAR));}
 
     private void showSavings(){
-        currentTool="SAVINGS"; shell(L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"));
+        currentTool="SAVINGS";
+        shell(L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"));
+
         Spinner mode=dropdown(new String[]{"SIP","RD","FD"});
         root.addView(mode,controlParams(58));
-        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);root.addView(box);
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.TOP);
+        root.addView(box,new LinearLayout.LayoutParams(-1,0,1));
+
         mode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            @Override public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){ financeBox(box,String.valueOf(mode.getSelectedItem())); }
+            @Override public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){
+                financeBox(box,String.valueOf(mode.getSelectedItem()));
+            }
             @Override public void onNothingSelected(android.widget.AdapterView<?> p){}
         });
         financeBox(box,"SIP");
     }
+
     private void financeBox(LinearLayout box,String mode){
         box.removeAllViews();
-        EditText p=input(mode.equals("FD")?"Principal Amount":"Monthly Amount"); EditText rate=input("Annual Interest %"); EditText years=input("Years");
-        box.addView(p);box.addView(rate);box.addView(years);Button calc=btn("CALCULATE "+mode);box.addView(calc,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);box.addView(out,resultParams(110));
-        calc.setOnClickListener(v->{haptic();double P=val(p),r=val(rate)/100.0,t=val(years),fv=0,invested=0;if(mode.equals("FD")){fv=P*Math.pow(1+r/4.0,4*t);invested=P;}else{double i=r/12.0;int n=(int)Math.round(t*12);invested=P*n;if(i==0)fv=invested;else fv=P*((Math.pow(1+i,n)-1)/i)*(mode.equals("SIP")?(1+i):1);}out.setText("Invested: ₹"+df.format(invested)+"\nMaturity: ₹"+df.format(fv)+"\nGain: ₹"+df.format(fv-invested));});
+
+        EditText p=input(mode.equals("FD")?L("Principal Amount","मूल राशि"):L("Monthly Amount","मासिक राशि"));
+        EditText rate=input(L("Annual Interest %","वार्षिक ब्याज %"));
+        EditText years=input(L("Years","वर्ष"));
+        box.addView(p);
+        box.addView(rate);
+        box.addView(years);
+
+        Button calc=btn(L("CALCULATE ","गणना ")+mode);
+        box.addView(calc,controlParams(60));
+
+        TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
+        styleResult(out);
+        box.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        addHistoryShareBar(box,"savings",L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"),out);
+
+        calc.setOnClickListener(v->{
+            double P=val(p),r=val(rate)/100.0,t=val(years),fv=0,invested=0;
+            if(mode.equals("FD")){
+                fv=P*Math.pow(1+r/4.0,4*t);
+                invested=P;
+            }else{
+                double i=r/12.0;
+                int n=(int)Math.round(t*12);
+                invested=P*n;
+                if(i==0) fv=invested;
+                else fv=P*((Math.pow(1+i,n)-1)/i)*(mode.equals("SIP")?(1+i):1);
+            }
+            String res=mode+"\n"+L("Invested: ₹","निवेश: ₹")+df.format(invested)
+                    +"\n"+L("Maturity: ₹","परिपक्वता: ₹")+df.format(fv)
+                    +"\n"+L("Gain: ₹","लाभ: ₹")+df.format(fv-invested);
+            out.setText(res);
+            savePanelHistory("savings",L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर"),res);
+        });
     }
 
     private void showEmiInterest(){
-        currentTool="EMI"; shell(L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"));
+        currentTool="EMI";
+        shell(L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"));
+
         Spinner mode=dropdown(new String[]{"EMI","SIMPLE INTEREST"});
         root.addView(mode,controlParams(58));
-        EditText loan=input("Loan / Principal Amount");EditText rate=input("Annual Interest %");EditText months=input("Tenure in Months");
-        root.addView(loan);root.addView(rate);root.addView(months);
-        Button calc=btn("CALCULATE");root.addView(calc,controlParams(58));
-        TextView out=tv("",20,WHITE);styleResult(out);root.addView(out,resultParams(120));
+
+        EditText loan=input(L("Loan / Principal Amount","लोन / मूल राशि"));
+        EditText rate=input(L("Annual Interest %","वार्षिक ब्याज %"));
+        EditText months=input(L("Tenure in Months","अवधि (महीने)"));
+        root.addView(loan);
+        root.addView(rate);
+        root.addView(months);
+
+        Button calc=btn(L("CALCULATE","गणना करें"));
+        root.addView(calc,controlParams(58));
+
+        TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
+        styleResult(out);
+        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        addHistoryShareBar(root,"emi",L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"),out);
+
         calc.setOnClickListener(v->{
             double P=val(loan);
+            String res;
             if(mode.getSelectedItemPosition()==0){
-                double i=val(rate)/1200.0;int n=(int)val(months);double e=i==0?(n==0?0:P/n):P*i*Math.pow(1+i,n)/(Math.pow(1+i,n)-1);double total=e*n;
-                out.setText("EMI: ₹"+df.format(e)+"\nInterest: ₹"+df.format(total-P)+"\nTotal: ₹"+df.format(total));
+                double i=val(rate)/1200.0;
+                int n=(int)val(months);
+                double e=i==0?(n==0?0:P/n):P*i*Math.pow(1+i,n)/(Math.pow(1+i,n)-1);
+                double total=e*n;
+                res="EMI: ₹"+df.format(e)
+                        +"\n"+L("Interest: ₹","ब्याज: ₹")+df.format(total-P)
+                        +"\n"+L("Total: ₹","कुल: ₹")+df.format(total);
             }else{
-                double r=val(rate)/100.0,t=val(months)/12.0;double si=P*r*t;out.setText("Interest: ₹"+df.format(si)+"\nTotal: ₹"+df.format(P+si));
+                double r=val(rate)/100.0,t=val(months)/12.0;
+                double si=P*r*t;
+                res=L("Interest: ₹","ब्याज: ₹")+df.format(si)
+                        +"\n"+L("Total: ₹","कुल: ₹")+df.format(P+si);
             }
+            out.setText(res);
+            savePanelHistory("emi",L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"),res);
         });
     }
 
     private void showNumberWords(){
-        currentTool="WORDS"; shell(L("NUMBER TO WORDS","संख्या शब्दों में"));
-        EditText e=input("Enter whole number");e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);root.addView(e);Button go=btn("CONVERT");root.addView(go,controlParams(60));TextView out=tv("",22,WHITE);styleResult(out);root.addView(out,resultParams(150));
-        go.setOnClickListener(v->{try{long n=Long.parseLong(e.getText().toString());out.setText(indianWords(n));}catch(Exception x){out.setText("Enter valid number");}});
+        currentTool="WORDS";
+        shell(L("NUMBER TO WORDS","संख्या शब्दों में"));
+
+        EditText e=input(L("Enter whole number","पूर्ण संख्या दर्ज करें"));
+        e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        root.addView(e);
+
+        Button go=btn(L("CONVERT","बदलें"));
+        root.addView(go,controlParams(60));
+
+        TextView out=tv(L("Converted words will appear here","शब्द यहाँ दिखाई देंगे"),22,WHITE);
+        styleResult(out);
+        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        addHistoryShareBar(root,"words",L("NUMBER TO WORDS","संख्या शब्दों में"),out);
+
+        go.setOnClickListener(v->{
+            try{
+                long n=Long.parseLong(e.getText().toString());
+                String res=indianWords(n);
+                out.setText(res);
+                savePanelHistory("words",L("NUMBER TO WORDS","संख्या शब्दों में"),e.getText().toString()+" = "+res);
+            }catch(Exception x){
+                out.setText(L("Enter valid number","सही संख्या दर्ज करें"));
+            }
+        });
     }
+
     private String indianWords(long n){
         if(n==0)return "Zero";if(n<0)return "Minus "+indianWords(-n);String s="";
         long crore=n/10000000;n%=10000000;long lakh=n/100000;n%=100000;long thousand=n/1000;n%=1000;long hundred=n/100;n%=100; if(crore>0)s+=indianWords(crore)+" Crore ";if(lakh>0)s+=indianWords(lakh)+" Lakh ";if(thousand>0)s+=indianWords(thousand)+" Thousand ";if(hundred>0)s+=indianWords(hundred)+" Hundred ";if(n>0)s+=under100((int)n);return s.trim();
@@ -1215,9 +1334,32 @@ public class MainActivity extends Activity {
     private Bitmap qrBitmap(String data,int size){try{BitMatrix m=new MultiFormatWriter().encode(data,BarcodeFormat.QR_CODE,size,size);Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.RGB_565);for(int y=0;y<size;y++)for(int x=0;x<size;x++)b.setPixel(x,y,m.get(x,y)?Color.BLACK:Color.WHITE);return b;}catch(Exception e){Toast.makeText(this,"QR error",Toast.LENGTH_SHORT).show();return null;}}
 
     private void showGst(){
-        currentTool="GST"; shell(L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"));
-        EditText amt=input("Amount");EditText disc=input("Discount %");EditText gst=input("GST %");root.addView(amt);root.addView(disc);root.addView(gst);Button go=btn("CALCULATE");root.addView(go,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);root.addView(out,resultParams(130));
-        go.setOnClickListener(v->{double a=val(amt),d=a*val(disc)/100.0,after=a-d,g=after*val(gst)/100.0;out.setText("Discount: ₹"+df.format(d)+"\nGST: ₹"+df.format(g)+"\nFinal: ₹"+df.format(after+g));});
+        currentTool="GST";
+        shell(L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"));
+
+        EditText amt=input(L("Amount","राशि"));
+        EditText disc=input(L("Discount %","छूट %"));
+        EditText gst=input("GST %");
+        root.addView(amt);
+        root.addView(disc);
+        root.addView(gst);
+
+        Button go=btn(L("CALCULATE","गणना करें"));
+        root.addView(go,controlParams(60));
+
+        TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
+        styleResult(out);
+        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        addHistoryShareBar(root,"gst",L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"),out);
+
+        go.setOnClickListener(v->{
+            double a=val(amt),d=a*val(disc)/100.0,after=a-d,g=after*val(gst)/100.0;
+            String res=L("Discount: ₹","छूट: ₹")+df.format(d)
+                    +"\nGST: ₹"+df.format(g)
+                    +"\n"+L("Final: ₹","अंतिम: ₹")+df.format(after+g);
+            out.setText(res);
+            savePanelHistory("gst",L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"),res);
+        });
     }
 
     private void showRemote(){
@@ -1228,19 +1370,76 @@ public class MainActivity extends Activity {
     }
 
     private void showUnitConverter(){
-        currentTool="UNIT"; shell(L("UNIT CONVERTER","यूनिट कन्वर्टर"));
-        Spinner type=dropdown(new String[]{"Kilometer → Mile","Mile → Kilometer","Kilogram → Pound","Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"});root.addView(type,controlParams(58));
-        EditText in=input("Value");root.addView(in);Button go=btn("CONVERT");root.addView(go,controlParams(60));TextView out=tv("",24,WHITE);styleResult(out);root.addView(out,resultParams(110));
-        go.setOnClickListener(v->{double x=val(in),y=0;switch(type.getSelectedItemPosition()){case 0:y=x*0.621371;break;case 1:y=x/0.621371;break;case 2:y=x*2.20462;break;case 3:y=x/2.20462;break;case 4:y=x*9/5+32;break;case 5:y=(x-32)*5/9;break;}out.setText(trim(y));});
+        currentTool="UNIT";
+        shell(L("UNIT CONVERTER","यूनिट कन्वर्टर"));
+
+        Spinner type=dropdown(new String[]{
+                "Kilometer → Mile","Mile → Kilometer","Kilogram → Pound",
+                "Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"
+        });
+        root.addView(type,controlParams(58));
+
+        EditText in=input(L("Value","मान"));
+        root.addView(in);
+
+        Button go=btn(L("CONVERT","बदलें"));
+        root.addView(go,controlParams(60));
+
+        TextView out=tv(L("Converted value will appear here","परिवर्तित मान यहाँ दिखेगा"),24,WHITE);
+        styleResult(out);
+        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        addHistoryShareBar(root,"unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),out);
+
+        go.setOnClickListener(v->{
+            double x=val(in),y=0;
+            switch(type.getSelectedItemPosition()){
+                case 0:y=x*0.621371;break;
+                case 1:y=x/0.621371;break;
+                case 2:y=x*2.20462;break;
+                case 3:y=x/2.20462;break;
+                case 4:y=x*9/5+32;break;
+                case 5:y=(x-32)*5/9;break;
+            }
+            String res=String.valueOf(type.getSelectedItem())+"\n"+trim(x)+" → "+trim(y);
+            out.setText(res);
+            savePanelHistory("unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),res);
+        });
     }
 
     private void openSpeedTest(){try{startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://fast.com")));}catch(Exception e){Toast.makeText(this,"Browser नहीं मिला",Toast.LENGTH_SHORT).show();}}
 
     private void showQuickBill(){
-        currentTool="BILL"; shell(L("QUICK BILL","क्विक बिल"));
-        EditText name=input("Item Name");name.setInputType(android.text.InputType.TYPE_CLASS_TEXT);EditText qty=input("Quantity");EditText rate=input("Rate ₹");EditText gst=input("GST %");
-        root.addView(name);root.addView(qty);root.addView(rate);root.addView(gst);Button go=btn("MAKE BILL");root.addView(go,controlParams(60));TextView out=tv("",20,WHITE);styleResult(out);root.addView(out,resultParams(180));
-        go.setOnClickListener(v->{double q=val(qty),r=val(rate),base=q*r,g=base*val(gst)/100.0;out.setText((name.getText().length()>0?name.getText().toString():"Item")+"\nQty: "+trim(q)+" × ₹"+df.format(r)+"\nSubtotal: ₹"+df.format(base)+"\nGST: ₹"+df.format(g)+"\nTOTAL: ₹"+df.format(base+g));});
+        currentTool="BILL";
+        shell(L("QUICK BILL","क्विक बिल"));
+
+        EditText name=input(L("Item Name","आइटम नाम"));
+        name.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        EditText qty=input(L("Quantity","मात्रा"));
+        EditText rate=input(L("Rate ₹","दर ₹"));
+        EditText gst=input("GST %");
+        root.addView(name);
+        root.addView(qty);
+        root.addView(rate);
+        root.addView(gst);
+
+        Button go=btn(L("MAKE BILL","बिल बनाएं"));
+        root.addView(go,controlParams(60));
+
+        TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),20,WHITE);
+        styleResult(out);
+        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        addHistoryShareBar(root,"bill",L("QUICK BILL","क्विक बिल"),out);
+
+        go.setOnClickListener(v->{
+            double q=val(qty),r=val(rate),base=q*r,g=base*val(gst)/100.0;
+            String res=(name.getText().length()>0?name.getText().toString():L("Item","आइटम"))
+                    +"\nQty: "+trim(q)+" × ₹"+df.format(r)
+                    +"\n"+L("Subtotal: ₹","उप-योग: ₹")+df.format(base)
+                    +"\nGST: ₹"+df.format(g)
+                    +"\n"+L("TOTAL: ₹","कुल: ₹")+df.format(base+g);
+            out.setText(res);
+            savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),res);
+        });
     }
 
     private void scanCode(){
