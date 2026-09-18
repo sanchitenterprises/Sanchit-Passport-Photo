@@ -10,6 +10,9 @@
     <application
         android:theme="@style/AppTheme"
         android:label="STS DigiKit"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:logo="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true">
