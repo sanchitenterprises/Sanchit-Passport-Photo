@@ -77,22 +77,33 @@ public class MainActivity extends Activity {
         TextView menu=tv("⋮",36,WHITE); menu.setGravity(Gravity.CENTER); top.addView(menu,new LinearLayout.LayoutParams(dp(50),dp(58)));
         outer.addView(top);
         ScrollView sc=new ScrollView(this); LinearLayout list=new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); list.setPadding(dp(12),dp(8),dp(12),dp(20));
-        TextView section=tv("CALCULATOR",22,WHITE); section.setGravity(Gravity.CENTER); section.setTypeface(null,1); section.setBackground(bg(PANEL2,12));
+        TextView section=tv("CALCULATOR                                      ▲",22,WHITE); section.setGravity(Gravity.CENTER); section.setTypeface(null,1); section.setBackground(bg(PANEL2,12));
         list.addView(section,new LinearLayout.LayoutParams(-1,dp(62)));
-        addMenu(list,"CALCULATOR",()->showCalculator());
-        addMenu(list,"CASH COUNTER",()->showCashCounter());
-        addMenu(list,"AGE CALCULATOR",()->showAge());
-        addMenu(list,"RD / FD / SIP CALCULATOR",()->showSavings());
-        addMenu(list,"EMI / INTEREST CALCULATOR",()->showEmiInterest());
-        addMenu(list,"NUMBER TO WORDS",()->showNumberWords());
-        addMenu(list,"QR CODE GENERATOR",()->showQr(false));
-        addMenu(list,"GST / DISCOUNT CALCULATOR",()->showGst());
-        addMenu(list,"WI-FI QR GENERATOR",()->showQr(true));
-        addMenu(list,"REMOTE",()->showRemote());
-        addMenu(list,"UNIT CONVERTER",()->showUnitConverter());
-        addMenu(list,"INTERNET SPEED TEST",()->openSpeedTest());
-        addMenu(list,"QUICK BILL",()->showQuickBill());
-        addMenu(list,"QR / BARCODE SCANNER",()->scanCode());
+
+        LinearLayout calcItems=new LinearLayout(this);
+        calcItems.setOrientation(LinearLayout.VERTICAL);
+        list.addView(calcItems,new LinearLayout.LayoutParams(-1,-2));
+
+        addMenu(calcItems,"CALCULATOR",()->showCalculator());
+        addMenu(calcItems,"CASH COUNTER",()->showCashCounter());
+        addMenu(calcItems,"AGE CALCULATOR",()->showAge());
+        addMenu(calcItems,"RD / FD / SIP CALCULATOR",()->showSavings());
+        addMenu(calcItems,"EMI / INTEREST CALCULATOR",()->showEmiInterest());
+        addMenu(calcItems,"NUMBER TO WORDS",()->showNumberWords());
+        addMenu(calcItems,"QR CODE GENERATOR",()->showQr(false));
+        addMenu(calcItems,"GST / DISCOUNT CALCULATOR",()->showGst());
+        addMenu(calcItems,"WI-FI QR GENERATOR",()->showQr(true));
+        addMenu(calcItems,"REMOTE",()->showRemote());
+        addMenu(calcItems,"UNIT CONVERTER",()->showUnitConverter());
+        addMenu(calcItems,"INTERNET SPEED TEST",()->openSpeedTest());
+        addMenu(calcItems,"QUICK BILL",()->showQuickBill());
+        addMenu(calcItems,"QR / BARCODE SCANNER",()->scanCode());
+
+        section.setOnClickListener(v->{
+            boolean open=calcItems.getVisibility()==View.VISIBLE;
+            calcItems.setVisibility(open?View.GONE:View.VISIBLE);
+            section.setText(open?"CALCULATOR                                      ▼":"CALCULATOR                                      ▲");
+        });
         sc.addView(list); outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1)); setContentView(outer);
     }
     private void addMenu(LinearLayout list,String s,Runnable r){
