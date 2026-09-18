@@ -496,8 +496,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.25\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.25\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.26\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.26\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -527,7 +527,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.25\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.26\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -823,9 +823,12 @@ public class MainActivity extends Activity {
         }
     }
 
-    private String buildCashSummary(int[] den, EditText[] qty, BigInteger total){
+    private String buildCashSummary(String partyName,int[] den, EditText[] qty, BigInteger total){
         StringBuilder b=new StringBuilder();
         b.append("STS DigiKit - Cash Counter\n");
+        if(partyName!=null && !partyName.trim().isEmpty()){
+            b.append("Party / Customer / Company: ").append(partyName.trim()).append("\n");
+        }
         b.append("TOTAL: ₹").append(formatCash(total)).append("\n\n");
         for(int i=0;i<den.length;i++){
             String q=qty[i].getText().toString().trim();
@@ -945,6 +948,19 @@ public class MainActivity extends Activity {
         body.setBackground(screenBg());
         outer.addView(body,new LinearLayout.LayoutParams(-1,0,1));
 
+        EditText partyName=new EditText(this);
+        partyName.setHint(L("Party / Customer / Company Name","Party / Customer / Company Name"));
+        partyName.setHintTextColor(SOFT);
+        partyName.setTextColor(WHITE);
+        partyName.setTextSize(18);
+        partyName.setSingleLine(true);
+        partyName.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        partyName.setPadding(dp(14),dp(8),dp(14),dp(8));
+        partyName.setBackground(fieldBg());
+        LinearLayout.LayoutParams partyParams=new LinearLayout.LayoutParams(-1,dp(56));
+        partyParams.setMargins(dp(6),dp(6),dp(6),dp(4));
+        body.addView(partyName,partyParams);
+
         LinearLayout actions=new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         Button history=btn(L("HISTORY","हिस्ट्री"));
@@ -1044,14 +1060,14 @@ public class MainActivity extends Activity {
         history.setOnClickListener(v->{
             recalc.run();
             if(grandTotal[0].signum()>0){
-                saveCashHistory(buildCashSummary(den,qty,grandTotal[0]),grandTotal[0]);
+                saveCashHistory(buildCashSummary(partyName.getText().toString(),den,qty,grandTotal[0]),grandTotal[0]);
             }
             showCashHistory();
         });
 
         share.setOnClickListener(v->{
             recalc.run();
-            String summary=buildCashSummary(den,qty,grandTotal[0]);
+            String summary=buildCashSummary(partyName.getText().toString(),den,qty,grandTotal[0]);
             if(grandTotal[0].signum()>0) saveCashHistory(summary,grandTotal[0]);
             shareCashSummary(summary);
         });
@@ -1180,46 +1196,92 @@ public class MainActivity extends Activity {
         return bar;
     }
 
+    private Calendar parseManualAgeDate(String raw) throws Exception{
+        String s=raw==null?"":raw.trim();
+        java.text.SimpleDateFormat sdf=new java.text.SimpleDateFormat("dd/MM/yy",java.util.Locale.US);
+        sdf.setLenient(false);
+        java.util.Date parsed=sdf.parse(s);
+        Calendar cal=Calendar.getInstance();
+        cal.setTime(parsed);
+        cal.set(Calendar.HOUR_OF_DAY,0);
+        cal.set(Calendar.MINUTE,0);
+        cal.set(Calendar.SECOND,0);
+        cal.set(Calendar.MILLISECOND,0);
+        return cal;
+    }
+
     private void showAge(){
         currentTool="AGE";
         shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
 
-        final Calendar dob=Calendar.getInstance(), asof=Calendar.getInstance();
-        TextView out=tv(L("Select date of birth","जन्म तिथि चुनें"),21,WHITE);
+        EditText dateInput=new EditText(this);
+        dateInput.setHint("DD/MM/YY");
+        dateInput.setHintTextColor(SOFT);
+        dateInput.setTextColor(WHITE);
+        dateInput.setTextSize(20);
+        dateInput.setGravity(Gravity.CENTER);
+        dateInput.setSingleLine(true);
+        dateInput.setInputType(android.text.InputType.TYPE_CLASS_DATETIME);
+        dateInput.setPadding(dp(14),dp(8),dp(14),dp(8));
+        dateInput.setBackground(fieldBg());
+        root.addView(dateInput,controlParams(58));
+
+        Button go=btn(L("SHOW DETAILS","DETAILS दिखाएं"));
+        root.addView(go,controlParams(60));
+
+        TextView out=tv(L("Enter date in DD/MM/YY","DD/MM/YY में date लिखें"),21,WHITE);
         styleResult(out);
+        out.setGravity(Gravity.CENTER);
         root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
 
-        Button bd=btn(L("SELECT DATE OF BIRTH","जन्म तिथि चुनें"));
-        Button td=btn(L("CALCULATE UP TO TODAY","आज तक गणना"));
-        Button go=btn(L("CALCULATE AGE","आयु गणना"));
-        root.addView(bd,controlParams(58));
-        root.addView(td,controlParams(58));
-        root.addView(go,controlParams(60));
         addHistoryShareBar(root,"age",L("AGE CALCULATOR","आयु कैलकुलेटर"),out);
 
-        bd.setOnClickListener(v->pickDate(dob, x->bd.setText(date(x))));
-        td.setOnClickListener(v->pickDate(asof, x->td.setText(L("UP TO: ","तक: ")+date(x))));
         go.setOnClickListener(v->{
-            Calendar a=(Calendar)asof.clone();
-            Calendar b=(Calendar)dob.clone();
-            if(a.before(b)){out.setText(L("Invalid date","अमान्य तिथि"));return;}
-            int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);
-            int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);
-            int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);
-            if(d<0){
-                m--;
-                Calendar prev=(Calendar)a.clone();
-                prev.add(Calendar.MONTH,-1);
-                d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);
+            try{
+                Calendar b=parseManualAgeDate(dateInput.getText().toString());
+                Calendar a=Calendar.getInstance();
+                a.set(Calendar.HOUR_OF_DAY,0);
+                a.set(Calendar.MINUTE,0);
+                a.set(Calendar.SECOND,0);
+                a.set(Calendar.MILLISECOND,0);
+
+                if(b.after(a)){
+                    out.setText(L("Invalid date","अमान्य date"));
+                    return;
+                }
+
+                int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);
+                int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);
+                int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);
+
+                if(d<0){
+                    m--;
+                    Calendar prev=(Calendar)a.clone();
+                    prev.add(Calendar.MONTH,-1);
+                    d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);
+                }
+                if(m<0){
+                    y--;
+                    m+=12;
+                }
+
+                long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;
+                String entered=new java.text.SimpleDateFormat("dd/MM/yy",java.util.Locale.US).format(b.getTime());
+
+                String res=L("Date: ","Date: ")+entered
+                        +"\n"+y+" "+L("Years","वर्ष")
+                        +"  "+m+" "+L("Months","महीने")
+                        +"  "+d+" "+L("Days","दिन")
+                        +"\n"+L("Total Days: ","कुल दिन: ")+days;
+
+                out.setText(res);
+                savePanelHistory("age",L("AGE CALCULATOR","आयु कैलकुलेटर"),res);
+            }catch(Exception e){
+                out.setText(L("Enter valid date in DD/MM/YY","DD/MM/YY में सही date लिखें"));
             }
-            if(m<0){y--;m+=12;}
-            long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;
-            String res=y+" "+L("Years","वर्ष")+"  "+m+" "+L("Months","महीने")+"  "+d+" "+L("Days","दिन")
-                    +"\n"+L("Total Days: ","कुल दिन: ")+days;
-            out.setText(res);
-            savePanelHistory("age",L("AGE CALCULATOR","आयु कैलकुलेटर"),res);
         });
     }
+
     interface DateCb{void done(Calendar c);}
     private void pickDate(Calendar c,DateCb cb){new DatePickerDialog(this,(v,y,m,d)->{c.set(y,m,d,12,0,0);cb.done(c);},c.get(Calendar.YEAR),c.get(Calendar.MONTH),c.get(Calendar.DAY_OF_MONTH)).show();}
     private String date(Calendar c){return String.format(java.util.Locale.US,"%02d/%02d/%04d",c.get(Calendar.DAY_OF_MONTH),c.get(Calendar.MONTH)+1,c.get(Calendar.YEAR));}
