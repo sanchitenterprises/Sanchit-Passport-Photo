@@ -421,8 +421,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.13\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.13\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.14\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.14\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -452,7 +452,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.13\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.14\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -487,31 +487,109 @@ public class MainActivity extends Activity {
     }
 
     private void showCalculator(){
-        currentTool="CALCULATOR"; shell(L("CALCULATOR","कैलकुलेटर"));
-        final TextView display=tv("0",32,WHITE); display.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL); display.setTypeface(null,1); display.setBackground(bg(PANEL,8)); root.addView(display,resultParams(80));
-        String[][] keys={{"7","8","9","÷"},{"4","5","6","×"},{"1","2","3","-"},{"0",".","C","+"},{"⌫","="}};
-        final String[] expr={""}; final double[] first={0}; final String[] op={""};
-        for(String[] row:keys){
+        currentTool="CALCULATOR";
+        shell(L("CALCULATOR","कैलकुलेटर"));
+
+        final TextView display=tv("0",32,WHITE);
+        display.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+        display.setTypeface(null,1);
+        display.setBackground(bg(PANEL,8));
+        root.addView(display,resultParams(80));
+
+        final String[] expr={""};
+        final double[] first={0};
+        final String[] op={""};
+
+        java.util.function.Consumer<String> press=(String x)->{
+            if("C".equals(x)){
+                expr[0]="";
+                first[0]=0;
+                op[0]="";
+                display.setText("0");
+                return;
+            }
+
+            if("⌫".equals(x)){
+                if(expr[0].length()>0) expr[0]=expr[0].substring(0,expr[0].length()-1);
+                display.setText(expr[0].isEmpty()?"0":expr[0]);
+                return;
+            }
+
+            if("%".equals(x)){
+                try{
+                    double v=Double.parseDouble(expr[0]);
+                    v=v/100.0;
+                    expr[0]=String.valueOf(v);
+                    display.setText(trim(v));
+                }catch(Exception ignored){}
+                return;
+            }
+
+            if("=".equals(x)){
+                double second;
+                try{second=Double.parseDouble(expr[0]);}catch(Exception z){second=0;}
+                double ans=second;
+                if("+".equals(op[0])) ans=first[0]+second;
+                else if("-".equals(op[0])) ans=first[0]-second;
+                else if("×".equals(op[0])) ans=first[0]*second;
+                else if("÷".equals(op[0])) ans=second==0?0:first[0]/second;
+                expr[0]=String.valueOf(ans);
+                display.setText(trim(ans));
+                op[0]="";
+                return;
+            }
+
+            if("+".equals(x) || "-".equals(x) || "×".equals(x) || "÷".equals(x)){
+                try{first[0]=Double.parseDouble(expr[0]);}catch(Exception z){first[0]=0;}
+                op[0]=x;
+                expr[0]="";
+                display.setText(x);
+                return;
+            }
+
+            if(".".equals(x)){
+                if(expr[0].contains(".")) return;
+                if(expr[0].isEmpty()) expr[0]="0";
+            }
+
+            expr[0]+=x;
+            display.setText(expr[0]);
+        };
+
+        String[][] rows={
+                {"C","⌫","÷"},
+                {"7","8","9","%","×"},
+                {"4","5","6",".","-"},
+                {"1","2","3","+"},
+                {"0","00","000","="}
+        };
+
+        for(int r=0;r<rows.length;r++){
             LinearLayout line=new LinearLayout(this);
-            for(String k:row){
-                Button b=btn(k); line.addView(b,new LinearLayout.LayoutParams(0,dp(62),1));
+            line.setOrientation(LinearLayout.HORIZONTAL);
+
+            for(int i=0;i<rows[r].length;i++){
+                String k=rows[r][i];
+                Button b=btn(k);
+                b.setTextSize(("C".equals(k)||"⌫".equals(k))?20:22);
+
+                float weight=1f;
+                if(r==0 && ("C".equals(k)||"⌫".equals(k))) weight=2f;
+                if((r==3 && "+".equals(k)) || (r==4 && "=".equals(k))) weight=2f;
+
+                LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(62),weight);
+                bp.setMargins(dp(1),dp(1),dp(1),dp(1));
+                line.addView(b,bp);
+
                 b.setOnClickListener(v->{
-                    String x=((Button)v).getText().toString();
-                    if("C".equals(x)){expr[0]=""; first[0]=0;op[0]="";display.setText("0");}
-                    else if("⌫".equals(x)){if(expr[0].length()>0)expr[0]=expr[0].substring(0,expr[0].length()-1);display.setText(expr[0].isEmpty()?"0":expr[0]);}
-                    else if("=".equals(x)){
-                        double second;try{second=Double.parseDouble(expr[0]);}catch(Exception z){second=0;}
-                        double ans=second;
-                        if("+".equals(op[0]))ans=first[0]+second; else if("-".equals(op[0]))ans=first[0]-second; else if("×".equals(op[0]))ans=first[0]*second; else if("÷".equals(op[0]))ans=second==0?0:first[0]/second;
-                        expr[0]=String.valueOf(ans);display.setText(trim(ans));op[0]="";
-                    } else if("+−×÷".contains(x)){
-                        try{first[0]=Double.parseDouble(expr[0]);}catch(Exception z){first[0]=0;} op[0]=x; expr[0]=""; display.setText(x);
-                    } else {expr[0]+=x;display.setText(expr[0]);}
+                    haptic();
+                    press.accept(((Button)v).getText().toString());
                 });
             }
             root.addView(line,new LinearLayout.LayoutParams(-1,dp(64)));
         }
     }
+
     private String trim(double x){ if(x==(long)x)return String.valueOf((long)x); return new DecimalFormat("0.########").format(x); }
 
     private void showCashCounter(){
