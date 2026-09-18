@@ -640,6 +640,29 @@ public class MainActivity extends Activity {
         final String[] expression={""};
         final boolean[] justEvaluated={false};
 
+        LinearLayout calcActions=new LinearLayout(this);
+        calcActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button calcHistory=btn(L("HISTORY","हिस्ट्री"));
+        Button calcShare=btn(L("SHARE","शेयर"));
+        calcActions.addView(calcHistory,new LinearLayout.LayoutParams(0,dp(48),1));
+        calcActions.addView(calcShare,new LinearLayout.LayoutParams(0,dp(48),1));
+        calcBody.addView(calcActions,new LinearLayout.LayoutParams(-1,dp(50)));
+
+        calcHistory.setOnClickListener(v->{
+            String value=typing.getText().toString().trim();
+            String result=display.getText().toString().trim();
+            String full=(value.isEmpty()?result:value+"\n= "+result);
+            if(meaningfulResult(result)) savePanelHistory("calculator",L("CALCULATOR","कैलकुलेटर"),full);
+            showPanelHistory("calculator",L("CALCULATOR","कैलकुलेटर"));
+        });
+        calcShare.setOnClickListener(v->{
+            String value=typing.getText().toString().trim();
+            String result=display.getText().toString().trim();
+            String full=(value.isEmpty()?result:value+"\n= "+result);
+            if(meaningfulResult(result)) savePanelHistory("calculator",L("CALCULATOR","कैलकुलेटर"),full);
+            sharePanelText(L("CALCULATOR","कैलकुलेटर"),full);
+        });
+
         Runnable refreshLive=()->{
             typing.setText(expression[0]);
             String complete=calcCompleteExpression(expression[0]);
@@ -685,6 +708,7 @@ public class MainActivity extends Activity {
                     String formatted=calcFormat(ans);
                     typing.setText(complete+" =");
                     display.setText(formatted);
+                    savePanelHistory("calculator",L("CALCULATOR","कैलकुलेटर"),complete+" = "+formatted);
                     expression[0]=formatted;
                     justEvaluated[0]=true;
                 }catch(Exception ex){
@@ -1326,11 +1350,78 @@ public class MainActivity extends Activity {
     private String under100(int n){String[] a={"","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"};String[] t={"","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"};if(n<20)return a[n];return t[n/10]+(n%10>0?" "+a[n%10]:"");}
 
     private void showQr(boolean wifi){
-        currentTool=wifi?"WIFI_QR":"QR"; shell(wifi?L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"):L("QR CODE GENERATOR","QR कोड जनरेटर"));
-        EditText a=input(wifi?"Wi-Fi Name (SSID)":"Text / URL");root.addView(a);EditText b=null;if(wifi){b=input("Wi-Fi Password");b.setInputType(android.text.InputType.TYPE_CLASS_TEXT);root.addView(b);}
-        Button go=btn("GENERATE QR");root.addView(go,controlParams(60));ImageView img=new ImageView(this);img.setAdjustViewBounds(true);root.addView(img,new LinearLayout.LayoutParams(-1,dp(340)));EditText pass=b;
-        go.setOnClickListener(v->{String data=wifi?"WIFI:T:WPA;S:"+a.getText().toString()+";P:"+pass.getText().toString()+";;":a.getText().toString();Bitmap bm=qrBitmap(data,800);if(bm!=null)img.setImageBitmap(bm);});
+        currentTool=wifi?"WIFI_QR":"QR";
+        String title=wifi?L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"):L("QR CODE GENERATOR","QR कोड जनरेटर");
+        shell(title);
+
+        EditText a=input(wifi?L("Wi-Fi Name (SSID)","वाई-फाई नाम (SSID)"):L("Text / URL","टेक्स्ट / URL"));
+        root.addView(a);
+
+        EditText b=null;
+        if(wifi){
+            b=input(L("Wi-Fi Password","वाई-फाई पासवर्ड"));
+            b.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+            root.addView(b);
+        }
+
+        Button go=btn(L("GENERATE QR","QR बनाएं"));
+        root.addView(go,controlParams(60));
+
+        TextView info=tv(L("Generate a QR code to enable History / Share","History / Share के लिए QR बनाएं"),16,SOFT);
+        info.setGravity(Gravity.CENTER);
+        root.addView(info,controlParams(50));
+
+        ImageView img=new ImageView(this);
+        img.setAdjustViewBounds(true);
+        img.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        img.setBackground(bg(Color.WHITE,12));
+        root.addView(img,new LinearLayout.LayoutParams(-1,0,1));
+
+        LinearLayout actions=new LinearLayout(this);
+        Button history=btn(L("HISTORY","हिस्ट्री"));
+        Button share=btn(L("SHARE","शेयर"));
+        actions.addView(history,new LinearLayout.LayoutParams(0,dp(50),1));
+        actions.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
+        root.addView(actions,controlParams(52));
+
+        EditText pass=b;
+        final String[] shareValue={""};
+        final String[] historyValue={""};
+
+        go.setOnClickListener(v->{
+            String primary=a.getText().toString().trim();
+            if(primary.isEmpty()){
+                Toast.makeText(this,L("Enter data first","पहले जानकारी दर्ज करें"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String data;
+            if(wifi){
+                String pwd=pass==null?"":pass.getText().toString();
+                data="WIFI:T:WPA;S:"+primary+";P:"+pwd+";;";
+                shareValue[0]=data;
+                historyValue[0]="SSID: "+primary;
+                info.setText(L("Wi-Fi QR generated for: ","वाई-फाई QR बना: ")+primary);
+            }else{
+                data=primary;
+                shareValue[0]=primary;
+                historyValue[0]=primary;
+                info.setText(L("QR generated","QR बन गया"));
+            }
+            Bitmap bm=qrBitmap(data,800);
+            if(bm!=null){
+                img.setImageBitmap(bm);
+                savePanelHistory(wifi?"wifi_qr":"qr",title,historyValue[0]);
+            }
+        });
+
+        history.setOnClickListener(v->{
+            if(meaningfulResult(historyValue[0])) savePanelHistory(wifi?"wifi_qr":"qr",title,historyValue[0]);
+            showPanelHistory(wifi?"wifi_qr":"qr",title);
+        });
+
+        share.setOnClickListener(v->sharePanelText(title,shareValue[0]));
     }
+
     private Bitmap qrBitmap(String data,int size){try{BitMatrix m=new MultiFormatWriter().encode(data,BarcodeFormat.QR_CODE,size,size);Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.RGB_565);for(int y=0;y<size;y++)for(int x=0;x<size;x++)b.setPixel(x,y,m.get(x,y)?Color.BLACK:Color.WHITE);return b;}catch(Exception e){Toast.makeText(this,"QR error",Toast.LENGTH_SHORT).show();return null;}}
 
     private void showGst(){
@@ -1451,7 +1542,20 @@ public class MainActivity extends Activity {
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         IntentResult r=IntentIntegrator.parseActivityResult(requestCode,resultCode,data);
         if(r!=null){
-            if(r.getContents()!=null)new AlertDialog.Builder(this).setTitle("Scan Result").setMessage(r.getContents()).setPositiveButton("COPY",(d,w)->{android.content.ClipboardManager c=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);c.setPrimaryClip(android.content.ClipData.newPlainText("scan",r.getContents()));}).setNegativeButton("CLOSE",null).show();
+            if(r.getContents()!=null){
+                String value=r.getContents();
+                savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),value);
+                new AlertDialog.Builder(this)
+                        .setTitle(L("Scan Result","स्कैन परिणाम"))
+                        .setMessage(value)
+                        .setPositiveButton(L("COPY","कॉपी"),(d,w)->{
+                            android.content.ClipboardManager cm=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("scan",value));
+                        })
+                        .setNeutralButton(L("SHARE","शेयर"),(d,w)->sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),value))
+                        .setNegativeButton(L("CLOSE","बंद करें"),null)
+                        .show();
+            }
             return;
         }
         super.onActivityResult(requestCode,resultCode,data);
