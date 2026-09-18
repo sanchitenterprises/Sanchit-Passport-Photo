@@ -186,7 +186,7 @@ public class MainActivity extends Activity {
         else if("UNIT".equals(key)) showUnitConverter();
         else if("SPEED".equals(key)) openSpeedTest();
         else if("BILL".equals(key)) showQuickBill();
-        else if("SCAN".equals(key)) scanCode();
+        else if("SCAN".equals(key)) showScanner();
     }
 
     private void reopenCurrentTool(){
@@ -484,8 +484,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.21\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.21\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.22\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.22\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -515,7 +515,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.21\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.22\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2332,12 +2332,62 @@ public class MainActivity extends Activity {
         });
     }
 
-    private static final int REQ_CAMERA_SCAN=9011;
     private boolean scanLaunching=false;
+    private TextView scannerStatus;
+
+    private void showScanner(){
+        currentTool="SCAN";
+        toolPickerOpen=false;
+        shell(L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"));
+
+        scannerStatus=tv(
+                L("Ready. Tap START SCANNER and point the camera at a QR code or barcode.",
+                  "तैयार। START SCANNER दबाएं और कैमरा QR code या barcode की ओर करें।"),
+                18,WHITE);
+        scannerStatus.setGravity(Gravity.CENTER);
+        styleResult(scannerStatus);
+        root.addView(scannerStatus,new LinearLayout.LayoutParams(-1,0,1));
+
+        Button startScan=btn(L("START SCANNER","स्कैनर शुरू करें"));
+        root.addView(startScan,controlParams(64));
+
+        LinearLayout actions=new LinearLayout(this);
+        Button history=btn(L("HISTORY","हिस्ट्री"));
+        Button help=btn(L("CAMERA HELP","कैमरा मदद"));
+        actions.addView(history,new LinearLayout.LayoutParams(0,dp(52),1));
+        actions.addView(help,new LinearLayout.LayoutParams(0,dp(52),1));
+        root.addView(actions,controlParams(54));
+
+        startScan.setOnClickListener(v->launchScanner());
+
+        history.setOnClickListener(v->
+                showPanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर")));
+
+        help.setOnClickListener(v->new AlertDialog.Builder(this)
+                .setTitle(L("CAMERA PERMISSION","कैमरा अनुमति"))
+                .setMessage(L(
+                        "When the scanner opens, Android may ask for Camera permission. Allow it to scan QR codes and barcodes. If permission was previously blocked, enable Camera for STS DigiKit from Android App Settings.",
+                        "Scanner खुलने पर Android Camera permission मांग सकता है। QR और barcode scan करने के लिए Allow करें। अगर permission पहले block की गई है, तो Android App Settings में STS DigiKit के लिए Camera चालू करें।"))
+                .setPositiveButton("OK",null)
+                .show());
+    }
 
     private void launchScanner(){
         if(scanLaunching) return;
+
+        if(!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)){
+            if(scannerStatus!=null) scannerStatus.setText(
+                    L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"));
+            Toast.makeText(this,
+                    L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
         scanLaunching=true;
+        if(scannerStatus!=null) scannerStatus.setText(
+                L("Opening camera scanner...","कैमरा scanner खोल रहे हैं..."));
+
         try{
             IntentIntegrator in=new IntentIntegrator(this);
             in.setDesiredBarcodeFormats(IntentIntegrator.ALL_CODE_TYPES);
@@ -2345,81 +2395,49 @@ public class MainActivity extends Activity {
             in.setBeepEnabled(true);
             in.setOrientationLocked(true);
             in.setBarcodeImageEnabled(false);
-            in.setCaptureActivity(com.journeyapps.barcodescanner.CaptureActivity.class);
             in.initiateScan();
-        }catch(Exception e){
+        }catch(Throwable e){
             scanLaunching=false;
+            if(scannerStatus!=null) scannerStatus.setText(
+                    L("Scanner could not start. Try again or check Camera permission.",
+                      "Scanner शुरू नहीं हो सका। फिर कोशिश करें या Camera permission जांचें।"));
             Toast.makeText(this,
-                    L("Scanner could not start. Please try again.","स्कैनर शुरू नहीं हो सका। फिर कोशिश करें।"),
+                    L("Scanner could not start. App is still safe.",
+                      "Scanner शुरू नहीं हो सका। App बंद नहीं होगा।"),
                     Toast.LENGTH_LONG).show();
-            reopenCurrentTool();
-        }
-    }
-
-    private void scanCode(){
-        currentTool="SCAN";
-        toolPickerOpen=false;
-
-        if(!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)){
-            Toast.makeText(this,
-                    L("Camera is not available on this device.","इस डिवाइस में कैमरा उपलब्ध नहीं है।"),
-                    Toast.LENGTH_LONG).show();
-            reopenCurrentTool();
-            return;
-        }
-
-        if(Build.VERSION.SDK_INT>=23 &&
-                checkSelfPermission(android.Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){
-            try{
-                requestPermissions(new String[]{android.Manifest.permission.CAMERA},REQ_CAMERA_SCAN);
-            }catch(Exception e){
-                Toast.makeText(this,
-                        L("Camera permission request failed.","कैमरा permission request नहीं हो सकी।"),
-                        Toast.LENGTH_LONG).show();
-                reopenCurrentTool();
-            }
-            return;
-        }
-
-        launchScanner();
-    }
-
-    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
-        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
-        if(requestCode==REQ_CAMERA_SCAN){
-            if(grantResults.length>0 && grantResults[0]==PackageManager.PERMISSION_GRANTED){
-                launchScanner();
-            }else{
-                scanLaunching=false;
-                Toast.makeText(this,
-                        L("Camera permission is required for QR / Barcode Scanner.","QR / Barcode Scanner के लिए Camera permission जरूरी है।"),
-                        Toast.LENGTH_LONG).show();
-                reopenCurrentTool();
-            }
         }
     }
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         IntentResult r=IntentIntegrator.parseActivityResult(requestCode,resultCode,data);
-        if(r!=null) scanLaunching=false;
         if(r!=null){
+            scanLaunching=false;
+            currentTool="SCAN";
+            showScanner();
+
             if(r.getContents()!=null){
                 String value=r.getContents();
+                if(scannerStatus!=null) scannerStatus.setText(L("Scan successful","स्कैन सफल"));
                 savePanelHistory("scanner",L("QR / BARCODE SCANNER","QR / बारकोड स्कैनर"),value);
+
                 new AlertDialog.Builder(this)
                         .setTitle(L("Scan Result","स्कैन परिणाम"))
                         .setMessage(value)
                         .setPositiveButton(L("COPY","कॉपी"),(d,w)->{
-                            android.content.ClipboardManager cm=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
-                            cm.setPrimaryClip(android.content.ClipData.newPlainText("scan",value));
+                            try{
+                                android.content.ClipboardManager cm=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("scan",value));
+                            }catch(Exception ignored){}
                         })
-                        .setNeutralButton(L("SHARE","शेयर"),(d,w)->sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),value))
+                        .setNeutralButton(L("SHARE","शेयर"),(d,w)->
+                                sharePanelText(L("SCAN RESULT","स्कैन परिणाम"),value))
                         .setNegativeButton(L("CLOSE","बंद करें"),null)
                         .show();
             }else{
-                Toast.makeText(this,L("Scan cancelled","स्कैन रद्द किया गया"),Toast.LENGTH_SHORT).show();
+                if(scannerStatus!=null) scannerStatus.setText(
+                        L("Scan cancelled. Tap START SCANNER to try again.",
+                          "Scan रद्द हुआ। फिर कोशिश के लिए START SCANNER दबाएं।"));
             }
-            reopenCurrentTool();
             return;
         }
         super.onActivityResult(requestCode,resultCode,data);
