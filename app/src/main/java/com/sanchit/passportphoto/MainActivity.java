@@ -2792,6 +2792,26 @@ public class MainActivity extends Activity {
         updateBill.run();
     }
 
+    private String scanParam(android.net.Uri uri,String key){
+        try{
+            String v=uri.getQueryParameter(key);
+            return v==null?"":v.trim();
+        }catch(Exception e){
+            return "";
+        }
+    }
+
+    private String parseWifiPart(String raw,String key){
+        try{
+            String body=raw.substring(5);
+            java.util.regex.Matcher m=java.util.regex.Pattern
+                    .compile("(?:^|;)"+java.util.regex.Pattern.quote(key)+":((?:\\\\.|[^;])*)")
+                    .matcher(body);
+            if(m.find()) return m.group(1).replace("\\;",";").replace("\\:"," : ").replace("\\\\","\\");
+        }catch(Exception ignored){}
+        return "";
+    }
+
     private String scanDetails(String raw,com.google.zxing.BarcodeFormat format){
         String value=raw==null?"":raw.trim();
         StringBuilder b=new StringBuilder();
