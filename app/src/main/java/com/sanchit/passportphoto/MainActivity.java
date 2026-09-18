@@ -718,68 +718,6 @@ public class MainActivity extends Activity {
 
     private String trim(double x){ if(x==(long)x)return String.valueOf((long)x); return new DecimalFormat("0.########").format(x); }
 
-    private String cashMoney(BigInteger n){
-        try{return new DecimalFormat("#,##0").format(n);}catch(Exception e){return n.toString();}
-    }
-
-    private String buildCashSummary(int[] den, java.util.ArrayList<EditText> qty, java.util.ArrayList<TextView> amounts){
-        StringBuilder b=new StringBuilder();
-        b.append("STS DigiKit - Cash Counter\n");
-        BigInteger total=BigInteger.ZERO;
-        for(int i=0;i<den.length;i++){
-            String qs=qty.get(i).getText().toString().trim();
-            BigInteger q=BigInteger.ZERO;
-            try{if(!qs.isEmpty()) q=new BigInteger(qs);}catch(Exception ignored){}
-            if(q.signum()>0){
-                BigInteger amount=q.multiply(BigInteger.valueOf(den[i]));
-                total=total.add(amount);
-                b.append("₹").append(den[i]).append(" × ").append(q)
-                        .append(" = ₹").append(cashMoney(amount)).append("\n");
-            }
-        }
-        b.append("----------------\nTOTAL = ₹").append(cashMoney(total));
-        return b.toString();
-    }
-
-    private void saveCashHistory(String summary){
-        if(summary==null || summary.trim().isEmpty() || summary.endsWith("TOTAL = ₹0")) return;
-        String stamp=new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm",java.util.Locale.US).format(new java.util.Date());
-        String entry=stamp+"\n"+summary;
-        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
-        String old=sp.getString("cashHistory","");
-        String combined=entry+(old.isEmpty()?"":"\n\n====================\n\n"+old);
-        if(combined.length()>30000) combined=combined.substring(0,30000);
-        sp.edit().putString("cashHistory",combined).apply();
-    }
-
-    private void showCashHistory(String currentSummary){
-        saveCashHistory(currentSummary);
-        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
-        String history=sp.getString("cashHistory","");
-        if(history.isEmpty()) history=L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।");
-
-        final String shown=history;
-        new AlertDialog.Builder(this)
-                .setTitle(L("CASH HISTORY","कैश हिस्ट्री"))
-                .setMessage(shown)
-                .setPositiveButton(L("CLOSE","बंद करें"),null)
-                .setNeutralButton(L("CLEAR","साफ करें"),(d,w)->{
-                    sp.edit().remove("cashHistory").apply();
-                    Toast.makeText(this,L("History cleared","हिस्ट्री साफ कर दी गई"),Toast.LENGTH_SHORT).show();
-                })
-                .show();
-    }
-
-    private void shareCashSummary(String summary){
-        saveCashHistory(summary);
-        Intent send=new Intent(Intent.ACTION_SEND);
-        send.setType("text/plain");
-        send.putExtra(Intent.EXTRA_SUBJECT,"STS DigiKit Cash Counter");
-        send.putExtra(Intent.EXTRA_TEXT,summary);
-        try{startActivity(Intent.createChooser(send,L("Share Cash Summary","कैश सारांश शेयर करें")));}
-        catch(Exception e){Toast.makeText(this,L("No share app found","शेयर करने वाला ऐप नहीं मिला"),Toast.LENGTH_SHORT).show();}
-    }
-
     private String formatCash(BigInteger value){
         try{
             java.text.NumberFormat nf=java.text.NumberFormat.getIntegerInstance(new java.util.Locale("en","IN"));
