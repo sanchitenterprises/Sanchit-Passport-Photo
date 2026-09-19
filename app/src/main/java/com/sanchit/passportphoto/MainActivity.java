@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.34\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.34\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.35\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.35\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.34\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.35\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2609,8 +2609,8 @@ public class MainActivity extends Activity {
             return L("Bill preview will appear here","बिल यहाँ दिखाई देगा");
         }
 
-        final int W=30;
-        final String line="------------------------------";
+        final int W=34;
+        final String line="----------------------------------";
 
         double subTotal=0;
         double gstTotal=0;
@@ -2626,9 +2626,9 @@ public class MainActivity extends Activity {
         }
         res.append(line).append("\n");
 
-        res.append(qbPadRight(L("Item","आइटम"),16))
-                .append(qbPadLeft(L("Qty","मात्रा"),5))
-                .append(qbPadLeft(L("Amount","राशि"),9)).append("\n");
+        res.append(qbPadRight(L("Item","आइटम"),18))
+                .append(qbPadLeft(L("Qty","मात्रा"),6))
+                .append(qbPadLeft(L("Amount","राशि"),10)).append("\n");
         res.append(line).append("\n");
 
         for(QuickBillItem row:all){
@@ -2637,15 +2637,15 @@ public class MainActivity extends Activity {
             subTotal+=base;
             gstTotal+=rowGst;
 
-            res.append(qbPadRight(row.name,16))
-                    .append(qbPadLeft(trim(row.qty),5))
-                    .append(qbPadLeft(df.format(base),9))
+            res.append(qbPadRight(row.name,18))
+                    .append(qbPadLeft(trim(row.qty),6))
+                    .append(qbPadLeft(df.format(base),10))
                     .append("\n");
 
             if(row.gst>0){
                 String gstLine=L("GST ","GST ")+trim(row.gst)+"%";
-                res.append(qbPadRight("  "+gstLine,21))
-                        .append(qbPadLeft(df.format(rowGst),9))
+                res.append(qbPadRight("  "+gstLine,24))
+                        .append(qbPadLeft(df.format(rowGst),10))
                         .append("\n");
             }
         }
@@ -2653,21 +2653,21 @@ public class MainActivity extends Activity {
         double total=subTotal+gstTotal;
 
         res.append(line).append("\n");
-        res.append(qbPadRight(L("Sub Total","उप-योग"),19))
+        res.append(qbPadRight(L("Sub Total","उप-योग"),23))
                 .append(qbPadLeft(df.format(subTotal),11)).append("\n");
 
         if(gstTotal>0){
-            res.append(qbPadRight(L("GST","जीएसटी"),19))
+            res.append(qbPadRight(L("GST","जीएसटी"),23))
                     .append(qbPadLeft(df.format(gstTotal),11)).append("\n");
         }
 
         res.append(line).append("\n");
-        res.append(qbPadRight(L("TOTAL","कुल"),18))
+        res.append(qbPadRight(L("TOTAL","कुल"),22))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         res.append(line).append("\n");
-        res.append(qbPadRight(L("Cash","नकद"),18))
+        res.append(qbPadRight(L("Cash","नकद"),22))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
-        res.append(qbPadRight(L("Cash Given","प्राप्त नकद"),18))
+        res.append(qbPadRight(L("Cash Given","प्राप्त नकद"),22))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         return res.toString();
     }
@@ -2727,8 +2727,24 @@ public class MainActivity extends Activity {
                                 ?android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)
                                 :android.graphics.Typeface.MONOSPACE);
 
-                        final float left=5f;
-                        final float usable=pageWidthPt-10f;
+                        final float left=2.84f;
+                        final float usable=pageWidthPt-5.68f;
+
+                        float size="HINDI".equals(language)?7.5f:7.6f;
+                        paint.setTextSize(size);
+                        float widest=0f;
+                        for(String measureLine:receiptLines){
+                            widest=Math.max(widest,paint.measureText(measureLine));
+                        }
+                        while(widest>usable && size>5.8f){
+                            size-=0.2f;
+                            paint.setTextSize(size);
+                            widest=0f;
+                            for(String measureLine:receiptLines){
+                                widest=Math.max(widest,paint.measureText(measureLine));
+                            }
+                        }
+
                         float y=14f;
 
                         for(String lineText:receiptLines){
@@ -2801,13 +2817,39 @@ public class MainActivity extends Activity {
         EditText gst=input(L("GST %","GST %"));
 
         root.addView(customer);
-        root.addView(name);
-        root.addView(qty);
-        root.addView(rate);
-        root.addView(gst);
 
-        Button addItem=btn(L("ADD ITEM","आइटम जोड़ें"));
-        root.addView(addItem,controlParams(58));
+        LinearLayout itemRow=new LinearLayout(this);
+        itemRow.setOrientation(LinearLayout.HORIZONTAL);
+        itemRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        Button addItem=btn("+");
+        addItem.setTextSize(28);
+        addItem.setMinWidth(dp(56));
+
+        LinearLayout.LayoutParams nameParams=new LinearLayout.LayoutParams(0,dp(54),1);
+        nameParams.setMargins(0,dp(4),dp(4),dp(4));
+        itemRow.addView(name,nameParams);
+
+        LinearLayout.LayoutParams plusParams=new LinearLayout.LayoutParams(dp(58),dp(54));
+        plusParams.setMargins(0,dp(4),0,dp(4));
+        itemRow.addView(addItem,plusParams);
+        root.addView(itemRow,new LinearLayout.LayoutParams(-1,dp(62)));
+
+        LinearLayout valuesRow=new LinearLayout(this);
+        valuesRow.setOrientation(LinearLayout.HORIZONTAL);
+        valuesRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout.LayoutParams qtyParams=new LinearLayout.LayoutParams(0,dp(54),1);
+        qtyParams.setMargins(0,dp(4),dp(2),dp(4));
+        LinearLayout.LayoutParams rateParams=new LinearLayout.LayoutParams(0,dp(54),1);
+        rateParams.setMargins(dp(2),dp(4),dp(2),dp(4));
+        LinearLayout.LayoutParams gstParams=new LinearLayout.LayoutParams(0,dp(54),1);
+        gstParams.setMargins(dp(2),dp(4),0,dp(4));
+
+        valuesRow.addView(qty,qtyParams);
+        valuesRow.addView(rate,rateParams);
+        valuesRow.addView(gst,gstParams);
+        root.addView(valuesRow,new LinearLayout.LayoutParams(-1,dp(62)));
 
         TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),14,WHITE);
         out.setTypeface("HINDI".equals(language)
