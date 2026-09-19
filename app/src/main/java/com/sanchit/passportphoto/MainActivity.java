@@ -263,37 +263,67 @@ public class MainActivity extends Activity {
         t.setBackground(g);
     }
 
+    private void styleProfessionalSpinner(Spinner s){
+        int accent=toolAccent();
+        GradientDrawable popup=grad(
+                mixColor(BG,accent,0.10f),
+                mixColor(PANEL,accent,0.15f),
+                16);
+        popup.setStroke(dp(1),mixColor(accent,Color.WHITE,0.22f));
+        s.setPopupBackgroundDrawable(popup);
+        s.setDropDownVerticalOffset(dp(6));
+        s.setDropDownWidth(Math.max(dp(260),getResources().getDisplayMetrics().widthPixels-dp(40)));
+        s.setPopupElevation(dp(10));
+        s.setElevation(dp(2));
+        s.setPadding(dp(2),0,dp(2),0);
+    }
+
     private Spinner dropdown(String[] items){
-        Spinner s=new Spinner(this);
+        final Spinner s=new Spinner(this);
         ArrayAdapter<String> a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,items){
             @Override public View getView(int pos, View convert, android.view.ViewGroup parent){
                 TextView t=(TextView)super.getView(pos,convert,parent);
+                t.setText(String.valueOf(getItem(pos))+"    ▾");
                 t.setTextColor(WHITE);
                 t.setTextSize(18);
                 t.setTypeface(null,1);
-                t.setPadding(dp(16),0,dp(16),0);
-                t.setBackground(grad(
-                        mixColor(PANEL2,toolAccent(),0.20f),
-                        mixColor(PANEL,toolAccent(),0.12f),14));
+                t.setGravity(Gravity.CENTER_VERTICAL);
+                t.setPadding(dp(18),0,dp(18),0);
+                GradientDrawable g=grad(
+                        mixColor(PANEL2,toolAccent(),0.24f),
+                        mixColor(PANEL,toolAccent(),0.15f),16);
+                g.setStroke(dp(2),mixColor(toolAccent(),Color.WHITE,0.24f));
+                t.setBackground(g);
                 return t;
             }
             @Override public View getDropDownView(int pos, View convert, android.view.ViewGroup parent){
                 TextView t=(TextView)super.getDropDownView(pos,convert,parent);
-                t.setTextColor(WHITE);
-                t.setTextSize(18);
-                t.setPadding(dp(16),dp(14),dp(16),dp(14));
+                boolean chosen=pos==s.getSelectedItemPosition();
+                t.setText((chosen?"✓  ":"    ")+String.valueOf(getItem(pos)));
+                t.setTextColor(chosen?Color.WHITE:mixColor(SOFT,Color.WHITE,0.28f));
+                t.setTextSize(17);
+                t.setTypeface(null,chosen?1:0);
+                t.setGravity(Gravity.CENTER_VERTICAL);
+                t.setMinHeight(dp(58));
+                t.setPadding(dp(18),dp(12),dp(18),dp(12));
+
                 GradientDrawable g=grad(
-                        mixColor(PANEL,toolAccent(),0.12f),
-                        mixColor(PANEL2,toolAccent(),0.16f),10);
-                g.setStroke(dp(1),mixColor(toolAccent(),Color.WHITE,0.12f));
+                        chosen?mixColor(PANEL2,toolAccent(),0.42f):mixColor(PANEL,toolAccent(),0.10f),
+                        chosen?mixColor(SURFACE,toolAccent(),0.34f):mixColor(PANEL2,toolAccent(),0.13f),
+                        12);
+                g.setStroke(dp(chosen?2:1),
+                        chosen?mixColor(toolAccent(),Color.WHITE,0.36f):Color.argb(90,Color.red(toolAccent()),Color.green(toolAccent()),Color.blue(toolAccent())));
                 t.setBackground(g);
+
+                android.view.ViewGroup.LayoutParams lp=t.getLayoutParams();
+                if(lp!=null) lp.height=dp(58);
                 return t;
             }
         };
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         s.setAdapter(a);
-        s.setElevation(dp(1));
-        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.22f),14));
+        styleProfessionalSpinner(s);
+        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.24f),16));
         return s;
     }
     private String L(String en,String hi){
@@ -529,7 +559,11 @@ public class MainActivity extends Activity {
 
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
+        int accent=toolAccent();
+        header.setBackground(grad(
+                mixColor(Color.rgb(26,56,96),accent,0.30f),
+                mixColor(Color.rgb(31,94,135),accent,0.42f),0));
+        header.setElevation(dp(4));
 
         TextView menu=tv("⋮",34,WHITE);
         menu.setGravity(Gravity.CENTER);
@@ -539,12 +573,17 @@ public class MainActivity extends Activity {
         TextView label=tv(currentName,21,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
+        label.setShadowLayer(4f,0f,2f,Color.argb(120,0,0,0));
         header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
 
         TextView spacer=tv("",1,WHITE);
         header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
+
+        View accentLine=new View(this);
+        accentLine.setBackgroundColor(toolAccent());
+        outer.addView(accentLine,new LinearLayout.LayoutParams(-1,dp(3)));
 
         ScrollView listScroll=new ScrollView(this);
         listScroll.setFillViewport(true);
@@ -554,6 +593,7 @@ public class MainActivity extends Activity {
 
         LinearLayout tools=new LinearLayout(this);
         tools.setOrientation(LinearLayout.VERTICAL);
+        tools.setPadding(dp(6),dp(8),dp(6),dp(8));
         tools.setBackground(screenBg());
 
         for(String key:getToolOrder()){
@@ -580,13 +620,24 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(LinearLayout list,String s,Runnable r,boolean selected){
-        TextView row=tv(s,20,selected?BG:WHITE);
-        row.setGravity(Gravity.CENTER);
-        row.setTypeface(null,1);
-        row.setBackground(selected?grad(TEAL,ACCENT,0):touchBg(PANEL,0));
+        TextView row=tv((selected?"✓  ":"   ")+s,19,WHITE);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setTypeface(null,selected?1:0);
+        row.setPadding(dp(20),0,dp(18),0);
+        row.setElevation(dp(selected?4:2));
+
+        int accent=toolAccent();
+        GradientDrawable card=grad(
+                selected?mixColor(PANEL2,accent,0.46f):mixColor(PANEL,accent,0.10f),
+                selected?mixColor(SURFACE,accent,0.36f):mixColor(PANEL2,accent,0.14f),
+                15);
+        card.setStroke(dp(selected?2:1),
+                selected?mixColor(accent,WHITE,0.38f):Color.argb(95,Color.red(accent),Color.green(accent),Color.blue(accent)));
+        row.setBackground(card);
+
         if(selected) row.setContentDescription(s+" selected");
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(72));
-        p.setMargins(0,0,0,dp(2));
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(64));
+        p.setMargins(dp(10),dp(4),dp(10),dp(4));
         list.addView(row,p);
         row.setOnClickListener(v->{logEvent("Open: "+s); haptic(); r.run();});
     }
@@ -2775,27 +2826,47 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void setUnitDropdownItems(Spinner spinner,String[] items){
+    private void setUnitDropdownItems(final Spinner spinner,String[] items){
         ArrayAdapter<String> a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,items){
             @Override public View getView(int pos,View convert,android.view.ViewGroup parent){
                 TextView t=(TextView)super.getView(pos,convert,parent);
+                t.setText(String.valueOf(getItem(pos))+"    ▾");
                 t.setTextColor(WHITE);
                 t.setTextSize(17);
-                t.setPadding(dp(12),0,dp(12),0);
-                t.setBackgroundColor(PANEL2);
+                t.setTypeface(null,1);
+                t.setGravity(Gravity.CENTER_VERTICAL);
+                t.setPadding(dp(18),0,dp(18),0);
+                GradientDrawable g=grad(
+                        mixColor(PANEL2,toolAccent(),0.24f),
+                        mixColor(PANEL,toolAccent(),0.15f),16);
+                g.setStroke(dp(2),mixColor(toolAccent(),Color.WHITE,0.24f));
+                t.setBackground(g);
                 return t;
             }
             @Override public View getDropDownView(int pos,View convert,android.view.ViewGroup parent){
                 TextView t=(TextView)super.getDropDownView(pos,convert,parent);
-                t.setTextColor(WHITE);
+                boolean chosen=pos==spinner.getSelectedItemPosition();
+                t.setText((chosen?"✓  ":"    ")+String.valueOf(getItem(pos)));
+                t.setTextColor(chosen?WHITE:mixColor(SOFT,WHITE,0.28f));
                 t.setTextSize(17);
-                t.setPadding(dp(12),dp(12),dp(12),dp(12));
-                t.setBackgroundColor(PANEL);
+                t.setTypeface(null,chosen?1:0);
+                t.setGravity(Gravity.CENTER_VERTICAL);
+                t.setMinHeight(dp(58));
+                t.setPadding(dp(18),dp(12),dp(18),dp(12));
+                GradientDrawable g=grad(
+                        chosen?mixColor(PANEL2,toolAccent(),0.42f):mixColor(PANEL,toolAccent(),0.10f),
+                        chosen?mixColor(SURFACE,toolAccent(),0.34f):mixColor(PANEL2,toolAccent(),0.13f),
+                        12);
+                g.setStroke(dp(chosen?2:1),
+                        chosen?mixColor(toolAccent(),WHITE,0.36f):Color.argb(90,Color.red(toolAccent()),Color.green(toolAccent()),Color.blue(toolAccent())));
+                t.setBackground(g);
                 return t;
             }
         };
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(a);
+        styleProfessionalSpinner(spinner);
+        spinner.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.24f),16));
     }
 
     private String[] landStateNames(){
