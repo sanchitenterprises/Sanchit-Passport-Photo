@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.39\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.39\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.40\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.40\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.39\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.40\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2146,38 +2146,191 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void setUnitDropdownItems(Spinner spinner,String[] items){
+        ArrayAdapter<String> a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,items){
+            @Override public View getView(int pos,View convert,android.view.ViewGroup parent){
+                TextView t=(TextView)super.getView(pos,convert,parent);
+                t.setTextColor(WHITE);
+                t.setTextSize(17);
+                t.setPadding(dp(12),0,dp(12),0);
+                t.setBackgroundColor(PANEL2);
+                return t;
+            }
+            @Override public View getDropDownView(int pos,View convert,android.view.ViewGroup parent){
+                TextView t=(TextView)super.getDropDownView(pos,convert,parent);
+                t.setTextColor(WHITE);
+                t.setTextSize(17);
+                t.setPadding(dp(12),dp(12),dp(12),dp(12));
+                t.setBackgroundColor(PANEL);
+                return t;
+            }
+        };
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(a);
+    }
+
+    private String[] unitNamesForCategory(int category){
+        switch(category){
+            case 0:
+                return new String[]{
+                        L("Acre","एकड़"),
+                        L("Hectare","हेक्टेयर"),
+                        L("Decimal / Dismil","डिसमिल / डेसिमल"),
+                        L("Square Foot","वर्ग फुट"),
+                        L("Square Meter","वर्ग मीटर"),
+                        L("Square Yard / Gaj","वर्ग गज"),
+                        L("Bihar Bigha (Patna standard)","बिहार बीघा (पटना मानक)"),
+                        L("Bihar Katha (Patna standard)","बिहार कट्ठा (पटना मानक)"),
+                        L("Bihar Dhur (Patna standard)","बिहार धुर (पटना मानक)")
+                };
+            case 1:
+                return new String[]{
+                        L("Millimeter","मिलीमीटर"),L("Centimeter","सेंटीमीटर"),
+                        L("Meter","मीटर"),L("Kilometer","किलोमीटर"),
+                        L("Inch","इंच"),L("Foot","फुट"),L("Yard","गज"),
+                        L("Mile","मील")
+                };
+            case 2:
+                return new String[]{
+                        L("Gram","ग्राम"),L("Kilogram","किलोग्राम"),
+                        L("Quintal","क्विंटल"),L("Tonne","टन"),
+                        L("Pound","पाउंड"),L("Ounce","औंस")
+                };
+            case 3:
+                return new String[]{
+                        L("Celsius","सेल्सियस"),L("Fahrenheit","फारेनहाइट"),
+                        L("Kelvin","केल्विन")
+                };
+            default:
+                return new String[]{
+                        L("Milliliter","मिलीलीटर"),L("Liter","लीटर"),
+                        L("Cubic Meter","घन मीटर"),L("Cubic Foot","घन फुट"),
+                        L("US Gallon","यूएस गैलन")
+                };
+        }
+    }
+
+    private double convertAdvancedUnit(int category,int from,int to,double x){
+        if(category==3){
+            double celsius;
+            if(from==0) celsius=x;
+            else if(from==1) celsius=(x-32.0)*5.0/9.0;
+            else celsius=x-273.15;
+
+            if(to==0) return celsius;
+            if(to==1) return celsius*9.0/5.0+32.0;
+            return celsius+273.15;
+        }
+
+        double[] factors;
+        switch(category){
+            case 0:
+                // Base: square foot. Bihar traditional values use Patna standard.
+                factors=new double[]{
+                        43560.0,
+                        107639.1041670972,
+                        435.6,
+                        1.0,
+                        10.7639104167097,
+                        9.0,
+                        27225.0,
+                        1361.25,
+                        68.0625
+                };
+                break;
+            case 1:
+                // Base: meter.
+                factors=new double[]{0.001,0.01,1.0,1000.0,0.0254,0.3048,0.9144,1609.344};
+                break;
+            case 2:
+                // Base: kilogram.
+                factors=new double[]{0.001,1.0,100.0,1000.0,0.45359237,0.028349523125};
+                break;
+            default:
+                // Base: liter.
+                factors=new double[]{0.001,1.0,1000.0,28.316846592,3.785411784};
+                break;
+        }
+
+        if(from<0 || from>=factors.length || to<0 || to>=factors.length) return 0;
+        return x*factors[from]/factors[to];
+    }
+
     private void showUnitConverter(){
         currentTool="UNIT";
         shell(L("UNIT CONVERTER","यूनिट कन्वर्टर"));
 
-        Spinner type=dropdown(new String[]{
-                "Kilometer → Mile","Mile → Kilometer","Kilogram → Pound",
-                "Pound → Kilogram","Celsius → Fahrenheit","Fahrenheit → Celsius"
+        Spinner category=dropdown(new String[]{
+                L("FIELD / LAND AREA","खेत / जमीन क्षेत्रफल"),
+                L("LENGTH","लंबाई"),
+                L("WEIGHT","वजन"),
+                L("TEMPERATURE","तापमान"),
+                L("VOLUME","मात्रा / वॉल्यूम")
         });
-        root.addView(type,controlParams(58));
+        root.addView(category,controlParams(56));
 
-        EditText in=input(L("Value","मान"));
+        LinearLayout unitRow=new LinearLayout(this);
+        unitRow.setOrientation(LinearLayout.HORIZONTAL);
+        unitRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        Spinner from=dropdown(unitNamesForCategory(0));
+        Spinner to=dropdown(unitNamesForCategory(0));
+        to.setSelection(2);
+
+        LinearLayout.LayoutParams fromParams=new LinearLayout.LayoutParams(0,dp(56),1);
+        fromParams.setMargins(0,dp(4),dp(3),dp(4));
+        LinearLayout.LayoutParams toParams=new LinearLayout.LayoutParams(0,dp(56),1);
+        toParams.setMargins(dp(3),dp(4),0,dp(4));
+        unitRow.addView(from,fromParams);
+        unitRow.addView(to,toParams);
+        root.addView(unitRow,new LinearLayout.LayoutParams(-1,dp(64)));
+
+        EditText in=input(L("Enter value","मान दर्ज करें"));
         root.addView(in);
 
         Button go=btn(L("CONVERT","बदलें"));
         root.addView(go,controlParams(60));
 
-        TextView out=tv(L("Converted value will appear here","परिवर्तित मान यहाँ दिखेगा"),24,WHITE);
+        TextView out=tv(L("Converted value will appear here","परिवर्तित मान यहाँ दिखेगा"),22,WHITE);
         styleResult(out);
         root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+
         addHistoryShareBar(root,"unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),out);
 
-        go.setOnClickListener(v->{
-            double x=val(in),y=0;
-            switch(type.getSelectedItemPosition()){
-                case 0:y=x*0.621371;break;
-                case 1:y=x/0.621371;break;
-                case 2:y=x*2.20462;break;
-                case 3:y=x/2.20462;break;
-                case 4:y=x*9/5+32;break;
-                case 5:y=(x-32)*5/9;break;
+        category.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
+                String[] units=unitNamesForCategory(pos);
+                setUnitDropdownItems(from,units);
+                setUnitDropdownItems(to,units);
+                if(units.length>1) to.setSelection(1);
+                if(pos==0 && units.length>2) to.setSelection(2);
             }
-            String res=String.valueOf(type.getSelectedItem())+"\n"+trim(x)+" → "+trim(y);
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+
+        go.setOnClickListener(v->{
+            String raw=in.getText().toString().trim();
+            if(raw.isEmpty()){
+                out.setText(L("Enter a value first","पहले मान दर्ज करें"));
+                return;
+            }
+
+            double x=val(in);
+            int cat=category.getSelectedItemPosition();
+            int fpos=from.getSelectedItemPosition();
+            int tpos=to.getSelectedItemPosition();
+            double y=convertAdvancedUnit(cat,fpos,tpos,x);
+
+            String res=String.valueOf(from.getSelectedItem())+"\n"
+                    +trim(x)+"  →  "+trim(y)+"\n"
+                    +String.valueOf(to.getSelectedItem());
+
+            if(cat==0 && (fpos>=6 || tpos>=6)){
+                res+="\n\n"+L(
+                        "Note: Bigha / Katha / Dhur use Bihar Patna standard; local land measures can vary.",
+                        "नोट: बीघा / कट्ठा / धुर में बिहार-पटना मानक लिया गया है; स्थानीय माप अलग हो सकता है।");
+            }
+
             out.setText(res);
             savePanelHistory("unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),res);
         });
