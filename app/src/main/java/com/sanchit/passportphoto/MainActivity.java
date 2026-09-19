@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.40\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.40\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.41\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.41\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.40\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.41\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2169,26 +2169,130 @@ public class MainActivity extends Activity {
         spinner.setAdapter(a);
     }
 
+    private String[] landStateNames(){
+        return new String[]{
+                "Bihar","Jharkhand","Uttar Pradesh","West Bengal","Assam",
+                "Punjab","Haryana","Maharashtra","Karnataka","Telangana",
+                "Andhra Pradesh","Tamil Nadu","Kerala",L("Other State","अन्य राज्य")
+        };
+    }
+
+    private String[] landUnitNamesForState(int state){
+        java.util.ArrayList<String> list=new java.util.ArrayList<>();
+        list.add(L("Acre","एकड़"));
+        list.add(L("Hectare","हेक्टेयर"));
+        list.add(L("Decimal / Dismil","डिसमिल / डेसिमल"));
+        list.add(L("Square Foot","वर्ग फुट"));
+        list.add(L("Square Meter","वर्ग मीटर"));
+        list.add(L("Square Yard / Gaj","वर्ग गज"));
+
+        switch(state){
+            case 0:
+            case 1:
+                list.add(L("Bigha","बीघा"));
+                list.add(L("Katha","कट्ठा"));
+                list.add(L("Dhur","धुर"));
+                break;
+            case 2:
+                list.add(L("Bigha","बीघा"));
+                list.add(L("Biswa","बिस्वा"));
+                break;
+            case 3:
+                list.add(L("Bigha","बीघा"));
+                list.add(L("Katha","कट्ठा"));
+                list.add(L("Chhatak","छटाक"));
+                break;
+            case 4:
+                list.add(L("Bigha","बीघा"));
+                list.add(L("Katha","कट्ठा"));
+                list.add(L("Lecha","लेचा"));
+                break;
+            case 5:
+            case 6:
+                list.add(L("Kanal","कनाल"));
+                list.add(L("Marla","मरला"));
+                break;
+            case 7:
+                list.add(L("Guntha","गुंठा"));
+                break;
+            case 8:
+            case 9:
+            case 10:
+                list.add(L("Gunta","गुंटा"));
+                break;
+            case 11:
+                list.add(L("Cent","सेंट"));
+                list.add(L("Ground","ग्राउंड"));
+                break;
+            case 12:
+                list.add(L("Cent","सेंट"));
+                break;
+        }
+        return list.toArray(new String[0]);
+    }
+
+    private double[] landUnitFactorsSqFt(int state){
+        java.util.ArrayList<Double> f=new java.util.ArrayList<>();
+        f.add(43560.0);
+        f.add(107639.1041670972);
+        f.add(435.6);
+        f.add(1.0);
+        f.add(10.7639104167097);
+        f.add(9.0);
+
+        switch(state){
+            case 0:
+            case 1:
+                f.add(27225.0);
+                f.add(1361.25);
+                f.add(68.0625);
+                break;
+            case 2:
+                f.add(27000.0);
+                f.add(1350.0);
+                break;
+            case 3:
+                f.add(14400.0);
+                f.add(720.0);
+                f.add(45.0);
+                break;
+            case 4:
+                f.add(14400.0);
+                f.add(2880.0);
+                f.add(144.0);
+                break;
+            case 5:
+            case 6:
+                f.add(5445.0);
+                f.add(272.25);
+                break;
+            case 7:
+            case 8:
+            case 9:
+            case 10:
+                f.add(1089.0);
+                break;
+            case 11:
+                f.add(435.6);
+                f.add(2400.0);
+                break;
+            case 12:
+                f.add(435.6);
+                break;
+        }
+
+        double[] out=new double[f.size()];
+        for(int i=0;i<f.size();i++) out[i]=f.get(i);
+        return out;
+    }
+
     private String[] unitNamesForCategory(int category){
         switch(category){
-            case 0:
-                return new String[]{
-                        L("Acre","एकड़"),
-                        L("Hectare","हेक्टेयर"),
-                        L("Decimal / Dismil","डिसमिल / डेसिमल"),
-                        L("Square Foot","वर्ग फुट"),
-                        L("Square Meter","वर्ग मीटर"),
-                        L("Square Yard / Gaj","वर्ग गज"),
-                        L("Bihar Bigha (Patna standard)","बिहार बीघा (पटना मानक)"),
-                        L("Bihar Katha (Patna standard)","बिहार कट्ठा (पटना मानक)"),
-                        L("Bihar Dhur (Patna standard)","बिहार धुर (पटना मानक)")
-                };
             case 1:
                 return new String[]{
                         L("Millimeter","मिलीमीटर"),L("Centimeter","सेंटीमीटर"),
                         L("Meter","मीटर"),L("Kilometer","किलोमीटर"),
-                        L("Inch","इंच"),L("Foot","फुट"),L("Yard","गज"),
-                        L("Mile","मील")
+                        L("Inch","इंच"),L("Foot","फुट"),L("Yard","गज"),L("Mile","मील")
                 };
             case 2:
                 return new String[]{
@@ -2198,8 +2302,7 @@ public class MainActivity extends Activity {
                 };
             case 3:
                 return new String[]{
-                        L("Celsius","सेल्सियस"),L("Fahrenheit","फारेनहाइट"),
-                        L("Kelvin","केल्विन")
+                        L("Celsius","सेल्सियस"),L("Fahrenheit","फारेनहाइट"),L("Kelvin","केल्विन")
                 };
             default:
                 return new String[]{
@@ -2210,50 +2313,73 @@ public class MainActivity extends Activity {
         }
     }
 
-    private double convertAdvancedUnit(int category,int from,int to,double x){
+    private double[] unitFactorsForCategory(int category){
+        switch(category){
+            case 1:
+                return new double[]{0.001,0.01,1.0,1000.0,0.0254,0.3048,0.9144,1609.344};
+            case 2:
+                return new double[]{0.001,1.0,100.0,1000.0,0.45359237,0.028349523125};
+            default:
+                return new double[]{0.001,1.0,1000.0,28.316846592,3.785411784};
+        }
+    }
+
+    private String buildFullUnitConversion(int category,int state,int from,double x){
+        StringBuilder res=new StringBuilder();
+
+        if(category==0){
+            String[] names=landUnitNamesForState(state);
+            double[] factors=landUnitFactorsSqFt(state);
+            if(from<0 || from>=factors.length) return "";
+
+            double baseSqFt=x*factors[from];
+            res.append(trim(x)).append(" ").append(names[from]).append("\n\n");
+
+            for(int i=0;i<names.length;i++){
+                double y=baseSqFt/factors[i];
+                res.append(names[i]).append(": ").append(trim(y));
+                if(i<names.length-1) res.append("\n");
+            }
+
+            res.append("\n\n").append(L(
+                    "State standard: ","राज्य मानक: ")).append(landStateNames()[state]);
+            res.append("\n").append(L(
+                    "Local land measures can vary by district/region.",
+                    "स्थानीय जमीन माप जिला/क्षेत्र के अनुसार अलग हो सकता है।"));
+            return res.toString();
+        }
+
+        String[] names=unitNamesForCategory(category);
+        if(from<0 || from>=names.length) return "";
+
+        res.append(trim(x)).append(" ").append(names[from]).append("\n\n");
+
         if(category==3){
             double celsius;
             if(from==0) celsius=x;
             else if(from==1) celsius=(x-32.0)*5.0/9.0;
             else celsius=x-273.15;
 
-            if(to==0) return celsius;
-            if(to==1) return celsius*9.0/5.0+32.0;
-            return celsius+273.15;
+            double[] vals=new double[]{
+                    celsius,
+                    celsius*9.0/5.0+32.0,
+                    celsius+273.15
+            };
+
+            for(int i=0;i<names.length;i++){
+                res.append(names[i]).append(": ").append(trim(vals[i]));
+                if(i<names.length-1) res.append("\n");
+            }
+            return res.toString();
         }
 
-        double[] factors;
-        switch(category){
-            case 0:
-                // Base: square foot. Bihar traditional values use Patna standard.
-                factors=new double[]{
-                        43560.0,
-                        107639.1041670972,
-                        435.6,
-                        1.0,
-                        10.7639104167097,
-                        9.0,
-                        27225.0,
-                        1361.25,
-                        68.0625
-                };
-                break;
-            case 1:
-                // Base: meter.
-                factors=new double[]{0.001,0.01,1.0,1000.0,0.0254,0.3048,0.9144,1609.344};
-                break;
-            case 2:
-                // Base: kilogram.
-                factors=new double[]{0.001,1.0,100.0,1000.0,0.45359237,0.028349523125};
-                break;
-            default:
-                // Base: liter.
-                factors=new double[]{0.001,1.0,1000.0,28.316846592,3.785411784};
-                break;
+        double[] factors=unitFactorsForCategory(category);
+        double base=x*factors[from];
+        for(int i=0;i<names.length;i++){
+            res.append(names[i]).append(": ").append(trim(base/factors[i]));
+            if(i<names.length-1) res.append("\n");
         }
-
-        if(from<0 || from>=factors.length || to<0 || to>=factors.length) return 0;
-        return x*factors[from]/factors[to];
+        return res.toString();
     }
 
     private void showUnitConverter(){
@@ -2269,70 +2395,89 @@ public class MainActivity extends Activity {
         });
         root.addView(category,controlParams(56));
 
-        LinearLayout unitRow=new LinearLayout(this);
-        unitRow.setOrientation(LinearLayout.HORIZONTAL);
-        unitRow.setGravity(Gravity.CENTER_VERTICAL);
+        Spinner state=dropdown(landStateNames());
+        state.setSelection(0);
+        root.addView(state,controlParams(56));
 
-        Spinner from=dropdown(unitNamesForCategory(0));
-        Spinner to=dropdown(unitNamesForCategory(0));
-        to.setSelection(2);
-
-        LinearLayout.LayoutParams fromParams=new LinearLayout.LayoutParams(0,dp(56),1);
-        fromParams.setMargins(0,dp(4),dp(3),dp(4));
-        LinearLayout.LayoutParams toParams=new LinearLayout.LayoutParams(0,dp(56),1);
-        toParams.setMargins(dp(3),dp(4),0,dp(4));
-        unitRow.addView(from,fromParams);
-        unitRow.addView(to,toParams);
-        root.addView(unitRow,new LinearLayout.LayoutParams(-1,dp(64)));
+        Spinner from=dropdown(landUnitNamesForState(0));
+        root.addView(from,controlParams(56));
 
         EditText in=input(L("Enter value","मान दर्ज करें"));
         root.addView(in);
 
-        Button go=btn(L("CONVERT","बदलें"));
+        Button go=btn(L("SHOW ALL CONVERSIONS","सभी रूपांतरण दिखाएं"));
         root.addView(go,controlParams(60));
 
-        TextView out=tv(L("Converted value will appear here","परिवर्तित मान यहाँ दिखेगा"),22,WHITE);
+        TextView out=tv(L("Enter one value to see complete details","एक मान डालें, पूरा विवरण यहाँ दिखेगा"),19,WHITE);
         styleResult(out);
-        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        out.setGravity(Gravity.LEFT|Gravity.TOP);
+        out.setPadding(dp(18),dp(16),dp(18),dp(16));
+
+        ScrollView resultScroll=new ScrollView(this);
+        resultScroll.setFillViewport(true);
+        resultScroll.addView(out,new ScrollView.LayoutParams(-1,-1));
+        root.addView(resultScroll,new LinearLayout.LayoutParams(-1,0,1));
 
         addHistoryShareBar(root,"unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),out);
 
+        final Runnable refresh=()->{
+            String raw=in.getText().toString().trim();
+            if(raw.isEmpty()){
+                out.setText(L("Enter one value to see complete details","एक मान डालें, पूरा विवरण यहाँ दिखेगा"));
+                return;
+            }
+
+            int cat=category.getSelectedItemPosition();
+            int st=state.getSelectedItemPosition();
+            int fp=from.getSelectedItemPosition();
+            double x=val(in);
+            String res=buildFullUnitConversion(cat,st,fp,x);
+            out.setText(res);
+        };
+
         category.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
             @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
-                String[] units=unitNamesForCategory(pos);
-                setUnitDropdownItems(from,units);
-                setUnitDropdownItems(to,units);
-                if(units.length>1) to.setSelection(1);
-                if(pos==0 && units.length>2) to.setSelection(2);
+                if(pos==0){
+                    state.setVisibility(View.VISIBLE);
+                    setUnitDropdownItems(from,landUnitNamesForState(state.getSelectedItemPosition()));
+                }else{
+                    state.setVisibility(View.GONE);
+                    setUnitDropdownItems(from,unitNamesForCategory(pos));
+                }
+                refresh.run();
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
         });
 
+        state.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
+                if(category.getSelectedItemPosition()==0){
+                    setUnitDropdownItems(from,landUnitNamesForState(pos));
+                    refresh.run();
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+
+        from.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
+                refresh.run();
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+
+        in.addTextChangedListener(new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
+            @Override public void onTextChanged(CharSequence s,int st,int before,int count){ refresh.run(); }
+            @Override public void afterTextChanged(android.text.Editable e){}
+        });
+
         go.setOnClickListener(v->{
-            String raw=in.getText().toString().trim();
-            if(raw.isEmpty()){
-                out.setText(L("Enter a value first","पहले मान दर्ज करें"));
-                return;
+            refresh.run();
+            String value=out.getText().toString();
+            if(meaningfulResult(value)){
+                savePanelHistory("unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),value);
             }
-
-            double x=val(in);
-            int cat=category.getSelectedItemPosition();
-            int fpos=from.getSelectedItemPosition();
-            int tpos=to.getSelectedItemPosition();
-            double y=convertAdvancedUnit(cat,fpos,tpos,x);
-
-            String res=String.valueOf(from.getSelectedItem())+"\n"
-                    +trim(x)+"  →  "+trim(y)+"\n"
-                    +String.valueOf(to.getSelectedItem());
-
-            if(cat==0 && (fpos>=6 || tpos>=6)){
-                res+="\n\n"+L(
-                        "Note: Bigha / Katha / Dhur use Bihar Patna standard; local land measures can vary.",
-                        "नोट: बीघा / कट्ठा / धुर में बिहार-पटना मानक लिया गया है; स्थानीय माप अलग हो सकता है।");
-            }
-
-            out.setText(res);
-            savePanelHistory("unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),res);
         });
     }
 
