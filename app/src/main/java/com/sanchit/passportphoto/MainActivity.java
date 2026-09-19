@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.38\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.38\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.39\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.39\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.38\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.39\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2413,13 +2413,13 @@ public class MainActivity extends Activity {
         currentTool="SPEED";
         shell(L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"));
 
-        TextView status=tv(L("Ready to test your connection","कनेक्शन टेस्ट के लिए तैयार"),17,SOFT);
-        status.setGravity(Gravity.CENTER);
-        root.addView(status,controlParams(48));
-
         SpeedometerView meter=new SpeedometerView(this);
         meter.setBackground(grad(Color.rgb(12,31,51),Color.rgb(18,47,72),16));
         root.addView(meter,new LinearLayout.LayoutParams(-1,0,1));
+
+        TextView status=tv(L("Ready to test your connection","कनेक्शन टेस्ट के लिए तैयार"),16,SOFT);
+        status.setGravity(Gravity.CENTER);
+        root.addView(status,controlParams(40));
 
         LinearLayout metrics=new LinearLayout(this);
         metrics.setOrientation(LinearLayout.HORIZONTAL);
@@ -2440,10 +2440,14 @@ public class MainActivity extends Activity {
         TextView result=new TextView(this);
         result.setText(L("Run a test to create a result","टेस्ट चलाकर परिणाम बनाएं"));
 
-        addHistoryShareBar(root,"speed",L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),result);
+        LinearLayout speedBar=addHistoryShareBar(root,"speed",L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"),result);
+        if(speedBar.getChildCount()>0) speedBar.getChildAt(0).setBackground(touchBg(PURPLE,10));
+        if(speedBar.getChildCount()>1) speedBar.getChildAt(1).setBackground(touchBg(ORANGE,10));
 
         Button start=btn(L("START SPEED TEST","स्पीड टेस्ट शुरू करें"));
-        root.addView(start,controlParams(62));
+        start.setTextSize(21);
+        start.setBackground(touchBg(GREEN,14));
+        root.addView(start,controlParams(88));
 
         start.setOnClickListener(v->{
             start.setEnabled(false);
