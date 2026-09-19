@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.33\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.33\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.34\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.34\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.33\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.34\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2537,6 +2537,19 @@ public class MainActivity extends Activity {
         });
     }
 
+    private static class QuickBillItem{
+        String name;
+        double qty;
+        double rate;
+        double gst;
+        QuickBillItem(String name,double qty,double rate,double gst){
+            this.name=name;
+            this.qty=qty;
+            this.rate=rate;
+            this.gst=gst;
+        }
+    }
+
     private String qbCenter(String s,int width){
         String x=s==null?"":s;
         if(x.length()>=width) return x;
@@ -2564,34 +2577,47 @@ public class MainActivity extends Activity {
         return b.toString();
     }
 
-    private String buildQuickBillPreview(EditText customer,EditText item,EditText qty,EditText rate,EditText gst,
-                                         String billNo,String billDate){
-        String customerName=customer.getText().toString().trim();
+    private QuickBillItem pendingQuickBillItem(EditText item,EditText qty,EditText rate,EditText gst){
         String itemName=item.getText().toString().trim();
         String qRaw=qty.getText().toString().trim();
         String rRaw=rate.getText().toString().trim();
         String gRaw=gst.getText().toString().trim();
 
-        if(customerName.isEmpty() && itemName.isEmpty() && qRaw.isEmpty() && rRaw.isEmpty() && gRaw.isEmpty()){
-            return L("Bill preview will appear here","बिल यहाँ दिखाई देगा");
-        }
+        if(itemName.isEmpty() && qRaw.isEmpty() && rRaw.isEmpty() && gRaw.isEmpty()) return null;
 
         double q=val(qty);
         double r=val(rate);
-        double base=q*r;
-        double gstRate=val(gst);
-        double gstAmount=base*gstRate/100.0;
-        double total=base+gstAmount;
+        double g=val(gst);
+        if(itemName.isEmpty() || q<=0 || r<0) return null;
 
-        final int W=32;
-        String line="--------------------------------";
-        String itemLabel=itemName.isEmpty()?L("Item","आइटम"):itemName;
-        String qtyText=trim(q);
-        String amountText=df.format(base);
+        return new QuickBillItem(itemName,q,r,Math.max(0,g));
+    }
+
+    private String buildQuickBillPreview(EditText customer,
+                                         java.util.List<QuickBillItem> addedItems,
+                                         EditText item,EditText qty,EditText rate,EditText gst,
+                                         String billNo,String billDate){
+        String customerName=customer.getText().toString().trim();
+
+        java.util.ArrayList<QuickBillItem> all=new java.util.ArrayList<>();
+        if(addedItems!=null) all.addAll(addedItems);
+
+        QuickBillItem pending=pendingQuickBillItem(item,qty,rate,gst);
+        if(pending!=null) all.add(pending);
+
+        if(customerName.isEmpty() && all.isEmpty()){
+            return L("Bill preview will appear here","बिल यहाँ दिखाई देगा");
+        }
+
+        final int W=30;
+        final String line="------------------------------";
+
+        double subTotal=0;
+        double gstTotal=0;
 
         StringBuilder res=new StringBuilder();
         res.append(qbCenter("STS DIGIKIT",W)).append("\n");
-        res.append(qbCenter(L("Retail Invoice","रिटेल इनवॉइस"),W)).append("\n");
+        res.append(qbCenter(L("INVOICE","बिल"),W)).append("\n");
         res.append(line).append("\n");
         res.append(L("Date: ","दिनांक: ")).append(billDate).append("\n");
         res.append(L("Bill No: ","बिल नं: ")).append(billNo).append("\n");
@@ -2599,30 +2625,49 @@ public class MainActivity extends Activity {
             res.append(L("Customer: ","ग्राहक: ")).append(customerName).append("\n");
         }
         res.append(line).append("\n");
-        res.append(qbPadRight(L("Item","आइटम"),18))
-                .append(qbPadLeft(L("Qty","मात्रा"),5))
-                .append(qbPadLeft(L("Amt","राशि"),9)).append("\n");
-        res.append(line).append("\n");
-        res.append(qbPadRight(itemLabel,18))
-                .append(qbPadLeft(qtyText,5))
-                .append(qbPadLeft(amountText,9)).append("\n");
-        res.append(line).append("\n");
-        res.append(qbPadRight(L("Sub Total","उप-योग"),21))
-                .append(qbPadLeft(df.format(base),11)).append("\n");
 
-        if(gstRate>0){
-            String gstLabel="GST @ "+trim(gstRate)+"%";
-            res.append(qbPadRight(gstLabel,21))
-                    .append(qbPadLeft(df.format(gstAmount),11)).append("\n");
+        res.append(qbPadRight(L("Item","आइटम"),16))
+                .append(qbPadLeft(L("Qty","मात्रा"),5))
+                .append(qbPadLeft(L("Amount","राशि"),9)).append("\n");
+        res.append(line).append("\n");
+
+        for(QuickBillItem row:all){
+            double base=row.qty*row.rate;
+            double rowGst=base*row.gst/100.0;
+            subTotal+=base;
+            gstTotal+=rowGst;
+
+            res.append(qbPadRight(row.name,16))
+                    .append(qbPadLeft(trim(row.qty),5))
+                    .append(qbPadLeft(df.format(base),9))
+                    .append("\n");
+
+            if(row.gst>0){
+                String gstLine=L("GST ","GST ")+trim(row.gst)+"%";
+                res.append(qbPadRight("  "+gstLine,21))
+                        .append(qbPadLeft(df.format(rowGst),9))
+                        .append("\n");
+            }
+        }
+
+        double total=subTotal+gstTotal;
+
+        res.append(line).append("\n");
+        res.append(qbPadRight(L("Sub Total","उप-योग"),19))
+                .append(qbPadLeft(df.format(subTotal),11)).append("\n");
+
+        if(gstTotal>0){
+            res.append(qbPadRight(L("GST","जीएसटी"),19))
+                    .append(qbPadLeft(df.format(gstTotal),11)).append("\n");
         }
 
         res.append(line).append("\n");
-        res.append(qbPadRight(L("TOTAL","कुल"),20))
+        res.append(qbPadRight(L("TOTAL","कुल"),18))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         res.append(line).append("\n");
-        res.append(qbPadRight(L("Cash","नकद"),20))
+        res.append(qbPadRight(L("Cash","नकद"),18))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
-        res.append(qbPadRight(L("Cash tendered","दिया गया नकद"),20))
+        res.append(qbPadRight(L("Cash Given","प्राप्त नकद"),18))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         return res.toString();
     }
@@ -2641,6 +2686,12 @@ public class MainActivity extends Activity {
             }
 
             final String receipt=content.trim();
+            final String[] receiptLines=receipt.split("\\n",-1);
+            final int pageWidthPt=164;
+            final int lineHeightPt=11;
+            final int pageHeightPt=Math.max(240,36+(receiptLines.length*lineHeightPt));
+            final int mediaHeightMils=Math.max(3333,Math.round(pageHeightPt*1000f/72f));
+
             android.print.PrintDocumentAdapter adapter=new android.print.PrintDocumentAdapter(){
                 @Override public void onLayout(android.print.PrintAttributes oldAttributes,
                                                android.print.PrintAttributes newAttributes,
@@ -2664,22 +2715,23 @@ public class MainActivity extends Activity {
                                               WriteResultCallback callback){
                     android.graphics.pdf.PdfDocument pdf=new android.graphics.pdf.PdfDocument();
                     try{
-                        String[] lines=receipt.split("\\n",-1);
-                        int width=164;
-                        int lineHeight=14;
-                        int height=Math.max(260,24+(lines.length*lineHeight)+30);
                         android.graphics.pdf.PdfDocument.PageInfo pageInfo=
-                                new android.graphics.pdf.PdfDocument.PageInfo.Builder(width,height,1).create();
+                                new android.graphics.pdf.PdfDocument.PageInfo.Builder(pageWidthPt,pageHeightPt,1).create();
                         android.graphics.pdf.PdfDocument.Page page=pdf.startPage(pageInfo);
                         android.graphics.Canvas canvas=page.getCanvas();
 
                         android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
                         paint.setColor(Color.BLACK);
-                        paint.setTextSize(9f);
-                        paint.setTypeface(android.graphics.Typeface.MONOSPACE);
+                        paint.setTextSize("HINDI".equals(language)?7.2f:7.6f);
+                        paint.setTypeface("HINDI".equals(language)
+                                ?android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)
+                                :android.graphics.Typeface.MONOSPACE);
 
-                        float y=18f;
-                        for(String line:lines){
+                        final float left=5f;
+                        final float usable=pageWidthPt-10f;
+                        float y=14f;
+
+                        for(String lineText:receiptLines){
                             if(cancellationSignal.isCanceled()){
                                 pdf.finishPage(page);
                                 callback.onWriteCancelled();
@@ -2687,18 +2739,18 @@ public class MainActivity extends Activity {
                                 return;
                             }
 
-                            String remaining=line;
+                            String remaining=lineText;
                             if(remaining.length()==0){
-                                y+=lineHeight;
+                                y+=lineHeightPt;
                                 continue;
                             }
 
                             while(remaining.length()>0){
-                                int fit=paint.breakText(remaining,true,width-12,null);
+                                int fit=paint.breakText(remaining,true,usable,null);
                                 if(fit<=0) fit=Math.min(1,remaining.length());
                                 String part=remaining.substring(0,fit);
-                                canvas.drawText(part,6f,y,paint);
-                                y+=lineHeight;
+                                canvas.drawText(part,left,y,paint);
+                                y+=lineHeightPt;
                                 remaining=remaining.substring(fit);
                             }
                         }
@@ -2719,12 +2771,12 @@ public class MainActivity extends Activity {
 
             android.print.PrintAttributes attrs=new android.print.PrintAttributes.Builder()
                     .setMediaSize(new android.print.PrintAttributes.MediaSize(
-                            "STS_58MM","Receipt",2283,8000))
+                            "STS_58MM","Receipt",2283,mediaHeightMils))
                     .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
                     .setColorMode(android.print.PrintAttributes.COLOR_MODE_MONOCHROME)
                     .build();
 
-            pm.print("STS DigiKit Bill",adapter,attrs);
+            pm.print(L("STS DigiKit Bill","STS DigiKit बिल"),adapter,attrs);
         }catch(Exception e){
             Toast.makeText(this,L("Could not open print screen","Print screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
         }
@@ -2736,6 +2788,7 @@ public class MainActivity extends Activity {
 
         final String billNo="QB"+new java.text.SimpleDateFormat("ddHHmmss",java.util.Locale.US).format(new java.util.Date());
         final String billDate=new java.text.SimpleDateFormat("dd/MM/yyyy, hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date());
+        final java.util.ArrayList<QuickBillItem> billItems=new java.util.ArrayList<>();
 
         EditText customer=input(L("Customer Name","ग्राहक का नाम"));
         customer.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
@@ -2745,7 +2798,7 @@ public class MainActivity extends Activity {
 
         EditText qty=input(L("Quantity","मात्रा"));
         EditText rate=input(L("Rate ₹","दर ₹"));
-        EditText gst=input("GST %");
+        EditText gst=input(L("GST %","GST %"));
 
         root.addView(customer);
         root.addView(name);
@@ -2753,20 +2806,26 @@ public class MainActivity extends Activity {
         root.addView(rate);
         root.addView(gst);
 
-        TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),15,WHITE);
-        out.setTypeface(android.graphics.Typeface.MONOSPACE);
+        Button addItem=btn(L("ADD ITEM","आइटम जोड़ें"));
+        root.addView(addItem,controlParams(58));
+
+        TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),14,WHITE);
+        out.setTypeface("HINDI".equals(language)
+                ?android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)
+                :android.graphics.Typeface.MONOSPACE);
         out.setGravity(Gravity.TOP|Gravity.LEFT);
         out.setTextIsSelectable(true);
-        out.setPadding(dp(14),dp(14),dp(14),dp(14));
+        out.setPadding(dp(12),dp(12),dp(12),dp(12));
         out.setBackground(grad(PANEL2,Color.rgb(28,96,132),12));
         root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
 
         addHistoryShareBar(root,"bill",L("QUICK BILL","क्विक बिल"),out);
 
-        Button print=btn(L("PRINT","PRINT"));
+        Button print=btn(L("PRINT","प्रिंट"));
         root.addView(print,controlParams(60));
 
-        Runnable updateBill=()->out.setText(buildQuickBillPreview(customer,name,qty,rate,gst,billNo,billDate));
+        Runnable updateBill=()->out.setText(
+                buildQuickBillPreview(customer,billItems,name,qty,rate,gst,billNo,billDate));
 
         android.text.TextWatcher watcher=new android.text.TextWatcher(){
             @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
@@ -2780,8 +2839,25 @@ public class MainActivity extends Activity {
         rate.addTextChangedListener(watcher);
         gst.addTextChangedListener(watcher);
 
+        addItem.setOnClickListener(v->{
+            QuickBillItem pending=pendingQuickBillItem(name,qty,rate,gst);
+            if(pending==null){
+                Toast.makeText(this,
+                        L("Enter Item Name, Quantity and Rate","आइटम नाम, मात्रा और दर भरें"),
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            billItems.add(pending);
+            name.setText("");
+            qty.setText("");
+            rate.setText("");
+            gst.setText("");
+            updateBill.run();
+        });
+
         print.setOnClickListener(v->{
-            String bill=buildQuickBillPreview(customer,name,qty,rate,gst,billNo,billDate);
+            String bill=buildQuickBillPreview(customer,billItems,name,qty,rate,gst,billNo,billDate);
             out.setText(bill);
             if(meaningfulResult(bill)){
                 savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),bill);
