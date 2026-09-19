@@ -273,7 +273,6 @@ public class MainActivity extends Activity {
         s.setPopupBackgroundDrawable(popup);
         s.setDropDownVerticalOffset(dp(6));
         s.setDropDownWidth(Math.max(dp(260),getResources().getDisplayMetrics().widthPixels-dp(40)));
-        s.setPopupElevation(dp(10));
         s.setElevation(dp(2));
         s.setPadding(dp(2),0,dp(2),0);
     }
