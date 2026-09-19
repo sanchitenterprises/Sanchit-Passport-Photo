@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.42\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.42\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.43\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.43\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.42\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.43\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1680,6 +1680,7 @@ public class MainActivity extends Activity {
         if("SAMSUNG".equals(d.type)) return portOpen(d.ip,8001,1000) || portOpen(d.ip,8002,1000);
         if("ANDROID_TV".equals(d.type)) return portOpen(d.ip,6466,1200) || portOpen(d.ip,6467,1200);
         if("LG".equals(d.type)) return portOpen(d.ip,3000,1000) || portOpen(d.ip,3001,1000);
+        if("IR".equals(d.type)) return hasIrEmitter();
         return portOpen(d.ip,80,900) || portOpen(d.ip,8000,900);
     }
 
@@ -1697,7 +1698,12 @@ public class MainActivity extends Activity {
         if("MUTE".equals(key)) return "VolumeMute";
         if("CH_UP".equals(key)) return "ChannelUp";
         if("CH_DOWN".equals(key)) return "ChannelDown";
-        if("PLAY".equals(key)) return "Play";
+        if("PLAY".equals(key) || "PAUSE".equals(key)) return "Play";
+        if("REW".equals(key)) return "Rev";
+        if("FF".equals(key)) return "Fwd";
+        if("INFO".equals(key) || "MENU".equals(key)) return "Info";
+        if("GUIDE".equals(key)) return "Guide";
+        if("INPUT".equals(key)) return "InputTuner";
         return key;
     }
 
@@ -1736,6 +1742,16 @@ public class MainActivity extends Activity {
         if("CH_UP".equals(key)) return "KEY_CHUP";
         if("CH_DOWN".equals(key)) return "KEY_CHDOWN";
         if("PLAY".equals(key)) return "KEY_PLAY";
+        if("PAUSE".equals(key)) return "KEY_PAUSE";
+        if("STOP".equals(key)) return "KEY_STOP";
+        if("REW".equals(key)) return "KEY_REWIND";
+        if("FF".equals(key)) return "KEY_FF";
+        if("INPUT".equals(key)) return "KEY_SOURCE";
+        if("MENU".equals(key)) return "KEY_MENU";
+        if("INFO".equals(key)) return "KEY_INFO";
+        if("GUIDE".equals(key)) return "KEY_GUIDE";
+        if("EXIT".equals(key)) return "KEY_EXIT";
+        if(key.matches("[0-9]")) return "KEY_"+key;
         return key;
     }
 
@@ -1831,7 +1847,7 @@ public class MainActivity extends Activity {
     private int androidTvKeyCode(String key){
         if("POWER".equals(key)) return 26;
         if("HOME".equals(key)) return 3;
-        if("BACK".equals(key)) return 4;
+        if("BACK".equals(key) || "EXIT".equals(key)) return 4;
         if("UP".equals(key)) return 19;
         if("DOWN".equals(key)) return 20;
         if("LEFT".equals(key)) return 21;
@@ -1842,14 +1858,120 @@ public class MainActivity extends Activity {
         if("MUTE".equals(key)) return 164;
         if("CH_UP".equals(key)) return 166;
         if("CH_DOWN".equals(key)) return 167;
-        if("PLAY".equals(key)) return 85;
+        if("PLAY".equals(key) || "PAUSE".equals(key)) return 85;
+        if("STOP".equals(key)) return 86;
+        if("REW".equals(key)) return 89;
+        if("FF".equals(key)) return 90;
+        if("MENU".equals(key)) return 82;
+        if("INFO".equals(key)) return 165;
+        if("GUIDE".equals(key)) return 172;
+        if("INPUT".equals(key)) return 178;
+        if(key.matches("[0-9]")) return 7+Integer.parseInt(key);
         return 0;
+    }
+
+    private boolean hasIrEmitter(){
+        try{
+            android.hardware.ConsumerIrManager ir=(android.hardware.ConsumerIrManager)getSystemService(Context.CONSUMER_IR_SERVICE);
+            return ir!=null && ir.hasIrEmitter();
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    private boolean transmitNec(long code){
+        try{
+            android.hardware.ConsumerIrManager ir=(android.hardware.ConsumerIrManager)getSystemService(Context.CONSUMER_IR_SERVICE);
+            if(ir==null || !ir.hasIrEmitter()) return false;
+
+            java.util.ArrayList<Integer> p=new java.util.ArrayList<>();
+            p.add(9000); p.add(4500);
+            for(int byteIndex=3;byteIndex>=0;byteIndex--){
+                int b=(int)((code>>(byteIndex*8))&0xff);
+                for(int bit=0;bit<8;bit++){
+                    p.add(560);
+                    p.add(((b>>bit)&1)==1?1690:560);
+                }
+            }
+            p.add(560);
+            int[] pattern=new int[p.size()];
+            for(int i=0;i<p.size();i++) pattern[i]=p.get(i);
+            ir.transmit(38000,pattern);
+            return true;
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    private boolean transmitSony12(int code){
+        try{
+            android.hardware.ConsumerIrManager ir=(android.hardware.ConsumerIrManager)getSystemService(Context.CONSUMER_IR_SERVICE);
+            if(ir==null || !ir.hasIrEmitter()) return false;
+
+            int[] pattern=new int[2+(12*2)];
+            int n=0;
+            pattern[n++]=2400; pattern[n++]=600;
+            for(int bit=0;bit<12;bit++){
+                pattern[n++]=((code>>bit)&1)==1?1200:600;
+                pattern[n++]=600;
+            }
+            ir.transmit(40000,pattern);
+            return true;
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    private boolean sendIrKey(String profile,String key){
+        if(profile==null) return false;
+
+        if("SAMSUNG".equals(profile)){
+            java.util.HashMap<String,Long> m=new java.util.HashMap<>();
+            m.put("POWER",0xE0E040BFL); m.put("INPUT",0xE0E0807FL);
+            m.put("VOL_UP",0xE0E0E01FL); m.put("VOL_DOWN",0xE0E0D02FL); m.put("MUTE",0xE0E0F00FL);
+            m.put("CH_UP",0xE0E048B7L); m.put("CH_DOWN",0xE0E008F7L);
+            m.put("MENU",0xE0E058A7L); m.put("INFO",0xE0E0F807L);
+            m.put("UP",0xE0E006F9L); m.put("DOWN",0xE0E08679L);
+            m.put("LEFT",0xE0E0A659L); m.put("RIGHT",0xE0E046B9L); m.put("OK",0xE0E016E9L);
+            m.put("BACK",0xE0E01AE5L); m.put("EXIT",0xE0E0B44BL);
+            m.put("1",0xE0E020DFL); m.put("2",0xE0E0A05FL); m.put("3",0xE0E0609FL);
+            m.put("4",0xE0E010EFL); m.put("5",0xE0E0906FL); m.put("6",0xE0E050AFL);
+            m.put("7",0xE0E030CFL); m.put("8",0xE0E0B04FL); m.put("9",0xE0E0708FL); m.put("0",0xE0E08877L);
+            Long code=m.get(key);
+            return code!=null && transmitNec(code);
+        }
+
+        if("LG".equals(profile)){
+            java.util.HashMap<String,Long> m=new java.util.HashMap<>();
+            m.put("POWER",0x20DF10EFL); m.put("INPUT",0x20DFD02FL);
+            m.put("VOL_UP",0x20DF40BFL); m.put("VOL_DOWN",0x20DFC03FL); m.put("MUTE",0x20DF906FL);
+            m.put("CH_UP",0x20DF00FFL); m.put("CH_DOWN",0x20DF807FL);
+            m.put("MENU",0x20DFC23DL); m.put("HOME",0x20DFC23DL);
+            m.put("UP",0x20DF02FDL); m.put("DOWN",0x20DF827DL);
+            m.put("LEFT",0x20DFE01FL); m.put("RIGHT",0x20DF609FL); m.put("OK",0x20DF22DDL);
+            m.put("BACK",0x20DF14EBL);
+            m.put("1",0x20DF8877L); m.put("2",0x20DF48B7L); m.put("3",0x20DFC837L);
+            m.put("4",0x20DF28D7L); m.put("5",0x20DFA857L); m.put("6",0x20DF6897L);
+            m.put("7",0x20DFE817L); m.put("8",0x20DF18E7L); m.put("9",0x20DF9867L); m.put("0",0x20DF08F7L);
+            Long code=m.get(key);
+            return code!=null && transmitNec(code);
+        }
+
+        if("SONY".equals(profile)){
+            java.util.HashMap<String,Integer> m=new java.util.HashMap<>();
+            m.put("POWER",0xA90); m.put("VOL_UP",0x490); m.put("VOL_DOWN",0xC90);
+            m.put("MUTE",0x290); m.put("CH_UP",0x090); m.put("CH_DOWN",0x890);
+            Integer code=m.get(key);
+            return code!=null && transmitSony12(code);
+        }
+        return false;
     }
 
     private boolean sendTvKey(TvDevice d,String key){
         if(d==null) return false;
         if("ROKU".equals(d.type)) return sendRokuKey(d.ip,key);
         if("SAMSUNG".equals(d.type)) return sendSamsungKey(d.ip,key);
+        if("IR".equals(d.type)) return sendIrKey(d.ip,key);
         if("ANDROID_TV".equals(d.type)){
             int code=androidTvKeyCode(key);
             return code!=0 && androidTvV2!=null && androidTvV2.sendKey(code);
@@ -1964,35 +2086,122 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private String detectTvType(String ip){
+        if(ip==null || ip.trim().isEmpty()) return "UPNP";
+        String clean=ip.trim();
+
+        String roku=fetchLanText("http://"+clean+":8060/query/device-info",1000);
+        if(!roku.isEmpty()) return "ROKU";
+        if(portOpen(clean,6466,700) || portOpen(clean,6467,700)) return "ANDROID_TV";
+        if(portOpen(clean,8001,700) || portOpen(clean,8002,700)) return "SAMSUNG";
+        if(portOpen(clean,3000,700) || portOpen(clean,3001,700)) return "LG";
+        return "UPNP";
+    }
+
+    private TextView remoteShell(String name){
+        toolPickerOpen=false;
+
+        LinearLayout outer=new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setBackground(screenBg());
+
+        LinearLayout header=new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
+
+        TextView spacer=tv("",1,WHITE);
+        header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
+
+        TextView label=tv(name,21,WHITE);
+        label.setGravity(Gravity.CENTER);
+        label.setTypeface(null,1);
+        header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
+
+        TextView settings=tv("⋮",34,WHITE);
+        settings.setGravity(Gravity.CENTER);
+        settings.setBackground(touchBg(Color.rgb(27,42,78),0));
+        header.addView(settings,new LinearLayout.LayoutParams(dp(56),dp(64)));
+
+        outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
+
+        ScrollView sc=new ScrollView(this);
+        sc.setFillViewport(true);
+        sc.setBackground(screenBg());
+        sc.setClipToPadding(false);
+
+        root=new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.TOP);
+        root.setPadding(dp(8),dp(8),dp(8),dp(8));
+        root.setBackground(screenBg());
+
+        sc.addView(root,new ScrollView.LayoutParams(-1,-1));
+        outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+        setContentView(outer);
+
+        label.setOnClickListener(v->{haptic();showToolPicker(name);});
+        return settings;
+    }
+
+    private void connectUniversalTv(TvDevice d,TextView status,java.util.function.Consumer<TvDevice> connected){
+        if(d==null) return;
+
+        if("IR".equals(d.type)){
+            if(!hasIrEmitter()){
+                status.setText(L("This phone does not have an IR blaster.","इस फोन में IR blaster नहीं है।"));
+                return;
+            }
+            saveConnectedTv(d);
+            connected.accept(d);
+            status.setText(L("IR Remote: ","IR रिमोट: ")+d.name);
+            return;
+        }
+
+        if("ANDROID_TV".equals(d.type)){
+            connectAndroidTv(d,status,()->connected.accept(d));
+            return;
+        }
+
+        status.setText(L("Connecting: ","कनेक्ट कर रहे हैं: ")+d.name);
+        new Thread(()->{
+            boolean ok=checkTvDevice(d);
+            runOnUiThread(()->{
+                if(ok && ("ROKU".equals(d.type) || "SAMSUNG".equals(d.type))){
+                    saveConnectedTv(d);
+                    connected.accept(d);
+                    status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+                }else if(ok && "LG".equals(d.type)){
+                    status.setText(L(
+                            "LG webOS TV detected. Use IR mode on phones with IR, or select another supported network protocol.",
+                            "LG webOS TV मिला। IR वाले फोन में IR mode इस्तेमाल करें या दूसरा supported network protocol चुनें।"));
+                }else{
+                    status.setText(L(
+                            "TV is not reachable with the selected protocol. Check Wi-Fi/IP and TV remote permissions.",
+                            "चुने गए protocol से TV नहीं जुड़ा। Wi-Fi/IP और TV remote permission जांचें।"));
+                }
+            });
+        }).start();
+    }
+
     private void showRemote(){
         currentTool="REMOTE";
         if(androidTvV2==null) androidTvV2=new AndroidTvV2(this);
-        shell(L("SMART TV REMOTE","स्मार्ट TV रिमोट"));
 
-        TextView status=tv(L("Same Wi-Fi TV remote","एक ही Wi-Fi पर TV रिमोट"),17,SOFT);
+        TextView settings=remoteShell(L("UNIVERSAL TV REMOTE","यूनिवर्सल TV रिमोट"));
+
+        TextView status=tv(L("Open ⋮ to connect TV","TV कनेक्ट करने के लिए ⋮ खोलें"),16,SOFT);
         status.setGravity(Gravity.CENTER);
-        styleResult(status);
-        root.addView(status,controlParams(92));
-
-        Button scan=btn(L("AUTO FIND TV ON WI-FI","Wi-Fi पर TV खोजें"));
-        root.addView(scan,controlParams(58));
-
-        Spinner devices=dropdown(new String[]{L("No TV selected","कोई TV चुना नहीं")});
-        root.addView(devices,controlParams(58));
-
-        Button connect=btn(L("CONNECT / SAVE TV","TV कनेक्ट / सेव करें"));
-        root.addView(connect,controlParams(58));
+        status.setPadding(dp(10),dp(8),dp(10),dp(8));
+        status.setBackground(grad(PANEL2,Color.rgb(24,67,101),12));
+        root.addView(status,controlParams(64));
 
         LinearLayout remoteBox=new LinearLayout(this);
         remoteBox.setOrientation(LinearLayout.VERTICAL);
-        remoteBox.setPadding(dp(4),dp(4),dp(4),dp(4));
+        remoteBox.setPadding(dp(3),dp(3),dp(3),dp(3));
         remoteBox.setBackground(grad(Color.rgb(13,31,52),Color.rgb(20,50,75),14));
-        root.addView(remoteBox,new LinearLayout.LayoutParams(-1,0,1));
+        root.addView(remoteBox,new LinearLayout.LayoutParams(-1,-2));
 
-        java.util.ArrayList<TvDevice> found=new java.util.ArrayList<>();
         final TvDevice[] active={null};
-
-        java.util.function.BiConsumer<String,String> addRemoteButton=(label,key)->{};
 
         java.util.function.Consumer<String[]> addRow=(String[] specs)->{
             LinearLayout row=new LinearLayout(this);
@@ -2002,103 +2211,214 @@ public class MainActivity extends Activity {
                 String label=parts[0];
                 String key=parts.length>1?parts[1]:"";
                 Button b=btn(label);
-                row.addView(b,new LinearLayout.LayoutParams(0,dp(58),1));
+                b.setTextSize(16);
+                LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(54),1);
+                bp.setMargins(dp(2),dp(2),dp(2),dp(2));
+                row.addView(b,bp);
+
+                if("POWER".equals(key)) b.setBackground(touchBg(RED,12));
+                else if("OK".equals(key)) b.setBackground(touchBg(GREEN,12));
+                else if("HOME".equals(key)) b.setBackground(touchBg(PURPLE,12));
+                else if("INPUT".equals(key)) b.setBackground(touchBg(ORANGE,12));
+
                 b.setOnClickListener(v->{
                     TvDevice d=active[0];
                     if(d==null){
-                        Toast.makeText(this,L("Connect a TV first","पहले TV कनेक्ट करें"),Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this,L("Open ⋮ and connect a TV first","पहले ⋮ खोलकर TV कनेक्ट करें"),Toast.LENGTH_SHORT).show();
                         return;
                     }
-                    status.setText(L("Sending: ","भेज रहे हैं: ")+label);
                     new Thread(()->{
                         boolean ok=sendTvKey(d,key);
                         runOnUiThread(()->{
                             if(ok) status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
-                            else status.setText(L("Command failed. Reconnect TV or allow remote access on TV.","कमांड नहीं गया। TV दोबारा कनेक्ट करें या TV पर remote access allow करें।"));
+                            else status.setText(L(
+                                    "This command is not supported by the current TV / connection.",
+                                    "यह command वर्तमान TV / connection पर supported नहीं है।"));
                         });
                     }).start();
                 });
             }
-            remoteBox.addView(row,new LinearLayout.LayoutParams(-1,0,1));
+            remoteBox.addView(row,new LinearLayout.LayoutParams(-1,dp(58)));
         };
 
-        addRow.accept(new String[]{"⏻|POWER","⌂|HOME","↩|BACK"});
-        addRow.accept(new String[]{"VOL −|VOL_DOWN","▲|UP","VOL +|VOL_UP"});
+        addRow.accept(new String[]{"⏻|POWER","INPUT|INPUT","MUTE|MUTE"});
+        addRow.accept(new String[]{"VOL −|VOL_DOWN","HOME|HOME","VOL +|VOL_UP"});
+        addRow.accept(new String[]{"CH −|CH_DOWN","▲|UP","CH +|CH_UP"});
         addRow.accept(new String[]{"◀|LEFT","OK|OK","▶|RIGHT"});
-        addRow.accept(new String[]{"CH −|CH_DOWN","▼|DOWN","CH +|CH_UP"});
-        addRow.accept(new String[]{"MUTE|MUTE","PLAY|PLAY"});
+        addRow.accept(new String[]{"BACK|BACK","▼|DOWN","MENU|MENU"});
+        addRow.accept(new String[]{"INFO|INFO","GUIDE|GUIDE","EXIT|EXIT"});
+        addRow.accept(new String[]{"⏪|REW","▶/Ⅱ|PLAY","⏩|FF"});
+        addRow.accept(new String[]{"1|1","2|2","3|3"});
+        addRow.accept(new String[]{"4|4","5|5","6|6"});
+        addRow.accept(new String[]{"7|7","8|8","9|9"});
+        addRow.accept(new String[]{"STOP|STOP","0|0","PAUSE|PAUSE"});
 
-        Runnable refreshSpinner=()->{
-            java.util.ArrayList<String> names=new java.util.ArrayList<>();
-            if(found.isEmpty()) names.add(L("No TV found","कोई TV नहीं मिला"));
-            else for(TvDevice d:found) names.add(d.toString());
+        java.util.function.Consumer<TvDevice> onConnected=d->active[0]=d;
 
-            ArrayAdapter<String> adapter=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,names){
-                @Override public View getView(int pos,View convert,android.view.ViewGroup parent){
-                    TextView t=(TextView)super.getView(pos,convert,parent);
-                    t.setTextColor(WHITE);t.setTextSize(16);t.setPadding(dp(12),0,dp(12),0);t.setBackgroundColor(PANEL2);
-                    return t;
+        settings.setOnClickListener(v->{
+            haptic();
+            PopupMenu menu=new PopupMenu(this,settings);
+            menu.getMenu().add(L("AUTO FIND TV","TV अपने-आप खोजें"));
+            menu.getMenu().add(L("MANUAL IP / TV TYPE","MANUAL IP / TV TYPE"));
+            menu.getMenu().add(L("SAVED TV / RECONNECT","सेव TV / दोबारा कनेक्ट"));
+            menu.getMenu().add(L("IR REMOTE MODE","IR रिमोट मोड"));
+            menu.getMenu().add(L("CONNECTION INFO","कनेक्शन जानकारी"));
+            menu.getMenu().add(L("FORGET SAVED TV","सेव TV हटाएं"));
+
+            menu.setOnMenuItemClickListener(item->{
+                String title=item.getTitle().toString();
+
+                if(title.equals(L("AUTO FIND TV","TV अपने-आप खोजें"))){
+                    status.setText(L("Searching TVs on this Wi-Fi...","इस Wi-Fi पर TV खोज रहे हैं..."));
+                    new Thread(()->{
+                        java.util.ArrayList<TvDevice> found=discoverTvs();
+                        runOnUiThread(()->{
+                            if(found.isEmpty()){
+                                status.setText(L(
+                                        "No TV found. Keep phone and TV on the same Wi-Fi, or use Manual IP / IR.",
+                                        "TV नहीं मिला। Phone और TV एक Wi-Fi पर रखें, या Manual IP / IR इस्तेमाल करें।"));
+                                return;
+                            }
+
+                            String[] names=new String[found.size()];
+                            for(int i=0;i<found.size();i++) names[i]=found.get(i).toString();
+
+                            new AlertDialog.Builder(this)
+                                    .setTitle(L("Select TV","TV चुनें"))
+                                    .setItems(names,(d,which)->{
+                                        if(which>=0 && which<found.size()){
+                                            connectUniversalTv(found.get(which),status,onConnected);
+                                        }
+                                    })
+                                    .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                                    .show();
+                        });
+                    }).start();
+                    return true;
                 }
-                @Override public View getDropDownView(int pos,View convert,android.view.ViewGroup parent){
-                    TextView t=(TextView)super.getDropDownView(pos,convert,parent);
-                    t.setTextColor(WHITE);t.setTextSize(16);t.setPadding(dp(12),dp(12),dp(12),dp(12));t.setBackgroundColor(PANEL);
-                    return t;
-                }
-            };
-            devices.setAdapter(adapter);
-        };
 
-        scan.setOnClickListener(v->{
-            scan.setEnabled(false);
-            status.setText(L("Searching TVs on this Wi-Fi...","इस Wi-Fi पर TV खोज रहे हैं..."));
-            new Thread(()->{
-                java.util.ArrayList<TvDevice> list=discoverTvs();
-                runOnUiThread(()->{
-                    found.clear();
-                    found.addAll(list);
-                    refreshSpinner.run();
-                    scan.setEnabled(true);
-                    if(found.isEmpty()){
-                        status.setText(L("No compatible TV discovered. Phone and TV must be on the same Wi-Fi.","TV नहीं मिला। Phone और TV एक ही Wi-Fi पर होना चाहिए।"));
+                if(title.equals(L("MANUAL IP / TV TYPE","MANUAL IP / TV TYPE"))){
+                    LinearLayout box=new LinearLayout(this);
+                    box.setOrientation(LinearLayout.VERTICAL);
+                    box.setPadding(dp(14),dp(4),dp(14),0);
+
+                    EditText ip=new EditText(this);
+                    ip.setHint("TV IP  e.g. 192.168.1.20");
+                    ip.setSingleLine(true);
+                    ip.setTextColor(Color.BLACK);
+                    ip.setHintTextColor(Color.DKGRAY);
+                    ip.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+                    box.addView(ip,new LinearLayout.LayoutParams(-1,dp(54)));
+
+                    Spinner type=new Spinner(this);
+                    String[] types={
+                            L("AUTO DETECT","AUTO DETECT"),
+                            "Android / Google TV",
+                            "Roku TV",
+                            "Samsung Smart TV",
+                            "LG webOS TV"
+                    };
+                    ArrayAdapter<String> ta=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,types);
+                    type.setAdapter(ta);
+                    box.addView(type,new LinearLayout.LayoutParams(-1,dp(54)));
+
+                    new AlertDialog.Builder(this)
+                            .setTitle(L("Manual TV Connection","Manual TV Connection"))
+                            .setView(box)
+                            .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                            .setPositiveButton(L("CONNECT","कनेक्ट"),(d,w)->{
+                                String host=ip.getText().toString().trim();
+                                if(host.isEmpty()){
+                                    status.setText(L("Enter TV IP address","TV का IP address लिखें"));
+                                    return;
+                                }
+
+                                int p=type.getSelectedItemPosition();
+                                status.setText(L("Checking TV...","TV जांच रहे हैं..."));
+                                new Thread(()->{
+                                    String tvType;
+                                    if(p==0) tvType=detectTvType(host);
+                                    else if(p==1) tvType="ANDROID_TV";
+                                    else if(p==2) tvType="ROKU";
+                                    else if(p==3) tvType="SAMSUNG";
+                                    else tvType="LG";
+
+                                    TvDevice manual=new TvDevice(
+                                            tvType.replace("_"," ")+" TV",host,tvType);
+                                    runOnUiThread(()->connectUniversalTv(manual,status,onConnected));
+                                }).start();
+                            })
+                            .show();
+                    return true;
+                }
+
+                if(title.equals(L("SAVED TV / RECONNECT","सेव TV / दोबारा कनेक्ट"))){
+                    android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+                    String ip=sp.getString("tv_ip","");
+                    String type=sp.getString("tv_type","");
+                    String name=sp.getString("tv_name","");
+                    if(ip.isEmpty() || type.isEmpty()){
+                        status.setText(L("No saved TV yet","अभी कोई TV सेव नहीं है"));
                     }else{
-                        status.setText(found.size()+" "+L("TV device(s) found. Select one and tap Connect.",
-                                "TV मिले। एक चुनें और Connect दबाएं।"));
+                        connectUniversalTv(new TvDevice(name.isEmpty()?"Saved TV":name,ip,type),status,onConnected);
                     }
-                });
-            }).start();
-        });
+                    return true;
+                }
 
-        connect.setOnClickListener(v->{
-            if(found.isEmpty()){
-                scan.performClick();
-                return;
-            }
+                if(title.equals(L("IR REMOTE MODE","IR रिमोट मोड"))){
+                    if(!hasIrEmitter()){
+                        new AlertDialog.Builder(this)
+                                .setTitle(L("IR Remote","IR रिमोट"))
+                                .setMessage(L(
+                                        "This phone does not have an IR blaster. Use Wi-Fi / Manual IP connection instead.",
+                                        "इस फोन में IR blaster नहीं है। Wi-Fi / Manual IP connection इस्तेमाल करें।"))
+                                .setPositiveButton("OK",null)
+                                .show();
+                        return true;
+                    }
 
-            int pos=devices.getSelectedItemPosition();
-            if(pos<0 || pos>=found.size()) pos=0;
-            TvDevice d=found.get(pos);
+                    String[] profiles={"Samsung IR","LG IR","Sony IR"};
+                    new AlertDialog.Builder(this)
+                            .setTitle(L("Select IR TV Profile","IR TV profile चुनें"))
+                            .setItems(profiles,(d,which)->{
+                                String profile=which==0?"SAMSUNG":which==1?"LG":"SONY";
+                                TvDevice irTv=new TvDevice(profiles[which],profile,"IR");
+                                connectUniversalTv(irTv,status,onConnected);
+                            })
+                            .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                            .show();
+                    return true;
+                }
 
-            if("UPNP".equals(d.type) && (portOpen(d.ip,6466,600) || portOpen(d.ip,6467,600))){
-                d.type="ANDROID_TV";
-                refreshSpinner.run();
-            }
+                if(title.equals(L("CONNECTION INFO","कनेक्शन जानकारी"))){
+                    TvDevice d=active[0];
+                    String msg;
+                    if(d==null){
+                        msg=L("No TV is connected.","कोई TV कनेक्ट नहीं है।");
+                    }else{
+                        msg=L("Name: ","नाम: ")+d.name
+                                +"\n"+L("Type: ","प्रकार: ")+d.type
+                                +"\n"+L("Address / Profile: ","पता / प्रोफाइल: ")+d.ip;
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle(L("TV Connection","TV कनेक्शन"))
+                            .setMessage(msg)
+                            .setPositiveButton("OK",null)
+                            .show();
+                    return true;
+                }
 
-            if("ANDROID_TV".equals(d.type)){
-                final TvDevice selected=d;
-                connectAndroidTv(selected,status,()->active[0]=selected);
-                return;
-            }
+                if(title.equals(L("FORGET SAVED TV","सेव TV हटाएं"))){
+                    getSharedPreferences("sts",0).edit()
+                            .remove("tv_name").remove("tv_ip").remove("tv_type").apply();
+                    active[0]=null;
+                    status.setText(L("Saved TV removed","सेव TV हटा दिया गया"));
+                    return true;
+                }
 
-            if("ROKU".equals(d.type) || "SAMSUNG".equals(d.type)){
-                active[0]=d;
-                saveConnectedTv(d);
-                status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
-                return;
-            }
-
-            status.setText(d.name+" "+L(
-                    "was detected, but this TV uses a different Wi-Fi remote protocol.",
-                    "detect हुआ है, लेकिन यह TV अलग Wi-Fi remote protocol इस्तेमाल करता है।"));
+                return false;
+            });
+            menu.show();
         });
 
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
@@ -2106,43 +2426,10 @@ public class MainActivity extends Activity {
         String savedType=sp.getString("tv_type","");
         String savedName=sp.getString("tv_name","Saved TV");
 
-        if(!savedIp.isEmpty()){
+        if(!savedIp.isEmpty() && !savedType.isEmpty()){
             TvDevice saved=new TvDevice(savedName,savedIp,savedType);
-            found.add(saved);
-            refreshSpinner.run();
             status.setText(L("Reconnecting saved TV...","सेव TV दोबारा कनेक्ट कर रहे हैं..."));
-
-            if("ANDROID_TV".equals(savedType)){
-                new Thread(()->{
-                    boolean ok=false;
-                    try{ok=androidTvV2.connect(saved.ip);}catch(Exception ignored){}
-                    final boolean connectedOk=ok;
-                    runOnUiThread(()->{
-                        if(connectedOk){
-                            active[0]=saved;
-                            status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+saved.name);
-                        }else{
-                            status.setText(L("Saved Android TV needs pairing/reconnect. Tap CONNECT / SAVE TV.",
-                                    "सेव Android TV को pairing/reconnect चाहिए। CONNECT / SAVE TV दबाएं।"));
-                        }
-                    });
-                }).start();
-            }else{
-                new Thread(()->{
-                    boolean ok=checkTvDevice(saved);
-                    runOnUiThread(()->{
-                        if(ok){
-                            active[0]=saved;
-                            status.setText(L("Auto connected: ","ऑटो कनेक्ट: ")+saved.name);
-                        }else{
-                            status.setText(L("Saved TV not reachable. Tap Auto Find TV.",
-                                    "सेव TV नहीं मिला। Auto Find TV दबाएं।"));
-                        }
-                    });
-                }).start();
-            }
-        }else{
-            scan.performClick();
+            connectUniversalTv(saved,status,onConnected);
         }
     }
 
