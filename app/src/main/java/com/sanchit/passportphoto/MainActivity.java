@@ -1200,7 +1200,14 @@ public class MainActivity extends Activity {
 
     private Calendar parseManualAgeDate(String raw) throws Exception{
         String s=raw==null?"":raw.trim();
-        java.text.SimpleDateFormat sdf=new java.text.SimpleDateFormat("dd/MM/yy",java.util.Locale.US);
+        java.text.SimpleDateFormat sdf;
+        if(s.matches("\\d{2}/\\d{2}/\\d{4}")){
+            sdf=new java.text.SimpleDateFormat("dd/MM/yyyy",java.util.Locale.US);
+        }else if(s.matches("\\d{2}/\\d{2}/\\d{2}")){
+            sdf=new java.text.SimpleDateFormat("dd/MM/yy",java.util.Locale.US);
+        }else{
+            throw new java.text.ParseException("Use DD/MM/YYYY",0);
+        }
         sdf.setLenient(false);
         java.util.Date parsed=sdf.parse(s);
         Calendar cal=Calendar.getInstance();
@@ -1212,76 +1219,162 @@ public class MainActivity extends Activity {
         return cal;
     }
 
+    private String buildAdvancedAgeDetails(Calendar birth){
+        Calendar today=Calendar.getInstance();
+        today.set(Calendar.HOUR_OF_DAY,0);
+        today.set(Calendar.MINUTE,0);
+        today.set(Calendar.SECOND,0);
+        today.set(Calendar.MILLISECOND,0);
+
+        if(birth.after(today)) return L("Invalid date","अमान्य तारीख");
+
+        int years=today.get(Calendar.YEAR)-birth.get(Calendar.YEAR);
+        int months=today.get(Calendar.MONTH)-birth.get(Calendar.MONTH);
+        int days=today.get(Calendar.DAY_OF_MONTH)-birth.get(Calendar.DAY_OF_MONTH);
+
+        if(days<0){
+            months--;
+            Calendar prev=(Calendar)today.clone();
+            prev.add(Calendar.MONTH,-1);
+            days+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);
+        }
+        if(months<0){
+            years--;
+            months+=12;
+        }
+
+        long totalDays=(today.getTimeInMillis()-birth.getTimeInMillis())/86400000L;
+        long totalWeeks=totalDays/7L;
+        long totalMonths=(long)years*12L+months;
+        long totalHours=totalDays*24L;
+        long totalMinutes=totalHours*60L;
+
+        java.util.Locale dayLocale="HINDI".equals(language)
+                ?new java.util.Locale("hi","IN")
+                :java.util.Locale.ENGLISH;
+        String birthDay=new java.text.SimpleDateFormat("EEEE",dayLocale).format(birth.getTime());
+        String dob=new java.text.SimpleDateFormat("dd/MM/yyyy",java.util.Locale.US).format(birth.getTime());
+
+        Calendar next=(Calendar)today.clone();
+        int by=birth.get(Calendar.YEAR);
+        int bm=birth.get(Calendar.MONTH);
+        int bd=birth.get(Calendar.DAY_OF_MONTH);
+        int targetYear=today.get(Calendar.YEAR);
+
+        next.set(Calendar.YEAR,targetYear);
+        next.set(Calendar.MONTH,bm);
+        int maxDay=next.getActualMaximum(Calendar.DAY_OF_MONTH);
+        next.set(Calendar.DAY_OF_MONTH,Math.min(bd,maxDay));
+
+        if(next.before(today)){
+            targetYear++;
+            next.set(Calendar.YEAR,targetYear);
+            next.set(Calendar.MONTH,bm);
+            maxDay=next.getActualMaximum(Calendar.DAY_OF_MONTH);
+            next.set(Calendar.DAY_OF_MONTH,Math.min(bd,maxDay));
+        }
+
+        long daysToBirthday=(next.getTimeInMillis()-today.getTimeInMillis())/86400000L;
+        int nextAge=targetYear-by;
+        String nextDate=new java.text.SimpleDateFormat("dd/MM/yyyy",java.util.Locale.US).format(next.getTime());
+
+        StringBuilder res=new StringBuilder();
+        res.append(L("DATE OF BIRTH","जन्म तिथि")).append(": ").append(dob);
+        res.append("\n").append(L("BIRTH DAY","जन्म का दिन")).append(": ").append(birthDay);
+        res.append("\n\n").append(L("EXACT AGE","सटीक आयु")).append("\n");
+        res.append(years).append(" ").append(L("Years","वर्ष"))
+                .append("  ").append(months).append(" ").append(L("Months","महीने"))
+                .append("  ").append(days).append(" ").append(L("Days","दिन"));
+
+        res.append("\n\n").append(L("TOTAL MONTHS","कुल महीने")).append(": ").append(totalMonths);
+        res.append("\n").append(L("TOTAL WEEKS","कुल सप्ताह")).append(": ").append(totalWeeks);
+        res.append("\n").append(L("TOTAL DAYS","कुल दिन")).append(": ").append(totalDays);
+        res.append("\n").append(L("TOTAL HOURS","कुल घंटे")).append(": ").append(totalHours);
+        res.append("\n").append(L("TOTAL MINUTES","कुल मिनट")).append(": ").append(totalMinutes);
+
+        res.append("\n\n").append(L("NEXT BIRTHDAY","अगला जन्मदिन")).append(": ").append(nextDate);
+        res.append("\n").append(L("DAYS LEFT","बाकी दिन")).append(": ").append(daysToBirthday);
+        res.append("\n").append(L("AGE ON NEXT BIRTHDAY","अगले जन्मदिन पर आयु")).append(": ")
+                .append(nextAge).append(" ").append(L("Years","वर्ष"));
+        return res.toString();
+    }
+
     private void showAge(){
         currentTool="AGE";
         shell(L("AGE CALCULATOR","आयु कैलकुलेटर"));
 
+        LinearLayout dateRow=new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+
         EditText dateInput=new EditText(this);
-        dateInput.setHint("DD/MM/YY");
+        dateInput.setHint("DD/MM/YYYY");
         dateInput.setHintTextColor(SOFT);
         dateInput.setTextColor(WHITE);
         dateInput.setTextSize(20);
         dateInput.setGravity(Gravity.CENTER);
         dateInput.setSingleLine(true);
-        dateInput.setInputType(android.text.InputType.TYPE_CLASS_DATETIME);
+        dateInput.setInputType(android.text.InputType.TYPE_CLASS_DATETIME
+                |android.text.InputType.TYPE_DATETIME_VARIATION_DATE);
         dateInput.setPadding(dp(14),dp(8),dp(14),dp(8));
         dateInput.setBackground(fieldBg());
-        root.addView(dateInput,controlParams(58));
 
-        Button go=btn(L("SHOW DETAILS","DETAILS दिखाएं"));
+        LinearLayout.LayoutParams dateParams=new LinearLayout.LayoutParams(0,dp(58),1);
+        dateParams.setMargins(0,dp(4),dp(4),dp(4));
+        dateRow.addView(dateInput,dateParams);
+
+        Button pick=btn(L("DATE","तारीख"));
+        pick.setTextSize(15);
+        LinearLayout.LayoutParams pickParams=new LinearLayout.LayoutParams(dp(88),dp(58));
+        pickParams.setMargins(dp(4),dp(4),0,dp(4));
+        dateRow.addView(pick,pickParams);
+
+        root.addView(dateRow,new LinearLayout.LayoutParams(-1,dp(66)));
+
+        Button go=btn(L("SHOW FULL AGE DETAILS","पूरा आयु विवरण दिखाएं"));
         root.addView(go,controlParams(60));
 
-        TextView out=tv(L("Enter date in DD/MM/YY","DD/MM/YY में date लिखें"),21,WHITE);
+        TextView out=tv(L("Enter date in DD/MM/YYYY","DD/MM/YYYY में जन्म तिथि लिखें"),18,WHITE);
         styleResult(out);
-        out.setGravity(Gravity.CENTER);
-        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+        out.setGravity(Gravity.LEFT|Gravity.TOP);
+        out.setPadding(dp(18),dp(16),dp(18),dp(16));
+
+        ScrollView detailsScroll=new ScrollView(this);
+        detailsScroll.setFillViewport(true);
+        detailsScroll.addView(out,new ScrollView.LayoutParams(-1,-1));
+        root.addView(detailsScroll,new LinearLayout.LayoutParams(-1,0,1));
 
         addHistoryShareBar(root,"age",L("AGE CALCULATOR","आयु कैलकुलेटर"),out);
 
-        go.setOnClickListener(v->{
+        Runnable calculate=()->{
             try{
-                Calendar b=parseManualAgeDate(dateInput.getText().toString());
-                Calendar a=Calendar.getInstance();
-                a.set(Calendar.HOUR_OF_DAY,0);
-                a.set(Calendar.MINUTE,0);
-                a.set(Calendar.SECOND,0);
-                a.set(Calendar.MILLISECOND,0);
-
-                if(b.after(a)){
-                    out.setText(L("Invalid date","अमान्य date"));
-                    return;
-                }
-
-                int y=a.get(Calendar.YEAR)-b.get(Calendar.YEAR);
-                int m=a.get(Calendar.MONTH)-b.get(Calendar.MONTH);
-                int d=a.get(Calendar.DAY_OF_MONTH)-b.get(Calendar.DAY_OF_MONTH);
-
-                if(d<0){
-                    m--;
-                    Calendar prev=(Calendar)a.clone();
-                    prev.add(Calendar.MONTH,-1);
-                    d+=prev.getActualMaximum(Calendar.DAY_OF_MONTH);
-                }
-                if(m<0){
-                    y--;
-                    m+=12;
-                }
-
-                long days=(a.getTimeInMillis()-b.getTimeInMillis())/86400000L;
-                String entered=new java.text.SimpleDateFormat("dd/MM/yy",java.util.Locale.US).format(b.getTime());
-
-                String res=L("Date: ","Date: ")+entered
-                        +"\n"+y+" "+L("Years","वर्ष")
-                        +"  "+m+" "+L("Months","महीने")
-                        +"  "+d+" "+L("Days","दिन")
-                        +"\n"+L("Total Days: ","कुल दिन: ")+days;
-
+                Calendar birth=parseManualAgeDate(dateInput.getText().toString());
+                String res=buildAdvancedAgeDetails(birth);
                 out.setText(res);
-                savePanelHistory("age",L("AGE CALCULATOR","आयु कैलकुलेटर"),res);
+                if(!res.equals(L("Invalid date","अमान्य तारीख"))){
+                    savePanelHistory("age",L("AGE CALCULATOR","आयु कैलकुलेटर"),res);
+                }
             }catch(Exception e){
-                out.setText(L("Enter valid date in DD/MM/YY","DD/MM/YY में सही date लिखें"));
+                out.setText(L(
+                        "Enter a valid date in DD/MM/YYYY",
+                        "DD/MM/YYYY में सही जन्म तिथि लिखें"));
             }
+        };
+
+        pick.setOnClickListener(v->{
+            Calendar chosen=Calendar.getInstance();
+            try{chosen=parseManualAgeDate(dateInput.getText().toString());}catch(Exception ignored){}
+            Calendar initial=chosen;
+            new DatePickerDialog(this,(view,y,m,d)->{
+                Calendar b=Calendar.getInstance();
+                b.set(y,m,d,0,0,0);
+                b.set(Calendar.MILLISECOND,0);
+                dateInput.setText(new java.text.SimpleDateFormat("dd/MM/yyyy",java.util.Locale.US).format(b.getTime()));
+                calculate.run();
+            },initial.get(Calendar.YEAR),initial.get(Calendar.MONTH),initial.get(Calendar.DAY_OF_MONTH)).show();
         });
+
+        go.setOnClickListener(v->calculate.run());
     }
 
     interface DateCb{void done(Calendar c);}
