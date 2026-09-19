@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.36\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.36\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.37\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.37\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.36\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.37\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2593,11 +2593,12 @@ public class MainActivity extends Activity {
         return new QuickBillItem(itemName,q,r,Math.max(0,g));
     }
 
-    private String buildQuickBillPreview(EditText customer,
+    private String buildQuickBillPreview(String shopCompanyName,EditText customer,
                                          java.util.List<QuickBillItem> addedItems,
                                          EditText item,EditText qty,EditText rate,EditText gst,
                                          String billNo,String billDate){
         String customerName=customer.getText().toString().trim();
+        String shopName=shopCompanyName==null?"":shopCompanyName.trim();
 
         java.util.ArrayList<QuickBillItem> all=new java.util.ArrayList<>();
         if(addedItems!=null) all.addAll(addedItems);
@@ -2616,7 +2617,7 @@ public class MainActivity extends Activity {
         double gstTotal=0;
 
         StringBuilder res=new StringBuilder();
-        res.append(qbCenter("STS DIGIKIT",W)).append("\n");
+        res.append(qbCenter(shopName.isEmpty()?"STS DIGIKIT":shopName,W)).append("\n");
         res.append(qbCenter(L("INVOICE","बिल"),W)).append("\n");
         res.append(line).append("\n");
         res.append(L("Date: ","दिनांक: ")).append(billDate).append("\n");
@@ -2806,15 +2807,26 @@ public class MainActivity extends Activity {
         final String billDate=new java.text.SimpleDateFormat("dd/MM/yyyy, hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date());
         final java.util.ArrayList<QuickBillItem> billItems=new java.util.ArrayList<>();
 
+        android.content.SharedPreferences qbPrefs=getSharedPreferences("sts",0);
+        final String[] shopCompanyName={qbPrefs.getString("quick_bill_default_shop_name","")};
+
         EditText customer=input(L("Customer Name","ग्राहक का नाम"));
         customer.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        customer.setPadding(dp(14),dp(8),dp(62),dp(8));
 
-        android.content.SharedPreferences qbPrefs=getSharedPreferences("sts",0);
-        String savedDefaultName=qbPrefs.getString("quick_bill_default_shop_name","");
-        if(savedDefaultName!=null && !savedDefaultName.trim().isEmpty()){
-            customer.setText(savedDefaultName.trim());
-            customer.setSelection(customer.getText().length());
-        }
+        FrameLayout customerFrame=new FrameLayout(this);
+        customerFrame.addView(customer,new FrameLayout.LayoutParams(-1,dp(54)));
+
+        Button customerMenu=btn("⋮");
+        customerMenu.setTextSize(26);
+        customerMenu.setMinWidth(dp(52));
+        FrameLayout.LayoutParams menuParams=new FrameLayout.LayoutParams(dp(52),dp(46),Gravity.RIGHT|Gravity.CENTER_VERTICAL);
+        menuParams.setMargins(0,0,dp(4),0);
+        customerFrame.addView(customerMenu,menuParams);
+
+        LinearLayout.LayoutParams customerFrameParams=new LinearLayout.LayoutParams(-1,dp(54));
+        customerFrameParams.setMargins(0,dp(4),0,dp(4));
+        root.addView(customerFrame,customerFrameParams);
 
         EditText name=input(L("Item Name","आइटम नाम"));
         name.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
@@ -2822,52 +2834,6 @@ public class MainActivity extends Activity {
         EditText qty=input(L("Quantity","मात्रा"));
         EditText rate=input(L("Rate ₹","दर ₹"));
         EditText gst=input(L("GST %","GST %"));
-
-        LinearLayout customerRow=new LinearLayout(this);
-        customerRow.setOrientation(LinearLayout.HORIZONTAL);
-        customerRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        Button customerMenu=btn("⋮");
-        customerMenu.setTextSize(26);
-        customerMenu.setMinWidth(dp(54));
-
-        LinearLayout.LayoutParams customerParams=new LinearLayout.LayoutParams(0,dp(54),1);
-        customerParams.setMargins(0,dp(4),dp(4),dp(4));
-        customerRow.addView(customer,customerParams);
-
-        LinearLayout.LayoutParams customerMenuParams=new LinearLayout.LayoutParams(dp(58),dp(54));
-        customerMenuParams.setMargins(0,dp(4),0,dp(4));
-        customerRow.addView(customerMenu,customerMenuParams);
-        root.addView(customerRow,new LinearLayout.LayoutParams(-1,dp(62)));
-
-        customerMenu.setOnClickListener(v->{
-            android.widget.PopupMenu menu=new android.widget.PopupMenu(this,customerMenu);
-            menu.getMenu().add(L("Set Default Shop / Company Name","डिफ़ॉल्ट दुकान / कंपनी नाम सेट करें"));
-            menu.setOnMenuItemClickListener(itemMenu->{
-                EditText defaultName=new EditText(this);
-                defaultName.setSingleLine(true);
-                defaultName.setTextColor(Color.BLACK);
-                defaultName.setTextSize(18);
-                defaultName.setPadding(dp(12),dp(8),dp(12),dp(8));
-                String saved=qbPrefs.getString("quick_bill_default_shop_name","");
-                defaultName.setText(saved==null?"":saved);
-                defaultName.setSelection(defaultName.getText().length());
-
-                new AlertDialog.Builder(this)
-                        .setTitle(L("Default Shop / Company Name","डिफ़ॉल्ट दुकान / कंपनी नाम"))
-                        .setView(defaultName)
-                        .setNegativeButton(L("CANCEL","रद्द करें"),null)
-                        .setPositiveButton(L("SAVE","सेव करें"),(d,w)->{
-                            String value=defaultName.getText().toString().trim();
-                            qbPrefs.edit().putString("quick_bill_default_shop_name",value).apply();
-                            customer.setText(value);
-                            customer.setSelection(customer.getText().length());
-                        })
-                        .show();
-                return true;
-            });
-            menu.show();
-        });
 
         LinearLayout itemRow=new LinearLayout(this);
         itemRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -2918,7 +2884,36 @@ public class MainActivity extends Activity {
         root.addView(print,controlParams(60));
 
         Runnable updateBill=()->out.setText(
-                buildQuickBillPreview(customer,billItems,name,qty,rate,gst,billNo,billDate));
+                buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo,billDate));
+
+        customerMenu.setOnClickListener(v->{
+            android.widget.PopupMenu menu=new android.widget.PopupMenu(this,customerMenu);
+            menu.getMenu().add(L("Set Shop / Company Name","दुकान / कंपनी नाम सेट करें"));
+            menu.setOnMenuItemClickListener(itemMenu->{
+                EditText defaultName=new EditText(this);
+                defaultName.setSingleLine(true);
+                defaultName.setTextColor(Color.BLACK);
+                defaultName.setTextSize(18);
+                defaultName.setPadding(dp(12),dp(8),dp(12),dp(8));
+                String saved=qbPrefs.getString("quick_bill_default_shop_name","");
+                defaultName.setText(saved==null?"":saved);
+                defaultName.setSelection(defaultName.getText().length());
+
+                new AlertDialog.Builder(this)
+                        .setTitle(L("Shop / Company Name","दुकान / कंपनी नाम"))
+                        .setView(defaultName)
+                        .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                        .setPositiveButton(L("SAVE","सेव करें"),(d,w)->{
+                            String value=defaultName.getText().toString().trim();
+                            qbPrefs.edit().putString("quick_bill_default_shop_name",value).apply();
+                            shopCompanyName[0]=value;
+                            updateBill.run();
+                        })
+                        .show();
+                return true;
+            });
+            menu.show();
+        });
 
         android.text.TextWatcher watcher=new android.text.TextWatcher(){
             @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
@@ -2950,7 +2945,7 @@ public class MainActivity extends Activity {
         });
 
         print.setOnClickListener(v->{
-            String bill=buildQuickBillPreview(customer,billItems,name,qty,rate,gst,billNo,billDate);
+            String bill=buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo,billDate);
             out.setText(bill);
             if(meaningfulResult(bill)){
                 savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),bill);
