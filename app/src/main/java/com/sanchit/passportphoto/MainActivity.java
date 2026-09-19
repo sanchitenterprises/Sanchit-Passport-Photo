@@ -31,6 +31,8 @@ public class MainActivity extends Activity {
     private final int GREEN = Color.rgb(38,183,108);
     private final int ORANGE = Color.rgb(244,154,48);
     private final int RED = Color.rgb(232,83,95);
+    private final int PINK = Color.rgb(232,86,173);
+    private final int INDIGO = Color.rgb(75,91,220);
     private final int SURFACE = Color.rgb(13,27,48);
     private final int SOFT = Color.rgb(172,190,220);
     private final int WHITE = Color.WHITE;
@@ -80,7 +82,10 @@ public class MainActivity extends Activity {
         return t;
     }
     private GradientDrawable bg(int color,float radius){
-        GradientDrawable g=new GradientDrawable(); g.setColor(color); g.setCornerRadius(dp((int)radius)); return g;
+        GradientDrawable g=new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp((int)radius));
+        return g;
     }
 
     private GradientDrawable grad(int c1,int c2,float radius){
@@ -89,36 +94,81 @@ public class MainActivity extends Activity {
         return g;
     }
 
+    private int mixColor(int a,int b,float amount){
+        float p=Math.max(0f,Math.min(1f,amount));
+        int r=(int)(Color.red(a)*(1f-p)+Color.red(b)*p);
+        int g=(int)(Color.green(a)*(1f-p)+Color.green(b)*p);
+        int bl=(int)(Color.blue(a)*(1f-p)+Color.blue(b)*p);
+        return Color.rgb(r,g,bl);
+    }
+
+    private int toolAccent(){
+        if("CASH_COUNTER".equals(currentTool)) return GREEN;
+        if("AGE".equals(currentTool)) return PURPLE;
+        if("SAVINGS".equals(currentTool)) return TEAL;
+        if("EMI".equals(currentTool)) return ORANGE;
+        if("WORDS".equals(currentTool)) return PINK;
+        if("GST".equals(currentTool)) return GREEN;
+        if("REMOTE".equals(currentTool)) return RED;
+        if("UNIT".equals(currentTool)) return TEAL;
+        if("SPEED".equals(currentTool)) return ACCENT;
+        if("BILL".equals(currentTool)) return ORANGE;
+        if("SCAN".equals(currentTool)) return PURPLE;
+        if("WIFI_QR".equals(currentTool)) return TEAL;
+        if("QR".equals(currentTool)) return PINK;
+        return ACCENT;
+    }
+
     private GradientDrawable fieldBg(){
-        GradientDrawable g=bg(PANEL,10);
-        g.setStroke(dp(1),Color.rgb(54,101,145));
+        int accent=toolAccent();
+        GradientDrawable g=grad(
+                mixColor(PANEL,accent,0.10f),
+                mixColor(PANEL2,accent,0.17f),
+                15);
+        g.setStroke(dp(2),mixColor(accent,Color.WHITE,0.18f));
         return g;
     }
 
     private android.graphics.drawable.Drawable touchBg(int color,float radius){
-        GradientDrawable base=bg(color,radius);
+        GradientDrawable base=grad(color,mixColor(color,Color.BLACK,0.18f),radius);
+        base.setStroke(dp(1),mixColor(color,Color.WHITE,0.18f));
         if(Build.VERSION.SDK_INT>=21){
             return new android.graphics.drawable.RippleDrawable(
-                    android.content.res.ColorStateList.valueOf(Color.argb(90,255,255,255)),
+                    android.content.res.ColorStateList.valueOf(Color.argb(95,255,255,255)),
                     base,null);
         }
         return base;
     }
 
     private android.graphics.drawable.Drawable screenBg(){
-        return new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,new int[]{BG,SURFACE,BG});
+        int accent=toolAccent();
+        return new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{
+                        BG,
+                        mixColor(SURFACE,accent,0.10f),
+                        mixColor(BG,accent,0.07f),
+                        BG
+                });
     }
 
     private int actionColor(String s){
         String x=s==null?"":s.toUpperCase(java.util.Locale.US);
         if(x.contains("SHARE") || x.contains("शेयर")) return GREEN;
         if(x.contains("HISTORY") || x.contains("हिस्ट्री")) return PURPLE;
-        if(x.contains("CLEAR") || "C".equals(x)) return RED;
-        if(x.contains("CALCULATE") || x.contains("CONVERT") || x.contains("GENERATE") || x.contains("MAKE")) return ACCENT;
-        if("=".equals(x)) return TEAL;
+        if(x.contains("CLEAR") || x.contains("DELETE") || x.contains("REMOVE") || "C".equals(x)) return RED;
+        if(x.contains("PRINT") || x.contains("INPUT") || x.contains("SOURCE")) return ORANGE;
+        if(x.contains("DATE") || x.contains("तारीख")) return PURPLE;
+        if(x.contains("SAVE") || x.contains("CONNECT") || x.contains("PAIR")) return TEAL;
+        if(x.contains("START") || x.contains("SCAN") || x.contains("FIND")
+                || x.contains("CALCULATE") || x.contains("CONVERT")
+                || x.contains("GENERATE") || x.contains("SHOW")
+                || x.contains("MAKE") || x.contains("DETAIL")) return toolAccent();
+        if("=".equals(x) || "OK".equals(x)) return TEAL;
         if("+".equals(x) || "-".equals(x) || "×".equals(x) || "÷".equals(x) || "%".equals(x)) return ORANGE;
-        return PANEL2;
+        return mixColor(PANEL2,toolAccent(),0.22f);
     }
+
     private Button btn(String s){
         Button b=new Button(this);
         b.setText(s);
@@ -129,18 +179,30 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(10),dp(8),dp(10),dp(8));
         b.setMinHeight(dp(48));
-        b.setBackground(touchBg(actionColor(s),10));
+        b.setElevation(dp(2));
+        b.setBackground(touchBg(actionColor(s),14));
         b.setOnTouchListener((v,e)->{
             if(e.getAction()==MotionEvent.ACTION_DOWN) haptic();
             return false;
         });
         return b;
     }
+
     private EditText input(String hint){
-        EditText e=new EditText(this); e.setHint(hint); e.setHintTextColor(SOFT); e.setTextColor(WHITE);
-        e.setTextSize(18); e.setSingleLine(true); e.setPadding(dp(14),dp(8),dp(14),dp(8));
-        e.setBackground(fieldBg()); e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(54)); p.setMargins(0,dp(4),0,dp(4)); e.setLayoutParams(p); return e;
+        EditText e=new EditText(this);
+        e.setHint(hint);
+        e.setHintTextColor(mixColor(SOFT,Color.WHITE,0.06f));
+        e.setTextColor(WHITE);
+        e.setTextSize(18);
+        e.setSingleLine(true);
+        e.setPadding(dp(16),dp(8),dp(16),dp(8));
+        e.setBackground(fieldBg());
+        e.setElevation(dp(1));
+        e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(56));
+        p.setMargins(0,dp(5),0,dp(5));
+        e.setLayoutParams(p);
+        return e;
     }
 
     private LinearLayout.LayoutParams controlParams(int heightDp){
@@ -158,8 +220,13 @@ public class MainActivity extends Activity {
     private void styleResult(TextView t){
         t.setGravity(Gravity.CENTER);
         t.setTypeface(null,1);
-        t.setPadding(dp(14),dp(12),dp(14),dp(12));
-        t.setBackground(grad(PANEL2,Color.rgb(28,96,132),12));
+        t.setPadding(dp(16),dp(14),dp(16),dp(14));
+        t.setElevation(dp(2));
+        GradientDrawable g=grad(
+                mixColor(PANEL2,toolAccent(),0.24f),
+                mixColor(SURFACE,toolAccent(),0.30f),16);
+        g.setStroke(dp(2),mixColor(toolAccent(),Color.WHITE,0.16f));
+        t.setBackground(g);
     }
 
     private Spinner dropdown(String[] items){
@@ -167,18 +234,32 @@ public class MainActivity extends Activity {
         ArrayAdapter<String> a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,items){
             @Override public View getView(int pos, View convert, android.view.ViewGroup parent){
                 TextView t=(TextView)super.getView(pos,convert,parent);
-                t.setTextColor(WHITE); t.setTextSize(18); t.setPadding(dp(14),0,dp(14),0);
-                t.setBackgroundColor(PANEL2); return t;
+                t.setTextColor(WHITE);
+                t.setTextSize(18);
+                t.setTypeface(null,1);
+                t.setPadding(dp(16),0,dp(16),0);
+                t.setBackground(grad(
+                        mixColor(PANEL2,toolAccent(),0.20f),
+                        mixColor(PANEL,toolAccent(),0.12f),14));
+                return t;
             }
             @Override public View getDropDownView(int pos, View convert, android.view.ViewGroup parent){
                 TextView t=(TextView)super.getDropDownView(pos,convert,parent);
-                t.setTextColor(WHITE); t.setTextSize(18); t.setPadding(dp(14),dp(14),dp(14),dp(14));
-                t.setBackgroundColor(PANEL); return t;
+                t.setTextColor(WHITE);
+                t.setTextSize(18);
+                t.setPadding(dp(16),dp(14),dp(16),dp(14));
+                GradientDrawable g=grad(
+                        mixColor(PANEL,toolAccent(),0.12f),
+                        mixColor(PANEL2,toolAccent(),0.16f),10);
+                g.setStroke(dp(1),mixColor(toolAccent(),Color.WHITE,0.12f));
+                t.setBackground(g);
+                return t;
             }
         };
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         s.setAdapter(a);
-        s.setBackground(touchBg(PANEL2,10));
+        s.setElevation(dp(1));
+        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.22f),14));
         return s;
     }
     private String L(String en,String hi){
@@ -357,7 +438,7 @@ public class MainActivity extends Activity {
         root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.TOP);
-        root.setPadding(dp(8),dp(8),dp(8),dp(8));
+        root.setPadding(dp(10),dp(10),dp(10),dp(10));
         root.setBackground(screenBg());
 
         sc.addView(root,new ScrollView.LayoutParams(-1,-1));
@@ -371,19 +452,25 @@ public class MainActivity extends Activity {
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(0,0,0,0);
-        header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
+        int accent=toolAccent();
+        header.setBackground(grad(
+                mixColor(Color.rgb(26,56,96),accent,0.28f),
+                mixColor(Color.rgb(31,94,135),accent,0.38f),0));
+        header.setElevation(dp(4));
 
         TextView menu=tv("⋮",34,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(touchBg(Color.rgb(27,42,78),0));
+        menu.setBackground(touchBg(mixColor(Color.rgb(27,42,78),accent,0.28f),0));
         header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         TextView label=tv(currentName,21,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
+        label.setShadowLayer(4f,0f,2f,Color.argb(120,0,0,0));
         header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
 
         TextView spacer=tv("",1,WHITE);
+        spacer.setBackground(touchBg(mixColor(Color.rgb(27,42,78),accent,0.18f),0));
         header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
@@ -2299,7 +2386,11 @@ public class MainActivity extends Activity {
 
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
+        int accent=toolAccent();
+        header.setBackground(grad(
+                mixColor(Color.rgb(26,56,96),accent,0.28f),
+                mixColor(Color.rgb(31,94,135),accent,0.38f),0));
+        header.setElevation(dp(4));
 
         TextView left=tv("",1,WHITE);
         header.addView(left,new LinearLayout.LayoutParams(dp(56),dp(64)));
@@ -2307,6 +2398,7 @@ public class MainActivity extends Activity {
         TextView label=tv(name,21,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
+        label.setShadowLayer(4f,0f,2f,Color.argb(120,0,0,0));
         header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
 
         TextView right=tv("",1,WHITE);
