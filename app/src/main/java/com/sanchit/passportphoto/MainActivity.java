@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.43\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.43\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.44\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.44\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.43\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.44\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2098,7 +2098,7 @@ public class MainActivity extends Activity {
         return "UPNP";
     }
 
-    private TextView remoteShell(String name){
+    private void remoteShell(String name){
         toolPickerOpen=false;
 
         LinearLayout outer=new LinearLayout(this);
@@ -2109,25 +2109,18 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setBackground(grad(Color.rgb(26,56,96),Color.rgb(31,94,135),0));
 
-        TextView spacer=tv("",1,WHITE);
-        header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
+        TextView left=tv("",1,WHITE);
+        header.addView(left,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         TextView label=tv(name,21,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
         header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
 
-        TextView settings=tv("⋮",34,WHITE);
-        settings.setGravity(Gravity.CENTER);
-        settings.setBackground(touchBg(Color.rgb(27,42,78),0));
-        header.addView(settings,new LinearLayout.LayoutParams(dp(56),dp(64)));
+        TextView right=tv("",1,WHITE);
+        header.addView(right,new LinearLayout.LayoutParams(dp(56),dp(64)));
 
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
-
-        ScrollView sc=new ScrollView(this);
-        sc.setFillViewport(true);
-        sc.setBackground(screenBg());
-        sc.setClipToPadding(false);
 
         root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -2135,12 +2128,11 @@ public class MainActivity extends Activity {
         root.setPadding(dp(8),dp(8),dp(8),dp(8));
         root.setBackground(screenBg());
 
-        sc.addView(root,new ScrollView.LayoutParams(-1,-1));
-        outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+        outer.addView(root,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(outer);
 
         label.setOnClickListener(v->{haptic();showToolPicker(name);});
-        return settings;
+        right.setOnClickListener(v->{haptic();showToolPicker(name);});
     }
 
     private void connectUniversalTv(TvDevice d,TextView status,java.util.function.Consumer<TvDevice> connected){
@@ -2187,19 +2179,32 @@ public class MainActivity extends Activity {
         currentTool="REMOTE";
         if(androidTvV2==null) androidTvV2=new AndroidTvV2(this);
 
-        TextView settings=remoteShell(L("UNIVERSAL TV REMOTE","यूनिवर्सल TV रिमोट"));
+        remoteShell(L("UNIVERSAL TV REMOTE","यूनिवर्सल TV रिमोट"));
+
+        LinearLayout statusBar=new LinearLayout(this);
+        statusBar.setOrientation(LinearLayout.HORIZONTAL);
+        statusBar.setGravity(Gravity.CENTER_VERTICAL);
+        statusBar.setBackground(grad(PANEL2,Color.rgb(24,67,101),12));
 
         TextView status=tv(L("Open ⋮ to connect TV","TV कनेक्ट करने के लिए ⋮ खोलें"),16,SOFT);
         status.setGravity(Gravity.CENTER);
-        status.setPadding(dp(10),dp(8),dp(10),dp(8));
-        status.setBackground(grad(PANEL2,Color.rgb(24,67,101),12));
-        root.addView(status,controlParams(64));
+        status.setPadding(dp(10),dp(8),dp(6),dp(8));
+        statusBar.addView(status,new LinearLayout.LayoutParams(0,-1,1));
+
+        TextView settings=tv("⋮",34,WHITE);
+        settings.setGravity(Gravity.CENTER);
+        settings.setBackground(touchBg(Color.rgb(27,42,78),10));
+        LinearLayout.LayoutParams settingsParams=new LinearLayout.LayoutParams(dp(58),-1);
+        settingsParams.setMargins(dp(2),dp(4),dp(4),dp(4));
+        statusBar.addView(settings,settingsParams);
+
+        root.addView(statusBar,controlParams(64));
 
         LinearLayout remoteBox=new LinearLayout(this);
         remoteBox.setOrientation(LinearLayout.VERTICAL);
         remoteBox.setPadding(dp(3),dp(3),dp(3),dp(3));
         remoteBox.setBackground(grad(Color.rgb(13,31,52),Color.rgb(20,50,75),14));
-        root.addView(remoteBox,new LinearLayout.LayoutParams(-1,-2));
+        root.addView(remoteBox,new LinearLayout.LayoutParams(-1,0,1));
 
         final TvDevice[] active={null};
 
@@ -2212,7 +2217,7 @@ public class MainActivity extends Activity {
                 String key=parts.length>1?parts[1]:"";
                 Button b=btn(label);
                 b.setTextSize(16);
-                LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,dp(54),1);
+                LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,-1,1);
                 bp.setMargins(dp(2),dp(2),dp(2),dp(2));
                 row.addView(b,bp);
 
@@ -2238,7 +2243,7 @@ public class MainActivity extends Activity {
                     }).start();
                 });
             }
-            remoteBox.addView(row,new LinearLayout.LayoutParams(-1,dp(58)));
+            remoteBox.addView(row,new LinearLayout.LayoutParams(-1,0,1));
         };
 
         addRow.accept(new String[]{"⏻|POWER","INPUT|INPUT","MUTE|MUTE"});
