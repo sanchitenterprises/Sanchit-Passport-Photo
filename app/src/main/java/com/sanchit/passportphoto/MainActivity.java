@@ -129,6 +129,36 @@ public class MainActivity extends Activity {
         return g;
     }
 
+    private GradientDrawable focusedFieldBg(){
+        int accent=toolAccent();
+        GradientDrawable g=grad(
+                mixColor(PANEL,accent,0.18f),
+                mixColor(PANEL2,accent,0.28f),
+                15);
+        g.setStroke(dp(2),mixColor(accent,Color.WHITE,0.42f));
+        return g;
+    }
+
+    private GradientDrawable contentCardBg(){
+        int accent=toolAccent();
+        GradientDrawable g=grad(
+                mixColor(SURFACE,accent,0.08f),
+                mixColor(BG,accent,0.12f),
+                20);
+        g.setStroke(dp(1),Color.argb(125,Color.red(accent),Color.green(accent),Color.blue(accent)));
+        return g;
+    }
+
+    private GradientDrawable actionBarBg(){
+        int accent=toolAccent();
+        GradientDrawable g=grad(
+                mixColor(PANEL,accent,0.16f),
+                mixColor(SURFACE,accent,0.22f),
+                16);
+        g.setStroke(dp(1),mixColor(accent,Color.WHITE,0.16f));
+        return g;
+    }
+
     private android.graphics.drawable.Drawable touchBg(int color,float radius){
         GradientDrawable base=grad(color,mixColor(color,Color.BLACK,0.18f),radius);
         base.setStroke(dp(1),mixColor(color,Color.WHITE,0.18f));
@@ -198,6 +228,10 @@ public class MainActivity extends Activity {
         e.setPadding(dp(16),dp(8),dp(16),dp(8));
         e.setBackground(fieldBg());
         e.setElevation(dp(1));
+        e.setOnFocusChangeListener((v,focused)->{
+            e.setBackground(focused?focusedFieldBg():fieldBg());
+            e.setElevation(dp(focused?4:1));
+        });
         e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(56));
         p.setMargins(0,dp(5),0,dp(5));
@@ -207,21 +241,21 @@ public class MainActivity extends Activity {
 
     private LinearLayout.LayoutParams controlParams(int heightDp){
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(heightDp));
-        p.setMargins(0,dp(4),0,dp(4));
+        p.setMargins(0,dp(5),0,dp(5));
         return p;
     }
 
     private LinearLayout.LayoutParams resultParams(int heightDp){
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(heightDp));
-        p.setMargins(0,dp(10),0,dp(4));
+        p.setMargins(0,dp(10),0,dp(6));
         return p;
     }
 
     private void styleResult(TextView t){
         t.setGravity(Gravity.CENTER);
         t.setTypeface(null,1);
-        t.setPadding(dp(16),dp(14),dp(16),dp(14));
-        t.setElevation(dp(2));
+        t.setPadding(dp(18),dp(16),dp(18),dp(16));
+        t.setElevation(dp(4));
         GradientDrawable g=grad(
                 mixColor(PANEL2,toolAccent(),0.24f),
                 mixColor(SURFACE,toolAccent(),0.30f),16);
@@ -430,16 +464,22 @@ public class MainActivity extends Activity {
 
         addFixedDropdown(outer,name);
 
+        View accentLine=new View(this);
+        accentLine.setBackgroundColor(toolAccent());
+        outer.addView(accentLine,new LinearLayout.LayoutParams(-1,dp(3)));
+
         ScrollView sc=new ScrollView(this);
         sc.setFillViewport(true);
         sc.setBackground(screenBg());
         sc.setClipToPadding(false);
+        sc.setPadding(dp(8),dp(8),dp(8),dp(8));
 
         root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setGravity(Gravity.TOP);
-        root.setPadding(dp(10),dp(10),dp(10),dp(10));
-        root.setBackground(screenBg());
+        root.setPadding(dp(12),dp(12),dp(12),dp(12));
+        root.setBackground(contentCardBg());
+        root.setElevation(dp(3));
 
         sc.addView(root,new ScrollView.LayoutParams(-1,-1));
         outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
@@ -1266,11 +1306,24 @@ public class MainActivity extends Activity {
     private LinearLayout addHistoryShareBar(LinearLayout parent,String key,String title,TextView result){
         LinearLayout bar=new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER);
+        bar.setPadding(dp(3),dp(3),dp(3),dp(3));
+        bar.setBackground(actionBarBg());
+        bar.setElevation(dp(3));
+
         Button history=btn(L("HISTORY","हिस्ट्री"));
         Button share=btn(L("SHARE","शेयर"));
-        bar.addView(history,new LinearLayout.LayoutParams(0,dp(50),1));
-        bar.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
-        parent.addView(bar,controlParams(52));
+
+        LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(0,-1,1);
+        hp.setMargins(0,0,dp(3),0);
+        LinearLayout.LayoutParams sp=new LinearLayout.LayoutParams(0,-1,1);
+        sp.setMargins(dp(3),0,0,0);
+        bar.addView(history,hp);
+        bar.addView(share,sp);
+
+        LinearLayout.LayoutParams barParams=new LinearLayout.LayoutParams(-1,dp(58));
+        barParams.setMargins(0,dp(7),0,0);
+        parent.addView(bar,barParams);
 
         history.setOnClickListener(v->{
             String value=result==null?"":result.getText().toString();
