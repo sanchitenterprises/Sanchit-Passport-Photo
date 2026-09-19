@@ -498,8 +498,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.41\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.41\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.42\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.42\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -529,7 +529,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.41\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.42\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2405,9 +2405,6 @@ public class MainActivity extends Activity {
         EditText in=input(L("Enter value","मान दर्ज करें"));
         root.addView(in);
 
-        Button go=btn(L("SHOW ALL CONVERSIONS","सभी रूपांतरण दिखाएं"));
-        root.addView(go,controlParams(60));
-
         TextView out=tv(L("Enter one value to see complete details","एक मान डालें, पूरा विवरण यहाँ दिखेगा"),19,WHITE);
         styleResult(out);
         out.setGravity(Gravity.LEFT|Gravity.TOP);
@@ -2472,13 +2469,6 @@ public class MainActivity extends Activity {
             @Override public void afterTextChanged(android.text.Editable e){}
         });
 
-        go.setOnClickListener(v->{
-            refresh.run();
-            String value=out.getText().toString();
-            if(meaningfulResult(value)){
-                savePanelHistory("unit",L("UNIT CONVERTER","यूनिट कन्वर्टर"),value);
-            }
-        });
     }
 
     private class SpeedometerView extends View{
