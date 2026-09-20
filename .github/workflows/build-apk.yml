@@ -22,7 +22,36 @@ jobs:
           sed -i "s/versionName '[^']*'/versionName '$VERSION_NAME'/" app/build.gradle
       - name: Build debug APK
         run: gradle assembleDebug
+
+      - name: Create full STS DigiKit backup package
+        run: |
+          source app/version.properties
+          mkdir -p export/package
+          cp app/build/outputs/apk/debug/app-debug.apk "export/package/STS-DigiKit-V${VERSION_NAME}.apk"
+          git archive --format=zip --prefix="STS-DigiKit-Source-V${VERSION_NAME}/" --output="export/package/STS-DigiKit-Source-V${VERSION_NAME}.zip" HEAD
+          {
+            echo "STS DigiKit"
+            echo "Version: ${VERSION_NAME}"
+            echo "Version Code: ${VERSION_CODE}"
+            echo "Branch: sts-digikit"
+            echo "Commit: ${GITHUB_SHA}"
+            echo "Contents: latest APK + complete source project"
+          } > export/package/BUILD_INFO.txt
+          (
+            cd export/package
+            zip -r "../STS-DigiKit-All-Materials-V${VERSION_NAME}.zip" .
+          )
+
       - uses: actions/upload-artifact@v4
         with:
           name: STS-DigiKit-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STS-DigiKit-Latest-Materials
+          path: |
+            export/package/STS-DigiKit-V*.apk
+            export/package/STS-DigiKit-Source-V*.zip
+            export/package/BUILD_INFO.txt
+            export/STS-DigiKit-All-Materials-V*.zip
