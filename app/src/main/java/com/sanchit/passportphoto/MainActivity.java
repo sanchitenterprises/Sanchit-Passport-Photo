@@ -278,53 +278,56 @@ public class MainActivity extends Activity {
     }
 
     private Spinner dropdown(String[] items){
-        final Spinner s=new Spinner(this);
+        Spinner s=new Spinner(this);
+        s.setPadding(dp(2),0,dp(2),0);
+
         ArrayAdapter<String> a=new ArrayAdapter<String>(this,android.R.layout.simple_spinner_item,items){
             @Override public View getView(int pos, View convert, android.view.ViewGroup parent){
                 TextView t=(TextView)super.getView(pos,convert,parent);
-                t.setText(String.valueOf(getItem(pos))+"    ▾");
                 t.setTextColor(WHITE);
-                t.setTextSize(18);
+                t.setTextSize(17);
                 t.setTypeface(null,1);
                 t.setGravity(Gravity.CENTER_VERTICAL);
-                t.setPadding(dp(18),0,dp(18),0);
+                t.setSingleLine(true);
+                t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                t.setPadding(dp(16),0,dp(16),0);
+
                 GradientDrawable g=grad(
-                        mixColor(PANEL2,toolAccent(),0.24f),
-                        mixColor(PANEL,toolAccent(),0.15f),16);
-                g.setStroke(dp(2),mixColor(toolAccent(),Color.WHITE,0.24f));
+                        mixColor(PANEL2,toolAccent(),0.28f),
+                        mixColor(PANEL,toolAccent(),0.18f),15);
+                g.setStroke(dp(2),mixColor(toolAccent(),WHITE,0.20f));
                 t.setBackground(g);
                 return t;
             }
+
             @Override public View getDropDownView(int pos, View convert, android.view.ViewGroup parent){
                 TextView t=(TextView)super.getDropDownView(pos,convert,parent);
-                boolean chosen=pos==s.getSelectedItemPosition();
-                t.setText((chosen?"✓  ":"    ")+String.valueOf(getItem(pos)));
-                t.setTextColor(chosen?Color.WHITE:mixColor(SOFT,Color.WHITE,0.28f));
+                t.setTextColor(WHITE);
                 t.setTextSize(17);
-                t.setTypeface(null,chosen?1:0);
                 t.setGravity(Gravity.CENTER_VERTICAL);
-                t.setMinHeight(dp(58));
-                t.setPadding(dp(18),dp(12),dp(18),dp(12));
+                t.setPadding(dp(18),dp(13),dp(18),dp(13));
 
+                boolean selected=pos==s.getSelectedItemPosition();
                 GradientDrawable g=grad(
-                        chosen?mixColor(PANEL2,toolAccent(),0.42f):mixColor(PANEL,toolAccent(),0.10f),
-                        chosen?mixColor(SURFACE,toolAccent(),0.34f):mixColor(PANEL2,toolAccent(),0.13f),
+                        selected?mixColor(PANEL2,toolAccent(),0.48f):mixColor(PANEL,toolAccent(),0.13f),
+                        selected?mixColor(SURFACE,toolAccent(),0.38f):mixColor(PANEL2,toolAccent(),0.16f),
                         12);
-                g.setStroke(dp(chosen?2:1),
-                        chosen?mixColor(toolAccent(),Color.WHITE,0.36f):Color.argb(90,Color.red(toolAccent()),Color.green(toolAccent()),Color.blue(toolAccent())));
+                g.setStroke(dp(selected?2:1),
+                        selected?mixColor(toolAccent(),WHITE,0.38f)
+                                :Color.argb(90,Color.red(toolAccent()),Color.green(toolAccent()),Color.blue(toolAccent())));
                 t.setBackground(g);
-
-                android.view.ViewGroup.LayoutParams lp=t.getLayoutParams();
-                if(lp!=null) lp.height=dp(58);
+                t.setTypeface(null,selected?1:0);
                 return t;
             }
         };
         a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         s.setAdapter(a);
-        styleProfessionalSpinner(s);
-        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.24f),16));
+        s.setElevation(dp(3));
+        s.setPopupBackgroundDrawable(contentCardBg());
+        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.28f),15));
         return s;
     }
+
     private String L(String en,String hi){
         return "HINDI".equals(language)?hi:en;
     }
@@ -518,39 +521,59 @@ public class MainActivity extends Activity {
     }
 
     private void addFixedDropdown(LinearLayout outer, String currentName){
+        int accent=toolAccent();
+
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(0,0,0,0);
-        int accent=toolAccent();
+        header.setPadding(dp(8),dp(7),dp(8),dp(7));
         header.setBackground(grad(
-                mixColor(Color.rgb(26,56,96),accent,0.28f),
-                mixColor(Color.rgb(31,94,135),accent,0.38f),0));
-        header.setElevation(dp(4));
+                mixColor(Color.rgb(20,43,74),accent,0.30f),
+                mixColor(Color.rgb(22,67,102),accent,0.38f),0));
+        header.setElevation(dp(5));
 
-        TextView menu=tv("⋮",34,WHITE);
+        TextView menu=tv("⋮",32,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(touchBg(mixColor(Color.rgb(27,42,78),accent,0.28f),0));
-        header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
+        menu.setBackground(touchBg(mixColor(PANEL,accent,0.34f),14));
+        LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(50),dp(50));
+        mp.setMargins(0,0,dp(8),0);
+        header.addView(menu,mp);
 
-        TextView label=tv(currentName,21,WHITE);
+        LinearLayout selector=new LinearLayout(this);
+        selector.setOrientation(LinearLayout.HORIZONTAL);
+        selector.setGravity(Gravity.CENTER_VERTICAL);
+        selector.setPadding(dp(14),0,dp(8),0);
+        GradientDrawable selectorBg=grad(
+                mixColor(PANEL2,accent,0.30f),
+                mixColor(SURFACE,accent,0.28f),16);
+        selectorBg.setStroke(dp(2),mixColor(accent,WHITE,0.25f));
+        selector.setBackground(selectorBg);
+        selector.setElevation(dp(3));
+
+        TextView label=tv(currentName,20,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
-        label.setShadowLayer(4f,0f,2f,Color.argb(120,0,0,0));
-        header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
+        label.setSingleLine(true);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setShadowLayer(3f,0f,1f,Color.argb(110,0,0,0));
+        selector.addView(label,new LinearLayout.LayoutParams(0,dp(50),1));
 
-        TextView spacer=tv("",1,WHITE);
-        spacer.setBackground(touchBg(mixColor(Color.rgb(27,42,78),accent,0.18f),0));
-        header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
+        TextView handle=tv("━",26,mixColor(WHITE,accent,0.20f));
+        handle.setGravity(Gravity.CENTER);
+        handle.setTypeface(null,1);
+        selector.addView(handle,new LinearLayout.LayoutParams(dp(44),dp(50)));
 
+        header.addView(selector,new LinearLayout.LayoutParams(0,dp(50),1));
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
 
         menu.setOnClickListener(v->{haptic();showTopMenu(menu);});
+        selector.setOnClickListener(v->{haptic();showToolPicker(currentName);});
         label.setOnClickListener(v->{haptic();showToolPicker(currentName);});
-        spacer.setOnClickListener(v->{haptic();showToolPicker(currentName);});
+        handle.setOnClickListener(v->{haptic();showToolPicker(currentName);});
     }
 
     private void showToolPicker(String currentName){
         toolPickerOpen=true;
+        int accent=toolAccent();
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
@@ -558,42 +581,64 @@ public class MainActivity extends Activity {
 
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        int accent=toolAccent();
+        header.setPadding(dp(8),dp(7),dp(8),dp(7));
         header.setBackground(grad(
-                mixColor(Color.rgb(26,56,96),accent,0.30f),
-                mixColor(Color.rgb(31,94,135),accent,0.42f),0));
-        header.setElevation(dp(4));
+                mixColor(Color.rgb(20,43,74),accent,0.30f),
+                mixColor(Color.rgb(22,67,102),accent,0.38f),0));
+        header.setElevation(dp(5));
 
-        TextView menu=tv("⋮",34,WHITE);
+        TextView menu=tv("⋮",32,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(touchBg(Color.rgb(27,42,78),0));
-        header.addView(menu,new LinearLayout.LayoutParams(dp(56),dp(64)));
+        menu.setBackground(touchBg(mixColor(PANEL,accent,0.34f),14));
+        LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(50),dp(50));
+        mp.setMargins(0,0,dp(8),0);
+        header.addView(menu,mp);
 
-        TextView label=tv(currentName,21,WHITE);
+        LinearLayout selector=new LinearLayout(this);
+        selector.setOrientation(LinearLayout.HORIZONTAL);
+        selector.setGravity(Gravity.CENTER_VERTICAL);
+        selector.setPadding(dp(14),0,dp(8),0);
+
+        GradientDrawable selectorBg=grad(
+                mixColor(PANEL2,accent,0.34f),
+                mixColor(SURFACE,accent,0.32f),16);
+        selectorBg.setStroke(dp(2),mixColor(accent,WHITE,0.32f));
+        selector.setBackground(selectorBg);
+        selector.setElevation(dp(4));
+
+        TextView label=tv(currentName,20,WHITE);
         label.setGravity(Gravity.CENTER);
         label.setTypeface(null,1);
-        label.setShadowLayer(4f,0f,2f,Color.argb(120,0,0,0));
-        header.addView(label,new LinearLayout.LayoutParams(0,dp(64),1));
+        label.setSingleLine(true);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        selector.addView(label,new LinearLayout.LayoutParams(0,dp(50),1));
 
-        TextView spacer=tv("",1,WHITE);
-        header.addView(spacer,new LinearLayout.LayoutParams(dp(56),dp(64)));
+        TextView handle=tv("━",26,mixColor(WHITE,accent,0.20f));
+        handle.setGravity(Gravity.CENTER);
+        handle.setTypeface(null,1);
+        selector.addView(handle,new LinearLayout.LayoutParams(dp(44),dp(50)));
 
+        header.addView(selector,new LinearLayout.LayoutParams(0,dp(50),1));
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
 
-        View accentLine=new View(this);
-        accentLine.setBackgroundColor(toolAccent());
-        outer.addView(accentLine,new LinearLayout.LayoutParams(-1,dp(3)));
+        TextView caption=tv(L("SELECT TOOL","टूल चुनें"),13,SOFT);
+        caption.setTypeface(null,1);
+        caption.setLetterSpacing(0.08f);
+        caption.setGravity(Gravity.CENTER_VERTICAL);
+        caption.setPadding(dp(20),dp(9),dp(20),dp(7));
+        outer.addView(caption,new LinearLayout.LayoutParams(-1,dp(38)));
 
         ScrollView listScroll=new ScrollView(this);
         listScroll.setFillViewport(true);
         listScroll.setBackground(screenBg());
         listScroll.setVerticalScrollBarEnabled(true);
         listScroll.setScrollbarFadingEnabled(false);
+        listScroll.setPadding(dp(7),0,dp(7),dp(8));
 
         LinearLayout tools=new LinearLayout(this);
         tools.setOrientation(LinearLayout.VERTICAL);
-        tools.setPadding(dp(6),dp(8),dp(6),dp(8));
-        tools.setBackground(screenBg());
+        tools.setPadding(dp(2),dp(2),dp(2),dp(8));
+        tools.setBackground(contentCardBg());
 
         for(String key:getToolOrder()){
             final String k=key;
@@ -603,15 +648,12 @@ public class MainActivity extends Activity {
         listScroll.addView(tools,new ScrollView.LayoutParams(-1,-2));
         outer.addView(listScroll,new LinearLayout.LayoutParams(-1,0,1));
 
-        menu.setOnClickListener(v->showTopMenu(menu));
-        label.setOnClickListener(v->{toolPickerOpen=false;reopenCurrentTool();});
-        spacer.setOnClickListener(v->{toolPickerOpen=false;reopenCurrentTool();});
+        menu.setOnClickListener(v->{haptic();showTopMenu(menu);});
+        selector.setOnClickListener(v->{haptic();toolPickerOpen=false;reopenCurrentTool();});
+        label.setOnClickListener(v->{haptic();toolPickerOpen=false;reopenCurrentTool();});
+        handle.setOnClickListener(v->{haptic();toolPickerOpen=false;reopenCurrentTool();});
 
         setContentView(outer);
-    }
-
-    private void showHome(){
-        showCalculator();
     }
 
     private void addMenu(LinearLayout list,String s,Runnable r){
@@ -619,24 +661,54 @@ public class MainActivity extends Activity {
     }
 
     private void addMenu(LinearLayout list,String s,Runnable r,boolean selected){
-        TextView row=tv((selected?"✓  ":"   ")+s,19,WHITE);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setTypeface(null,selected?1:0);
-        row.setPadding(dp(20),0,dp(18),0);
-        row.setElevation(dp(selected?4:2));
-
         int accent=toolAccent();
+
+        LinearLayout row=new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10),0,dp(10),0);
+        row.setElevation(dp(selected?5:2));
+
         GradientDrawable card=grad(
-                selected?mixColor(PANEL2,accent,0.46f):mixColor(PANEL,accent,0.10f),
-                selected?mixColor(SURFACE,accent,0.36f):mixColor(PANEL2,accent,0.14f),
-                15);
+                selected?mixColor(PANEL2,accent,0.48f):mixColor(PANEL,accent,0.12f),
+                selected?mixColor(SURFACE,accent,0.38f):mixColor(PANEL2,accent,0.16f),
+                17);
         card.setStroke(dp(selected?2:1),
-                selected?mixColor(accent,WHITE,0.38f):Color.argb(95,Color.red(accent),Color.green(accent),Color.blue(accent)));
+                selected?mixColor(accent,WHITE,0.42f)
+                        :Color.argb(90,Color.red(accent),Color.green(accent),Color.blue(accent)));
         row.setBackground(card);
 
-        if(selected) row.setContentDescription(s+" selected");
+        TextView dot=tv(selected?"✓":"•",selected?18:24,selected?WHITE:accent);
+        dot.setGravity(Gravity.CENTER);
+        dot.setTypeface(null,1);
+        GradientDrawable dotBg=bg(
+                selected?accent:mixColor(PANEL2,accent,0.24f),
+                13);
+        dot.setBackground(dotBg);
+        LinearLayout.LayoutParams dpv=new LinearLayout.LayoutParams(dp(40),dp(40));
+        dpv.setMargins(0,0,dp(12),0);
+        row.addView(dot,dpv);
+
+        TextView name=tv(s,18,WHITE);
+        name.setGravity(Gravity.CENTER_VERTICAL);
+        name.setTypeface(null,selected?1:0);
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.addView(name,new LinearLayout.LayoutParams(0,-1,1));
+
+        if(selected){
+            TextView badge=tv(L("ACTIVE","चालू"),11,WHITE);
+            badge.setGravity(Gravity.CENTER);
+            badge.setTypeface(null,1);
+            badge.setBackground(bg(accent,10));
+            LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(dp(64),dp(30));
+            bp.setMargins(dp(8),0,0,0);
+            row.addView(badge,bp);
+            row.setContentDescription(s+" selected");
+        }
+
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(64));
-        p.setMargins(dp(10),dp(4),dp(10),dp(4));
+        p.setMargins(dp(7),dp(4),dp(7),dp(4));
         list.addView(row,p);
         row.setOnClickListener(v->{logEvent("Open: "+s); haptic(); r.run();});
     }
@@ -675,8 +747,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.45\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.45\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.50\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.50\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -706,7 +778,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.45\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.50\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
