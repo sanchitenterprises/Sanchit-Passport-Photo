@@ -106,6 +106,7 @@ public class MainActivity extends Activity {
 
     private int toolAccent(){
         if("CASH_COUNTER".equals(currentTool)) return GREEN;
+        if("NOTEPAD".equals(currentTool)) return INDIGO;
         if("AGE".equals(currentTool)) return PURPLE;
         if("SAVINGS".equals(currentTool)) return TEAL;
         if("EMI".equals(currentTool)) return ORANGE;
@@ -423,6 +424,7 @@ public class MainActivity extends Activity {
     private void openTool(String key){
         currentTool=key;
         if("CALCULATOR".equals(key)) showCalculator();
+        else if("NOTEPAD".equals(key)) showNotepad();
         else if("CASH_COUNTER".equals(key)) showCashCounter();
         else if("AGE".equals(key)) showAge();
         else if("SAVINGS".equals(key)) showSavings();
@@ -443,6 +445,7 @@ public class MainActivity extends Activity {
     }
 
     private String toolName(String key){
+        if("NOTEPAD".equals(key)) return L("NOTEPAD","नोटपैड");
         if("CASH_COUNTER".equals(key)) return L("CASH COUNTER","कैश काउंटर");
         if("AGE".equals(key)) return L("AGE CALCULATOR","आयु कैलकुलेटर");
         if("SAVINGS".equals(key)) return L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर");
@@ -464,7 +467,7 @@ public class MainActivity extends Activity {
     }
 
     private String[] defaultToolOrder(){
-        return new String[]{"CALCULATOR","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","GST","WIFI_QR","REMOTE","UNIT","SPEED","BILL","SCAN"};
+        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","GST","WIFI_QR","REMOTE","UNIT","SPEED","BILL","SCAN"};
     }
 
     private String[] getToolOrder(){
@@ -472,9 +475,37 @@ public class MainActivity extends Activity {
         String[] def=defaultToolOrder();
         if(saved==null || saved.trim().isEmpty()) return def;
         String[] arr=saved.split(",");
-        if(arr.length!=def.length) return def;
+
         java.util.HashSet<String> valid=new java.util.HashSet<>();
         for(String x:def) valid.add(x);
+
+        if(arr.length==def.length-1){
+            java.util.HashSet<String> oldSeen=new java.util.HashSet<>();
+            boolean oldValid=true;
+            for(String x:arr){
+                if(!valid.contains(x) || "NOTEPAD".equals(x) || !oldSeen.add(x)){
+                    oldValid=false;
+                    break;
+                }
+            }
+            if(oldValid){
+                java.util.ArrayList<String> migrated=new java.util.ArrayList<>();
+                boolean added=false;
+                for(String x:arr){
+                    migrated.add(x);
+                    if("CALCULATOR".equals(x)){
+                        migrated.add("NOTEPAD");
+                        added=true;
+                    }
+                }
+                if(!added) migrated.add(0,"NOTEPAD");
+                String[] result=migrated.toArray(new String[0]);
+                saveToolOrder(result);
+                return result;
+            }
+        }
+
+        if(arr.length!=def.length) return def;
         java.util.HashSet<String> seen=new java.util.HashSet<>();
         for(String x:arr) if(!valid.contains(x) || !seen.add(x)) return def;
         return arr;
@@ -3838,9 +3869,317 @@ public class MainActivity extends Activity {
         return res.toString();
     }
 
-    private void printQuickBill58mm(String content){
+    private String buildNotepadText(String noteTitle,String noteBody){
+        String titleText=noteTitle==null?"":noteTitle.trim();
+        String bodyText=noteBody==null?"":noteBody.trim();
+        StringBuilder out=new StringBuilder();
+        if(!titleText.isEmpty()){
+            out.append(titleText).append("\n");
+            out.append("--------------------------------").append("\n");
+        }
+        out.append(bodyText);
+        return out.toString().trim();
+    }
+
+    private void saveNotepadHistory(String noteTitle,String noteBody){
+        String titleText=noteTitle==null?"":noteTitle.trim();
+        String bodyText=noteBody==null?"":noteBody.trim();
+        if(titleText.isEmpty() && bodyText.isEmpty()) return;
+
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String old=sp.getString("notepad_history","");
+        String raw=titleText+"\u001f"+bodyText;
+        String payload=android.util.Base64.encodeToString(
+                raw.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                android.util.Base64.NO_WRAP);
+
+        if(old!=null && !old.isEmpty()){
+            String[] rows=old.split("\\u001e",-1);
+            if(rows.length>0){
+                String[] top=rows[0].split("\\|",2);
+                if(top.length==2 && top[1].equals(payload)) return;
+            }
+        }
+
+        String rec=System.currentTimeMillis()+"|"+payload;
+        String merged=(old==null || old.isEmpty())?rec:rec+"\u001e"+old;
+        String[] rows=merged.split("\\u001e",-1);
+        StringBuilder keep=new StringBuilder();
+        for(int i=0;i<rows.length && i<50;i++){
+            if(i>0) keep.append("\u001e");
+            keep.append(rows[i]);
+        }
+        sp.edit().putString("notepad_history",keep.toString()).apply();
+    }
+
+    private String[] decodeNotepadHistoryRow(String row){
+        try{
+            String[] p=row.split("\\|",2);
+            if(p.length!=2) return null;
+            long time=Long.parseLong(p[0]);
+            String decoded=new String(
+                    android.util.Base64.decode(p[1],android.util.Base64.NO_WRAP),
+                    java.nio.charset.StandardCharsets.UTF_8);
+            String[] note=decoded.split("\\u001f",-1);
+            String titleText=note.length>0?note[0]:"";
+            String bodyText=note.length>1?note[1]:"";
+            String stamp=new java.text.SimpleDateFormat(
+                    "dd/MM/yyyy hh:mm a",
+                    java.util.Locale.getDefault()).format(new java.util.Date(time));
+            return new String[]{stamp,titleText,bodyText};
+        }catch(Exception e){
+            return null;
+        }
+    }
+
+    private void showNotepadEntry(String stamp,String noteTitle,String noteBody){
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10),dp(8),dp(10),dp(8));
+        box.setBackgroundColor(BG);
+
+        if(stamp!=null && !stamp.isEmpty()){
+            TextView date=tv(stamp,14,SOFT);
+            box.addView(date,new LinearLayout.LayoutParams(-1,dp(38)));
+        }
+
+        ScrollView sc=new ScrollView(this);
+        TextView content=tv(buildNotepadText(noteTitle,noteBody),17,WHITE);
+        content.setGravity(Gravity.LEFT|Gravity.TOP);
+        content.setTextIsSelectable(true);
+        content.setPadding(dp(14),dp(14),dp(14),dp(14));
+        content.setBackground(bg(PANEL,10));
+        sc.addView(content,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(430)));
+
+        String dialogTitle=(noteTitle==null || noteTitle.trim().isEmpty())
+                ?L("NOTEPAD NOTE","नोटपैड नोट")
+                :noteTitle.trim();
+
+        new AlertDialog.Builder(this)
+                .setTitle(dialogTitle)
+                .setView(box)
+                .setPositiveButton(L("CLOSE","बंद करें"),null)
+                .setNegativeButton(L("PRINT COPY","प्रिंट कॉपी"),(d,w)->
+                        printNotepad58mm(buildNotepadText(noteTitle,noteBody)))
+                .setNeutralButton(L("SHARE","शेयर"),(d,w)->
+                        sharePanelText(dialogTitle,noteBody))
+                .show();
+    }
+
+    private void showNotepadHistory(){
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        String raw=sp.getString("notepad_history","");
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(8),dp(8),dp(8),dp(8));
+        box.setBackgroundColor(BG);
+
+        ScrollView sc=new ScrollView(this);
+        LinearLayout list=new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(2),dp(2),dp(2),dp(2));
+        sc.addView(list,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(500)));
+
+        if(raw==null || raw.isEmpty()){
+            TextView empty=tv(L("No notepad history yet.","अभी कोई नोटपैड हिस्ट्री नहीं है।"),16,SOFT);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
+        }else{
+            String[] rows=raw.split("\\u001e",-1);
+            for(String row:rows){
+                String[] item=decodeNotepadHistoryRow(row);
+                if(item==null) continue;
+
+                final String stamp=item[0];
+                final String entryTitle=item[1];
+                final String entryBody=item[2];
+
+                LinearLayout card=new LinearLayout(this);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setPadding(dp(10),dp(8),dp(10),dp(8));
+                card.setBackground(contentCardBg());
+
+                String heading=entryTitle.trim().isEmpty()?L("Untitled Note","बिना शीर्षक नोट"):entryTitle.trim();
+                TextView name=tv(heading,18,WHITE);
+                name.setTypeface(null,1);
+                card.addView(name,new LinearLayout.LayoutParams(-1,dp(42)));
+
+                TextView date=tv(stamp,13,SOFT);
+                card.addView(date,new LinearLayout.LayoutParams(-1,dp(32)));
+
+                String preview=entryBody.replace("\n"," ").trim();
+                if(preview.length()>120) preview=preview.substring(0,120)+"…";
+                if(preview.isEmpty()) preview=L("(No body text)","(कोई मुख्य टेक्स्ट नहीं)");
+                TextView p=tv(preview,15,WHITE);
+                p.setGravity(Gravity.LEFT|Gravity.TOP);
+                card.addView(p,new LinearLayout.LayoutParams(-1,dp(64)));
+
+                LinearLayout buttons=new LinearLayout(this);
+                buttons.setOrientation(LinearLayout.HORIZONTAL);
+                Button view=btn(L("VIEW","देखें"));
+                Button print=btn(L("PRINT COPY","प्रिंट कॉपी"));
+                Button share=btn(L("SHARE","शेयर"));
+                buttons.addView(view,new LinearLayout.LayoutParams(0,dp(50),1));
+                buttons.addView(print,new LinearLayout.LayoutParams(0,dp(50),1));
+                buttons.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
+                card.addView(buttons,new LinearLayout.LayoutParams(-1,dp(52)));
+
+                view.setOnClickListener(v->showNotepadEntry(stamp,entryTitle,entryBody));
+                print.setOnClickListener(v->printNotepad58mm(buildNotepadText(entryTitle,entryBody)));
+                share.setOnClickListener(v->sharePanelText(
+                        entryTitle.trim().isEmpty()?L("NOTEPAD","नोटपैड"):entryTitle.trim(),
+                        entryBody));
+
+                LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
+                cp.setMargins(0,0,0,dp(10));
+                list.addView(card,cp);
+            }
+
+            if(list.getChildCount()==0){
+                TextView empty=tv(L("No notepad history yet.","अभी कोई नोटपैड हिस्ट्री नहीं है।"),16,SOFT);
+                empty.setGravity(Gravity.CENTER);
+                list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
+            }
+        }
+
+        AlertDialog dialog=new AlertDialog.Builder(this)
+                .setTitle(L("NOTEPAD HISTORY","नोटपैड हिस्ट्री"))
+                .setView(box)
+                .setPositiveButton(L("CLOSE","बंद करें"),null)
+                .setNegativeButton(L("CLEAR HISTORY","हिस्ट्री साफ करें"),null)
+                .create();
+
+        dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
+            sp.edit().remove("notepad_history").apply();
+            list.removeAllViews();
+            TextView empty=tv(L("No notepad history yet.","अभी कोई नोटपैड हिस्ट्री नहीं है।"),16,SOFT);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
+        }));
+        dialog.show();
+    }
+
+    private void showNotepad(){
+        currentTool="NOTEPAD";
+        shell(L("NOTEPAD","नोटपैड"));
+
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+
+        TextView info=tv(
+                L("58mm THERMAL PRINT ONLY","केवल 58mm THERMAL PRINT"),
+                15,
+                mixColor(WHITE,INDIGO,0.15f));
+        info.setGravity(Gravity.CENTER);
+        info.setTypeface(null,1);
+        info.setBackground(actionBarBg());
+        root.addView(info,controlParams(46));
+
+        EditText noteTitle=input(L("Note Title (Optional)","नोट शीर्षक (वैकल्पिक)"));
+        noteTitle.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                |android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        noteTitle.setText(sp.getString("notepad_draft_title",""));
+        root.addView(noteTitle);
+
+        EditText noteBody=new EditText(this);
+        noteBody.setHint(L("Write or paste your note here...","यहाँ अपना नोट लिखें या पेस्ट करें..."));
+        noteBody.setHintTextColor(SOFT);
+        noteBody.setTextColor(WHITE);
+        noteBody.setTextSize(18);
+        noteBody.setGravity(Gravity.TOP|Gravity.LEFT);
+        noteBody.setSingleLine(false);
+        noteBody.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                |android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                |android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        noteBody.setPadding(dp(16),dp(14),dp(16),dp(14));
+        noteBody.setBackground(fieldBg());
+        noteBody.setElevation(dp(1));
+        noteBody.setText(sp.getString("notepad_draft_body",""));
+        attachInputBehavior(noteBody);
+        LinearLayout.LayoutParams noteParams=new LinearLayout.LayoutParams(-1,dp(360));
+        noteParams.setMargins(0,dp(6),0,dp(8));
+        root.addView(noteBody,noteParams);
+
+        LinearLayout row1=new LinearLayout(this);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        Button save=btn(L("SAVE","सेव"));
+        Button history=btn(L("HISTORY","हिस्ट्री"));
+        row1.addView(save,new LinearLayout.LayoutParams(0,dp(54),1));
+        row1.addView(history,new LinearLayout.LayoutParams(0,dp(54),1));
+        root.addView(row1,new LinearLayout.LayoutParams(-1,dp(56)));
+
+        LinearLayout row2=new LinearLayout(this);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        Button share=btn(L("SHARE","शेयर"));
+        Button print=btn(L("PRINT 58MM","58MM प्रिंट"));
+        row2.addView(share,new LinearLayout.LayoutParams(0,dp(56),1));
+        row2.addView(print,new LinearLayout.LayoutParams(0,dp(56),1));
+        LinearLayout.LayoutParams row2p=new LinearLayout.LayoutParams(-1,dp(58));
+        row2p.setMargins(0,dp(6),0,dp(12));
+        root.addView(row2,row2p);
+
+        android.text.TextWatcher draftWatcher=new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence s,int st,int count,int after){}
+            @Override public void onTextChanged(CharSequence s,int st,int before,int count){
+                sp.edit()
+                        .putString("notepad_draft_title",noteTitle.getText().toString())
+                        .putString("notepad_draft_body",noteBody.getText().toString())
+                        .apply();
+            }
+            @Override public void afterTextChanged(android.text.Editable e){}
+        };
+        noteTitle.addTextChangedListener(draftWatcher);
+        noteBody.addTextChangedListener(draftWatcher);
+
+        save.setOnClickListener(v->{
+            String t=noteTitle.getText().toString();
+            String b=noteBody.getText().toString();
+            if(t.trim().isEmpty() && b.trim().isEmpty()){
+                Toast.makeText(this,L("Write something first","पहले कुछ लिखें"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveNotepadHistory(t,b);
+            Toast.makeText(this,L("Note saved to history","नोट हिस्ट्री में सेव हो गया"),Toast.LENGTH_SHORT).show();
+        });
+
+        history.setOnClickListener(v->{
+            String t=noteTitle.getText().toString();
+            String b=noteBody.getText().toString();
+            if(!t.trim().isEmpty() || !b.trim().isEmpty()) saveNotepadHistory(t,b);
+            showNotepadHistory();
+        });
+
+        share.setOnClickListener(v->{
+            String t=noteTitle.getText().toString();
+            String b=noteBody.getText().toString();
+            if(t.trim().isEmpty() && b.trim().isEmpty()){
+                Toast.makeText(this,L("Write something first","पहले कुछ लिखें"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveNotepadHistory(t,b);
+            sharePanelText(
+                    t.trim().isEmpty()?L("NOTEPAD","नोटपैड"):t.trim(),
+                    b.trim().isEmpty()?buildNotepadText(t,b):b);
+        });
+
+        print.setOnClickListener(v->{
+            String t=noteTitle.getText().toString();
+            String b=noteBody.getText().toString();
+            String printable=buildNotepadText(t,b);
+            if(!meaningfulResult(printable)){
+                Toast.makeText(this,L("Write something first","पहले कुछ लिखें"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveNotepadHistory(t,b);
+            printNotepad58mm(printable);
+        });
+    }
+
+    private void print58mmText(String content,String fileName,String jobName,String emptyEn,String emptyHi){
         if(!meaningfulResult(content)){
-            Toast.makeText(this,L("Nothing to print yet","अभी print करने के लिए bill नहीं है"),Toast.LENGTH_SHORT).show();
+            Toast.makeText(this,L(emptyEn,emptyHi),Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -3855,7 +4194,13 @@ public class MainActivity extends Activity {
             final String[] receiptLines=receipt.split("\\n",-1);
             final int pageWidthPt=164;
             final int lineHeightPt=11;
-            final int pageHeightPt=Math.max(240,36+(receiptLines.length*lineHeightPt));
+
+            int estimatedLines=0;
+            for(String estimateLine:receiptLines){
+                int chars=estimateLine==null?0:estimateLine.length();
+                estimatedLines+=Math.max(1,(chars+23)/24);
+            }
+            final int pageHeightPt=Math.max(240,36+(estimatedLines*lineHeightPt));
             final int mediaHeightMils=Math.max(3333,Math.round(pageHeightPt*1000f/72f));
 
             android.print.PrintDocumentAdapter adapter=new android.print.PrintDocumentAdapter(){
@@ -3868,7 +4213,7 @@ public class MainActivity extends Activity {
                         callback.onLayoutCancelled();
                         return;
                     }
-                    android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder("STS-DigiKit-Bill.pdf")
+                    android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder(fileName)
                             .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
                             .setPageCount(1)
                             .build();
@@ -3912,7 +4257,6 @@ public class MainActivity extends Activity {
                         }
 
                         float y=14f;
-
                         for(String lineText:receiptLines){
                             if(cancellationSignal.isCanceled()){
                                 pdf.finishPage(page);
@@ -3938,7 +4282,6 @@ public class MainActivity extends Activity {
                         }
 
                         pdf.finishPage(page);
-
                         java.io.FileOutputStream out=new java.io.FileOutputStream(destination.getFileDescriptor());
                         pdf.writeTo(out);
                         out.close();
@@ -3953,15 +4296,33 @@ public class MainActivity extends Activity {
 
             android.print.PrintAttributes attrs=new android.print.PrintAttributes.Builder()
                     .setMediaSize(new android.print.PrintAttributes.MediaSize(
-                            "STS_58MM","Receipt",2283,mediaHeightMils))
+                            "STS_58MM","58mm Thermal Receipt",2283,mediaHeightMils))
                     .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
                     .setColorMode(android.print.PrintAttributes.COLOR_MODE_MONOCHROME)
                     .build();
 
-            pm.print(L("STS DigiKit Bill","STS DigiKit बिल"),adapter,attrs);
+            pm.print(jobName,adapter,attrs);
         }catch(Exception e){
             Toast.makeText(this,L("Could not open print screen","Print screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void printQuickBill58mm(String content){
+        print58mmText(
+                content,
+                "STS-DigiKit-Bill.pdf",
+                L("STS DigiKit Bill","STS DigiKit बिल"),
+                "Nothing to print yet",
+                "अभी print करने के लिए bill नहीं है");
+    }
+
+    private void printNotepad58mm(String content){
+        print58mmText(
+                content,
+                "STS-DigiKit-Notepad.pdf",
+                L("STS DigiKit Notepad","STS DigiKit नोटपैड"),
+                "Nothing to print yet",
+                "अभी print करने के लिए note नहीं है");
     }
 
     private void showQuickBill(){
