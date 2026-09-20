@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.74\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.74\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.75\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.75\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.74\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.75\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -6521,9 +6521,258 @@ public class MainActivity extends Activity {
         return lines;
     }
 
-    private android.graphics.Bitmap renderThermalBitmap(String content,String printMode){
-        // Keep the proven 384-dot raster width used by this 58mm printer.
-        // Only shift the content slightly right to balance the visible paper margins.
+    private void thermalDrawFit(
+            android.graphics.Canvas canvas,
+            android.graphics.Paint paint,
+            String text,
+            float x,
+            float y,
+            float maxWidth,
+            android.graphics.Paint.Align align){
+
+        String value=text==null?"":text;
+        float oldSize=paint.getTextSize();
+        android.graphics.Paint.Align oldAlign=paint.getTextAlign();
+        paint.setTextAlign(align);
+
+        float size=oldSize;
+        paint.setTextSize(size);
+        while(size>15f && paint.measureText(value)>maxWidth){
+            size-=1f;
+            paint.setTextSize(size);
+        }
+
+        canvas.drawText(value,x,y,paint);
+        paint.setTextSize(oldSize);
+        paint.setTextAlign(oldAlign);
+    }
+
+    private android.graphics.Bitmap renderCashThermalBitmap(String content){
+        final int width=384;
+        final int left=18;
+        final int right=374;
+        final int top=10;
+        final int lineHeight=31;
+
+        String safe=content==null?"":content.replace("\r","");
+        String[] lines=safe.split("\n",-1);
+        int height=Math.max(90,top*2+lines.length*lineHeight+18);
+
+        android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(
+                width,height,android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
+        canvas.drawColor(Color.WHITE);
+
+        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.BLACK);
+        paint.setTextSize(22f);
+        paint.setTypeface(android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL));
+
+        java.util.regex.Pattern cashRow=java.util.regex.Pattern.compile(
+                "^\\s*(₹[^\\s]+)\\s+x\\s+([^\\s]+)\\s+=\\s+(₹[^\\s]+)\\s*$");
+
+        float y=top-paint.getFontMetrics().ascent;
+        for(String raw:lines){
+            String t=raw==null?"":raw.trim();
+
+            if(t.isEmpty()){
+                y+=lineHeight;
+                continue;
+            }
+
+            if(t.matches("-{5,}")){
+                android.graphics.Paint linePaint=new android.graphics.Paint();
+                linePaint.setColor(Color.BLACK);
+                linePaint.setStrokeWidth(1.4f);
+                canvas.drawLine(left,y-9,right,y-9,linePaint);
+                y+=lineHeight;
+                continue;
+            }
+
+            java.util.regex.Matcher row=cashRow.matcher(t);
+            if(row.matches()){
+                // Fixed physical columns: these never depend on spaces/font width.
+                thermalDrawFit(canvas,paint,row.group(1),88,y,70,android.graphics.Paint.Align.RIGHT);
+                thermalDrawFit(canvas,paint,"x",111,y,18,android.graphics.Paint.Align.CENTER);
+                thermalDrawFit(canvas,paint,row.group(2),184,y,62,android.graphics.Paint.Align.RIGHT);
+                thermalDrawFit(canvas,paint,"=",211,y,18,android.graphics.Paint.Align.CENTER);
+                thermalDrawFit(canvas,paint,row.group(3),right,y,145,android.graphics.Paint.Align.RIGHT);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(t.startsWith("TOTAL")){
+                String amount=t.substring(Math.min(5,t.length())).trim();
+                thermalDrawFit(canvas,paint,"TOTAL",left,y,120,android.graphics.Paint.Align.LEFT);
+                thermalDrawFit(canvas,paint,amount,right,y,170,android.graphics.Paint.Align.RIGHT);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(t.startsWith("Party:")){
+                thermalDrawFit(canvas,paint,t,left,y,right-left,android.graphics.Paint.Align.LEFT);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(t.startsWith("STS DigiKit - Cash Counter")){
+                thermalDrawFit(canvas,paint,t,width/2f,y,right-left,android.graphics.Paint.Align.CENTER);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(t.matches("\\d{2}/\\d{2}/\\d{4}.*")){
+                thermalDrawFit(canvas,paint,t,width/2f,y,right-left,android.graphics.Paint.Align.CENTER);
+                y+=lineHeight;
+                continue;
+            }
+
+            thermalDrawFit(canvas,paint,t,left,y,right-left,android.graphics.Paint.Align.LEFT);
+            y+=lineHeight;
+        }
+        return bitmap;
+    }
+
+    private String thermalPadTo(String value,int width){
+        String x=value==null?"":value;
+        StringBuilder b=new StringBuilder(x);
+        while(b.length()<width) b.append(' ');
+        return b.toString();
+    }
+
+    private String[] thermalSplitTotalRow(String raw){
+        String line=raw==null?"":raw;
+        java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\s{2,}").matcher(line);
+        int split=-1,end=-1;
+        while(m.find()){
+            split=m.start();
+            end=m.end();
+        }
+        if(split>0 && end>=0 && end<line.length()){
+            return new String[]{line.substring(0,split).trim(),line.substring(end).trim()};
+        }
+        return new String[]{line.trim(),""};
+    }
+
+    private android.graphics.Bitmap renderBillThermalBitmap(String content){
+        final int width=384;
+        final int left=18;
+        final int right=374;
+        final int top=10;
+        final int lineHeight=31;
+
+        String safe=content==null?"":content.replace("\r","");
+        String[] lines=safe.split("\n",-1);
+        int height=Math.max(100,top*2+lines.length*lineHeight+20);
+
+        android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(
+                width,height,android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
+        canvas.drawColor(Color.WHITE);
+
+        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.BLACK);
+        paint.setTextSize(22f);
+        paint.setTypeface(android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL));
+
+        int separatorCount=0;
+        float y=top-paint.getFontMetrics().ascent;
+
+        for(String raw:lines){
+            String original=raw==null?"":raw;
+            String t=original.trim();
+
+            if(t.isEmpty()){
+                y+=lineHeight;
+                continue;
+            }
+
+            if(t.matches("-{5,}")){
+                android.graphics.Paint linePaint=new android.graphics.Paint();
+                linePaint.setColor(Color.BLACK);
+                linePaint.setStrokeWidth(1.4f);
+                canvas.drawLine(left,y-9,right,y-9,linePaint);
+                separatorCount++;
+                y+=lineHeight;
+                continue;
+            }
+
+            if(separatorCount==0){
+                // Shop name and INVOICE.
+                thermalDrawFit(canvas,paint,t,width/2f,y,right-left,android.graphics.Paint.Align.CENTER);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(separatorCount==1){
+                // Date, Bill No, Customer.
+                thermalDrawFit(canvas,paint,t,left,y,right-left,android.graphics.Paint.Align.LEFT);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(separatorCount==2){
+                // Item | Qty | Amount heading.
+                String padded=thermalPadTo(original,34);
+                String item=padded.substring(0,Math.min(18,padded.length())).trim();
+                String qty=padded.length()>18?padded.substring(18,Math.min(24,padded.length())).trim():"";
+                String amount=padded.length()>24?padded.substring(24,Math.min(34,padded.length())).trim():"";
+
+                thermalDrawFit(canvas,paint,item,left,y,190,android.graphics.Paint.Align.LEFT);
+                thermalDrawFit(canvas,paint,qty,257,y,55,android.graphics.Paint.Align.RIGHT);
+                thermalDrawFit(canvas,paint,amount,right,y,105,android.graphics.Paint.Align.RIGHT);
+                y+=lineHeight;
+                continue;
+            }
+
+            if(separatorCount==3){
+                // Item rows. Fixed physical columns, never wrap Amount.
+                String padded=thermalPadTo(original,34);
+
+                if(t.startsWith("GST") || t.startsWith("जीएसटी")
+                        || t.startsWith("GST ") || t.startsWith("  GST")){
+                    String label=padded.substring(0,Math.min(24,padded.length())).trim();
+                    String amount=padded.length()>24?padded.substring(24,Math.min(34,padded.length())).trim():"";
+                    thermalDrawFit(canvas,paint,label,left+12,y,230,android.graphics.Paint.Align.LEFT);
+                    thermalDrawFit(canvas,paint,amount,right,y,105,android.graphics.Paint.Align.RIGHT);
+                }else{
+                    String item=padded.substring(0,Math.min(18,padded.length())).trim();
+                    String qty=padded.length()>18?padded.substring(18,Math.min(24,padded.length())).trim():"";
+                    String amount=padded.length()>24?padded.substring(24,Math.min(34,padded.length())).trim():"";
+
+                    thermalDrawFit(canvas,paint,item,left,y,190,android.graphics.Paint.Align.LEFT);
+                    thermalDrawFit(canvas,paint,qty,257,y,55,android.graphics.Paint.Align.RIGHT);
+                    thermalDrawFit(canvas,paint,amount,right,y,105,android.graphics.Paint.Align.RIGHT);
+                }
+                y+=lineHeight;
+                continue;
+            }
+
+            // Totals section: label stays left, amount is always right aligned.
+            String[] total=thermalSplitTotalRow(original);
+            if(total[1].isEmpty()){
+                // Fallback for older history rows.
+                java.util.regex.Matcher m=java.util.regex.Pattern
+                        .compile("^(.*?)(Rs\\s+[^\\s]+|₹[^\\s]+|[0-9,]+(?:\\.[0-9]+)?)$")
+                        .matcher(t);
+                if(m.matches()){
+                    total[0]=m.group(1).trim();
+                    total[1]=m.group(2).trim();
+                }
+            }
+
+            if(!total[1].isEmpty()){
+                thermalDrawFit(canvas,paint,total[0],left,y,210,android.graphics.Paint.Align.LEFT);
+                thermalDrawFit(canvas,paint,total[1],right,y,150,android.graphics.Paint.Align.RIGHT);
+            }else{
+                thermalDrawFit(canvas,paint,t,left,y,right-left,android.graphics.Paint.Align.LEFT);
+            }
+            y+=lineHeight;
+        }
+        return bitmap;
+    }
+
+    private android.graphics.Bitmap renderPlainThermalBitmap(String content){
         final int width=384;
         final int leftPad=18;
         final int rightPad=2;
@@ -6532,20 +6781,8 @@ public class MainActivity extends Activity {
 
         android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.BLACK);
-        paint.setTypeface(android.graphics.Typeface.MONOSPACE);
-
-        // Bills and Cash Counter use a 34-column fixed grid. Choose the largest
-        // readable mono text size that keeps all 34 columns on one physical line.
-        float textSize=24f;
-        if("BILL".equals(printMode) || "CASH".equals(printMode)){
-            paint.setTextSize(textSize);
-            float cell=Math.max(1f,paint.measureText("0"));
-            float required=cell*34f;
-            if(required>usable){
-                textSize=Math.max(16f,textSize*(usable/required));
-            }
-        }
-        paint.setTextSize(textSize);
+        paint.setTextSize(24f);
+        paint.setTypeface(android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL));
 
         java.util.ArrayList<String> lines=thermalWrapLines(content,paint,usable);
         android.graphics.Paint.FontMetrics fm=paint.getFontMetrics();
@@ -6563,6 +6800,16 @@ public class MainActivity extends Activity {
             y+=lineHeight;
         }
         return bitmap;
+    }
+
+    private android.graphics.Bitmap renderThermalBitmap(String content,String printMode){
+        if("CASH".equals(printMode)){
+            return renderCashThermalBitmap(content);
+        }
+        if("BILL".equals(printMode)){
+            return renderBillThermalBitmap(content);
+        }
+        return renderPlainThermalBitmap(content);
     }
 
     private void sendEscPosBitmapSafe(
