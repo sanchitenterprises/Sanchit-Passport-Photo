@@ -55,8 +55,38 @@ public class MainActivity extends Activity {
     private static final int REQ_GALLERY_SCAN=9013;
     private static final int REQ_THERMAL_BLUETOOTH=9014;
     private static final int REQ_SAVE_QR_IMAGE=9015;
+    private static final int REQ_PICK_RESIZER_IMAGE=9016;
+    private static final int REQ_SAVE_RESIZER=9017;
+    private static final int REQ_PICK_PDFS=9018;
+    private static final int REQ_SAVE_JOINED_PDF=9019;
+    private static final int REQ_SAVE_PDF_IMAGES_DIR=9020;
+    private static final int REQ_SAVE_VIEWER_PDF=9021;
+    private static final int REQ_SAVE_VIEWER_IMAGES_DIR=9022;
+
     private Bitmap lastGeneratedQrBitmap;
     private String pendingQrSaveFormat="PNG";
+
+    private Uri resizerSourceUri;
+    private Bitmap resizerSourceBitmap;
+    private Bitmap resizerOutputBitmap;
+    private String pendingResizerFormat="JPG";
+    private int resizerTargetKb=0;
+
+    private final java.util.ArrayList<Uri> pdfToolUris=new java.util.ArrayList<>();
+    private byte[] lastJoinedPdfBytes;
+    private String pendingPdfExportFormat="PDF";
+    private float lastPdfBuildScale=1.0f;
+    private String lastPdfPageMode="ORIGINAL";
+
+    private Uri viewerPdfUri;
+    private android.os.ParcelFileDescriptor viewerPdfPfd;
+    private android.graphics.pdf.PdfRenderer viewerPdfRenderer;
+    private android.graphics.pdf.PdfRenderer.Page viewerPdfPage;
+    private int viewerPageIndex=0;
+    private ImageView viewerImage;
+    private TextView viewerPageLabel;
+    private float viewerZoom=1f;
+    private String pendingViewerExportFormat="PDF";
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private FrameLayout scannerViewport;
     private TextView scannerStatus;
@@ -81,7 +111,17 @@ public class MainActivity extends Activity {
         vibrationEnabled=sp.getBoolean("vibration",true);
         language=sp.getString("language","ENGLISH");
         logEvent("App started");
-        showCalculator();
+        if(!handleIncomingPdfIntent(getIntent())){
+            showCalculator();
+        }
+    }
+
+    @Override protected void onNewIntent(Intent intent){
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if(!handleIncomingPdfIntent(intent)){
+            reopenCurrentTool();
+        }
     }
 
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
@@ -128,6 +168,8 @@ public class MainActivity extends Activity {
         if("SCAN".equals(currentTool)) return PURPLE;
         if("WIFI_QR".equals(currentTool)) return TEAL;
         if("QR".equals(currentTool)) return PINK;
+        if("PHOTO_RESIZER".equals(currentTool)) return TEAL;
+        if("PDF_TOOLS".equals(currentTool) || "PDF_VIEWER".equals(currentTool)) return INDIGO;
         return ACCENT;
     }
 
@@ -440,6 +482,8 @@ public class MainActivity extends Activity {
         else if("EMI".equals(key) || "GST".equals(key)) showEmiInterest();
         else if("WORDS".equals(key)) showNumberWords();
         else if("QR".equals(key) || "WIFI_QR".equals(key)) showQr();
+        else if("PHOTO_RESIZER".equals(key)) showPhotoSignatureResizer();
+        else if("PDF_TOOLS".equals(key)) showPdfJoinResize();
         else if("REMOTE".equals(key)) showRemote();
         else if("UNIT".equals(key)) showUnitConverter();
         else if("SPEED".equals(key)) openSpeedTest();
@@ -459,6 +503,9 @@ public class MainActivity extends Activity {
         if("EMI".equals(key) || "GST".equals(key)) return L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट");
         if("WORDS".equals(key)) return L("NUMBER TO WORDS","संख्या शब्दों में");
         if("QR".equals(key) || "WIFI_QR".equals(key)) return L("QR GENERATOR","QR जनरेटर");
+        if("PHOTO_RESIZER".equals(key)) return L("PHOTO / SIGNATURE RESIZER","फोटो / सिग्नेचर रिसाइज़र");
+        if("PDF_TOOLS".equals(key)) return L("PDF JOIN / RESIZE","PDF जोड़ें / रिसाइज़");
+        if("PDF_VIEWER".equals(key)) return L("PDF VIEWER","PDF व्यूअर");
         if("REMOTE".equals(key)) return L("REMOTE","रिमोट");
         if("UNIT".equals(key)) return L("UNIT CONVERTER","यूनिट कन्वर्टर");
         if("SPEED".equals(key)) return L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट");
@@ -472,7 +519,7 @@ public class MainActivity extends Activity {
     }
 
     private String[] defaultToolOrder(){
-        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","REMOTE","UNIT","SPEED","BILL","SCAN"};
+        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","PHOTO_RESIZER","PDF_TOOLS","REMOTE","UNIT","SPEED","BILL","SCAN"};
     }
 
     private String[] getToolOrder(){
