@@ -62,6 +62,8 @@ public class MainActivity extends Activity {
     private boolean scannerFullScreen=false;
     private String lastScannerRaw="";
     private String lastScannerDetails="";
+    private android.view.ScaleGestureDetector scannerScaleDetector;
+    private float scannerZoomLevel=0f;
 
 
     @Override public void onCreate(Bundle b){
@@ -877,8 +879,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.56\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.56\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.57\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.57\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -908,7 +910,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.56\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.57\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1253,38 +1255,98 @@ public class MainActivity extends Activity {
         sp.edit().putString("cashHistory",keep.toString()).apply();
     }
 
+    private void showCashHistoryEntry(String summary){
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10),dp(8),dp(10),dp(8));
+        box.setBackgroundColor(BG);
+
+        ScrollView sc=new ScrollView(this);
+        TextView content=tv(summary,16,WHITE);
+        content.setGravity(Gravity.LEFT|Gravity.TOP);
+        content.setTextIsSelectable(true);
+        content.setPadding(dp(12),dp(12),dp(12),dp(12));
+        content.setBackground(bg(PANEL,8));
+        sc.addView(content,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(430)));
+
+        new AlertDialog.Builder(this)
+                .setTitle(L("CASH HISTORY","कैश हिस्ट्री"))
+                .setView(box)
+                .setPositiveButton(L("CLOSE","बंद करें"),null)
+                .setNegativeButton(L("PRINT COPY","प्रिंट कॉपी"),(d,w)->printCashSummary58mm(summary))
+                .setNeutralButton(L("SHARE","शेयर"),(d,w)->shareCashSummary(summary))
+                .show();
+    }
+
     private void showCashHistory(){
-        String raw=getSharedPreferences("sts",0).getString("cashHistory","");
+        android.content.SharedPreferences prefs=getSharedPreferences("sts",0);
+        String raw=prefs.getString("cashHistory","");
+
         LinearLayout box=new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackgroundColor(BG);
-        box.setPadding(dp(10),dp(8),dp(10),dp(8));
+        box.setPadding(dp(8),dp(8),dp(8),dp(8));
 
         ScrollView sc=new ScrollView(this);
-        TextView content=tv("",16,WHITE);
-        content.setGravity(Gravity.LEFT|Gravity.TOP);
-        content.setTextIsSelectable(true);
-        content.setBackground(bg(PANEL,8));
+        LinearLayout list=new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(2),dp(2),dp(2),dp(2));
+        sc.addView(list,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(500)));
 
         if(raw==null || raw.isEmpty()){
-            content.setText(L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।"));
+            TextView empty=tv(L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।"),16,SOFT);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
         }else{
-            StringBuilder out=new StringBuilder();
             String[] rows=raw.split("\\u001e",-1);
-            for(int i=0;i<rows.length;i++){
-                String[] p=rows[i].split("\\|",2);
+            for(String row:rows){
+                String[] p=row.split("\\|",2);
                 if(p.length!=2) continue;
                 try{
-                    String summary=new String(android.util.Base64.decode(p[1],android.util.Base64.NO_WRAP),java.nio.charset.StandardCharsets.UTF_8);
-                    if(out.length()>0) out.append("\n\n--------------------\n\n");
-                    out.append(summary);
+                    long when=Long.parseLong(p[0]);
+                    final String summary=new String(
+                            android.util.Base64.decode(p[1],android.util.Base64.NO_WRAP),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    String stamp=new java.text.SimpleDateFormat(
+                            "dd/MM/yyyy hh:mm a",
+                            java.util.Locale.getDefault()).format(new java.util.Date(when));
+
+                    LinearLayout card=new LinearLayout(this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dp(10),dp(8),dp(10),dp(8));
+                    card.setBackground(contentCardBg());
+
+                    TextView date=tv(stamp,13,SOFT);
+                    card.addView(date,new LinearLayout.LayoutParams(-1,dp(32)));
+
+                    String preview=summary.replace("\n"," ").trim();
+                    if(preview.length()>145) preview=preview.substring(0,145)+"…";
+                    TextView pv=tv(preview,15,WHITE);
+                    pv.setGravity(Gravity.LEFT|Gravity.TOP);
+                    card.addView(pv,new LinearLayout.LayoutParams(-1,dp(70)));
+
+                    LinearLayout buttons=new LinearLayout(this);
+                    buttons.setOrientation(LinearLayout.HORIZONTAL);
+                    Button view=btn(L("VIEW","देखें"));
+                    Button print=btn(L("PRINT COPY","प्रिंट कॉपी"));
+                    Button share=btn(L("SHARE","शेयर"));
+                    buttons.addView(view,new LinearLayout.LayoutParams(0,dp(50),1));
+                    buttons.addView(print,new LinearLayout.LayoutParams(0,dp(50),1));
+                    buttons.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
+                    card.addView(buttons,new LinearLayout.LayoutParams(-1,dp(52)));
+
+                    view.setOnClickListener(v->showCashHistoryEntry(summary));
+                    print.setOnClickListener(v->printCashSummary58mm(summary));
+                    share.setOnClickListener(v->shareCashSummary(summary));
+
+                    LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
+                    cp.setMargins(0,0,0,dp(10));
+                    list.addView(card,cp);
                 }catch(Exception ignored){}
             }
-            content.setText(out.length()==0?L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।"):out.toString());
         }
-
-        sc.addView(content,new ScrollView.LayoutParams(-1,-2));
-        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(430)));
 
         AlertDialog dialog=new AlertDialog.Builder(this)
                 .setTitle(L("CASH HISTORY","कैश हिस्ट्री"))
@@ -1293,12 +1355,13 @@ public class MainActivity extends Activity {
                 .setNegativeButton(L("CLEAR HISTORY","हिस्ट्री साफ करें"),null)
                 .create();
 
-        dialog.setOnShowListener(x->{
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
-                getSharedPreferences("sts",0).edit().remove("cashHistory").apply();
-                content.setText(L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।"));
-            });
-        });
+        dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
+            prefs.edit().remove("cashHistory").apply();
+            list.removeAllViews();
+            TextView empty=tv(L("No cash history yet.","अभी कोई कैश हिस्ट्री नहीं है।"),16,SOFT);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
+        }));
         dialog.show();
     }
 
@@ -1328,12 +1391,13 @@ public class MainActivity extends Activity {
         cashScroll.setFillViewport(true);
         cashScroll.setClipToPadding(false);
         cashScroll.setBackground(screenBg());
+        cashScroll.setPadding(0,0,0,0);
 
         LinearLayout body=new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setBackground(screenBg());
-        body.setPadding(dp(6),dp(4),dp(6),dp(16));
-        cashScroll.addView(body,new ScrollView.LayoutParams(-1,-2));
+        body.setPadding(dp(4),dp(4),dp(4),dp(4));
+        cashScroll.addView(body,new ScrollView.LayoutParams(-1,-1));
         outer.addView(cashScroll,new LinearLayout.LayoutParams(-1,0,1));
         registerInputScroll(cashScroll);
 
@@ -1449,6 +1513,22 @@ public class MainActivity extends Activity {
 
             rowsBox.addView(line,new LinearLayout.LayoutParams(-1,dp(56)));
         }
+
+        Button cashPrint=btn(L("PRINT 58MM","58MM प्रिंट"));
+        LinearLayout.LayoutParams cashPrintParams=new LinearLayout.LayoutParams(-1,dp(58));
+        cashPrintParams.setMargins(0,dp(6),0,0);
+        body.addView(cashPrint,cashPrintParams);
+
+        cashPrint.setOnClickListener(v->{
+            recalc.run();
+            String summary=buildCashSummary(partyName.getText().toString(),den,qty,grandTotal[0]);
+            if(grandTotal[0].signum()<=0){
+                Toast.makeText(this,L("Enter cash quantity first","पहले cash quantity भरें"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+            saveCashHistory(summary,grandTotal[0]);
+            printCashSummary58mm(summary);
+        });
 
         history.setOnClickListener(v->{
             recalc.run();
@@ -4123,17 +4203,9 @@ public class MainActivity extends Activity {
     private void showNotepad(){
         currentTool="NOTEPAD";
         shell(L("NOTEPAD","नोटपैड"));
+        root.setPadding(dp(4),dp(4),dp(4),dp(4));
 
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
-
-        TextView info=tv(
-                L("58mm THERMAL PRINT ONLY","केवल 58mm THERMAL PRINT"),
-                15,
-                mixColor(WHITE,INDIGO,0.15f));
-        info.setGravity(Gravity.CENTER);
-        info.setTypeface(null,1);
-        info.setBackground(actionBarBg());
-        root.addView(info,controlParams(46));
 
         EditText noteTitle=input(L("Note Title (Optional)","नोट शीर्षक (वैकल्पिक)"));
         noteTitle.setInputType(android.text.InputType.TYPE_CLASS_TEXT
@@ -4156,8 +4228,8 @@ public class MainActivity extends Activity {
         noteBody.setElevation(dp(1));
         noteBody.setText(sp.getString("notepad_draft_body",""));
         attachInputBehavior(noteBody);
-        LinearLayout.LayoutParams noteParams=new LinearLayout.LayoutParams(-1,dp(360));
-        noteParams.setMargins(0,dp(6),0,dp(8));
+        LinearLayout.LayoutParams noteParams=new LinearLayout.LayoutParams(-1,0,1);
+        noteParams.setMargins(0,dp(4),0,dp(6));
         root.addView(noteBody,noteParams);
 
         LinearLayout row1=new LinearLayout(this);
@@ -4175,7 +4247,7 @@ public class MainActivity extends Activity {
         row2.addView(share,new LinearLayout.LayoutParams(0,dp(56),1));
         row2.addView(print,new LinearLayout.LayoutParams(0,dp(56),1));
         LinearLayout.LayoutParams row2p=new LinearLayout.LayoutParams(-1,dp(58));
-        row2p.setMargins(0,dp(6),0,dp(12));
+        row2p.setMargins(0,dp(4),0,0);
         root.addView(row2,row2p);
 
         android.text.TextWatcher draftWatcher=new android.text.TextWatcher(){
@@ -4702,6 +4774,15 @@ public class MainActivity extends Activity {
                 "अभी print करने के लिए note नहीं है");
     }
 
+    private void printCashSummary58mm(String content){
+        print58mmText(
+                content,
+                "STS-DigiKit-Cash-Counter.pdf",
+                L("STS DigiKit Cash Counter","STS DigiKit कैश काउंटर"),
+                "Nothing to print yet",
+                "अभी print करने के लिए cash summary नहीं है");
+    }
+
     private void showQuickBill(){
         currentTool="BILL";
         shell(L("QUICK BILL","क्विक बिल"));
@@ -5145,6 +5226,79 @@ public class MainActivity extends Activity {
         });
     }
 
+    private android.hardware.Camera findScannerLegacyCamera(Object obj,java.util.IdentityHashMap<Object,Boolean> seen,int depth){
+        if(obj==null || depth>5 || seen.containsKey(obj)) return null;
+        seen.put(obj,Boolean.TRUE);
+        if(obj instanceof android.hardware.Camera) return (android.hardware.Camera)obj;
+
+        Class<?> c=obj.getClass();
+        while(c!=null && c!=Object.class){
+            java.lang.reflect.Field[] fields;
+            try{fields=c.getDeclaredFields();}catch(Throwable e){break;}
+            for(java.lang.reflect.Field field:fields){
+                try{
+                    field.setAccessible(true);
+                    Object value=field.get(obj);
+                    if(value instanceof android.hardware.Camera) return (android.hardware.Camera)value;
+                    if(value!=null){
+                        String cn=value.getClass().getName();
+                        if(cn.startsWith("com.journeyapps.barcodescanner") || cn.toLowerCase(java.util.Locale.US).contains("camera")){
+                            android.hardware.Camera found=findScannerLegacyCamera(value,seen,depth+1);
+                            if(found!=null) return found;
+                        }
+                    }
+                }catch(Throwable ignored){}
+            }
+            c=c.getSuperclass();
+        }
+        return null;
+    }
+
+    private void applyScannerPinchZoom(float scaleFactor){
+        if(embeddedScanner==null || !scannerActive) return;
+        try{
+            Object barcodeView=embeddedScanner.getBarcodeView();
+            android.hardware.Camera camera=findScannerLegacyCamera(
+                    barcodeView,new java.util.IdentityHashMap<>(),0);
+            if(camera==null) return;
+
+            android.hardware.Camera.Parameters params=camera.getParameters();
+            if(params==null || !params.isZoomSupported()) return;
+            int max=params.getMaxZoom();
+            if(max<=0) return;
+
+            float delta=(scaleFactor-1f)*0.70f;
+            scannerZoomLevel=Math.max(0f,Math.min(1f,scannerZoomLevel+delta));
+            int target=Math.max(0,Math.min(max,Math.round(scannerZoomLevel*max)));
+            if(params.getZoom()!=target){
+                params.setZoom(target);
+                camera.setParameters(params);
+            }
+        }catch(Throwable ignored){}
+    }
+
+    private void installScannerPinchZoom(){
+        if(scannerViewport==null) return;
+        scannerScaleDetector=new android.view.ScaleGestureDetector(
+                this,
+                new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener(){
+                    @Override public boolean onScale(android.view.ScaleGestureDetector detector){
+                        applyScannerPinchZoom(detector.getScaleFactor());
+                        return true;
+                    }
+                });
+
+        scannerViewport.setOnTouchListener((v,event)->{
+            if(event.getPointerCount()>1) v.getParent().requestDisallowInterceptTouchEvent(true);
+            boolean handled=scannerScaleDetector!=null && scannerScaleDetector.onTouchEvent(event);
+            if(event.getActionMasked()==MotionEvent.ACTION_UP ||
+                    event.getActionMasked()==MotionEvent.ACTION_CANCEL){
+                v.getParent().requestDisallowInterceptTouchEvent(false);
+            }
+            return event.getPointerCount()>1 || handled;
+        });
+    }
+
     private void showScannerCameraInViewport(){
         if(scannerViewport==null) return;
 
@@ -5157,6 +5311,7 @@ public class MainActivity extends Activity {
 
         scannerResultLocked=false;
         scannerActive=true;
+        scannerZoomLevel=0f;
 
         try{
             embeddedScanner.resume();
@@ -5193,6 +5348,8 @@ public class MainActivity extends Activity {
         scannerViewport=new FrameLayout(this);
         scannerViewport.setBackground(screenBg());
         body.addView(scannerViewport,new LinearLayout.LayoutParams(-1,0,1));
+        scannerZoomLevel=0f;
+        installScannerPinchZoom();
 
         Button start=btn(L("START SCANNER","स्कैनर शुरू करें"));
         Button gallery=btn(L("GALLERY PICKUP","गैलरी से चुनें"));
