@@ -944,8 +944,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.65\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.65\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.66\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.66\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -975,7 +975,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.65\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.66\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3373,7 +3373,8 @@ public class MainActivity extends Activity {
             if(viewerModeButton!=null) viewerModeButton.setText(L("PAGE","PAGE"));
             if(viewerPageLabel!=null){
                 viewerPageLabel.setText(viewerPdfRenderer.getPageCount()+" "
-                        +L("pages • Scroll up/down","pages • ऊपर/नीचे scroll"));
+                        +L("pages • Scroll • Pinch zoom • Double-tap",
+                                "pages • Scroll • Pinch zoom • Double-tap"));
             }
         }else{
             if(viewerContinuousList!=null){
@@ -3387,6 +3388,200 @@ public class MainActivity extends Activity {
             viewerImage.setVisibility(View.VISIBLE);
             if(viewerModeButton!=null) viewerModeButton.setText(L("SCROLL","SCROLL"));
             renderViewerPage();
+        }
+    }
+
+
+    private class ContinuousPdfPageView extends ImageView {
+        private final Matrix pageMatrix=new Matrix();
+        private final android.view.ScaleGestureDetector pageScaleDetector;
+        private final android.view.GestureDetector pageTapDetector;
+        private float pageZoom=1f;
+        private float pageBaseScale=1f;
+        private float lastX=0f,lastY=0f;
+        private Bitmap currentPdfBitmap;
+
+        ContinuousPdfPageView(Context context){
+            super(context);
+            setScaleType(ImageView.ScaleType.MATRIX);
+            setBackgroundColor(Color.WHITE);
+
+            pageScaleDetector=new android.view.ScaleGestureDetector(
+                    context,new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener(){
+                        @Override public boolean onScaleBegin(android.view.ScaleGestureDetector detector){
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                            return true;
+                        }
+
+                        @Override public boolean onScale(android.view.ScaleGestureDetector detector){
+                            scaleAround(detector.getScaleFactor(),
+                                    detector.getFocusX(),
+                                    detector.getFocusY());
+                            return true;
+                        }
+
+                        @Override public void onScaleEnd(android.view.ScaleGestureDetector detector){
+                            constrainMatrix();
+                            setImageMatrix(pageMatrix);
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
+                        }
+                    });
+
+            pageTapDetector=new android.view.GestureDetector(
+                    context,new android.view.GestureDetector.SimpleOnGestureListener(){
+                        @Override public boolean onDown(MotionEvent e){return true;}
+
+                        @Override public boolean onDoubleTap(MotionEvent e){
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                            if(pageZoom<1.75f){
+                                scaleAround(2f/pageZoom,e.getX(),e.getY());
+                            }else{
+                                resetTransform();
+                            }
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
+                            return true;
+                        }
+                    });
+
+            setOnTouchListener((v,event)->{
+                pageTapDetector.onTouchEvent(event);
+                pageScaleDetector.onTouchEvent(event);
+
+                switch(event.getActionMasked()){
+                    case MotionEvent.ACTION_DOWN:
+                        lastX=event.getX();
+                        lastY=event.getY();
+                        if(pageZoom>1.01f){
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        if(!pageScaleDetector.isInProgress()
+                                && pageZoom>1.01f
+                                && event.getPointerCount()==1){
+                            float dx=event.getX()-lastX;
+                            float dy=event.getY()-lastY;
+                            pageMatrix.postTranslate(dx,dy);
+                            constrainMatrix();
+                            setImageMatrix(pageMatrix);
+                            lastX=event.getX();
+                            lastY=event.getY();
+
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                            return true;
+                        }
+
+                        if(pageZoom<=1.01f){
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(false);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        android.view.ViewParent p=getParent();
+                        if(p!=null) p.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
+                        return true;
+                }
+                return true;
+            });
+        }
+
+        void setPdfBitmap(Bitmap bitmap){
+            if(bitmap==null || bitmap.isRecycled()){
+                currentPdfBitmap=null;
+                setImageDrawable(null);
+                pageZoom=1f;
+                pageMatrix.reset();
+                return;
+            }
+            if(currentPdfBitmap==bitmap && getDrawable()!=null) return;
+            currentPdfBitmap=bitmap;
+            setImageBitmap(bitmap);
+            post(this::resetTransform);
+        }
+
+        void clearPdfBitmap(){
+            currentPdfBitmap=null;
+            setImageDrawable(null);
+            pageZoom=1f;
+            pageMatrix.reset();
+            setImageMatrix(pageMatrix);
+        }
+
+        private void resetTransform(){
+            if(currentPdfBitmap==null || currentPdfBitmap.isRecycled()) return;
+            int vw=getWidth(),vh=getHeight();
+            if(vw<=0 || vh<=0) return;
+
+            pageBaseScale=Math.min(
+                    vw/(float)currentPdfBitmap.getWidth(),
+                    vh/(float)currentPdfBitmap.getHeight());
+            if(pageBaseScale<=0f) pageBaseScale=1f;
+
+            float dw=currentPdfBitmap.getWidth()*pageBaseScale;
+            float dh=currentPdfBitmap.getHeight()*pageBaseScale;
+            float dx=(vw-dw)/2f;
+            float dy=(vh-dh)/2f;
+
+            pageMatrix.reset();
+            pageMatrix.setScale(pageBaseScale,pageBaseScale);
+            pageMatrix.postTranslate(dx,dy);
+            pageZoom=1f;
+            setImageMatrix(pageMatrix);
+
+            android.view.ViewParent p=getParent();
+            if(p!=null) p.requestDisallowInterceptTouchEvent(false);
+        }
+
+        private void scaleAround(float factor,float focusX,float focusY){
+            if(currentPdfBitmap==null || currentPdfBitmap.isRecycled()) return;
+
+            float target=pageZoom*factor;
+            if(target<1f) factor=1f/pageZoom;
+            else if(target>5f) factor=5f/pageZoom;
+
+            if(Math.abs(factor-1f)<0.0001f) return;
+
+            pageMatrix.postScale(factor,factor,focusX,focusY);
+            pageZoom=Math.max(1f,Math.min(5f,pageZoom*factor));
+            constrainMatrix();
+            setImageMatrix(pageMatrix);
+
+            if(pageZoom<=1.01f) resetTransform();
+        }
+
+        private void constrainMatrix(){
+            if(currentPdfBitmap==null || currentPdfBitmap.isRecycled()) return;
+            int vw=getWidth(),vh=getHeight();
+            if(vw<=0 || vh<=0) return;
+
+            RectF rect=new RectF(
+                    0,0,currentPdfBitmap.getWidth(),currentPdfBitmap.getHeight());
+            pageMatrix.mapRect(rect);
+
+            float dx=0f,dy=0f;
+            if(rect.width()<=vw){
+                dx=vw/2f-rect.centerX();
+            }else{
+                if(rect.left>0) dx=-rect.left;
+                else if(rect.right<vw) dx=vw-rect.right;
+            }
+
+            if(rect.height()<=vh){
+                dy=vh/2f-rect.centerY();
+            }else{
+                if(rect.top>0) dy=-rect.top;
+                else if(rect.bottom<vh) dy=vh-rect.bottom;
+            }
+
+            if(dx!=0f || dy!=0f) pageMatrix.postTranslate(dx,dy);
         }
     }
 
@@ -3426,13 +3621,13 @@ public class MainActivity extends Activity {
 
             @Override public View getView(int position,View convertView,ViewGroup parent){
                 LinearLayout card;
-                ImageView image;
+                ContinuousPdfPageView image;
                 TextView label;
 
                 if(convertView instanceof LinearLayout){
                     card=(LinearLayout)convertView;
                     label=(TextView)card.getChildAt(0);
-                    image=(ImageView)card.getChildAt(1);
+                    image=(ContinuousPdfPageView)card.getChildAt(1);
                 }else{
                     card=new LinearLayout(MainActivity.this);
                     card.setOrientation(LinearLayout.VERTICAL);
@@ -3444,10 +3639,8 @@ public class MainActivity extends Activity {
                     label.setPadding(dp(8),dp(3),dp(8),dp(3));
                     card.addView(label,new LinearLayout.LayoutParams(-1,dp(28)));
 
-                    image=new ImageView(MainActivity.this);
-                    image.setAdjustViewBounds(true);
-                    image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    image.setBackgroundColor(Color.WHITE);
+                    image=new ContinuousPdfPageView(MainActivity.this);
+                    image.setAdjustViewBounds(false);
                     card.addView(image,new LinearLayout.LayoutParams(-1,dp(520)));
                 }
 
@@ -3456,12 +3649,12 @@ public class MainActivity extends Activity {
 
                 Bitmap cached=viewerPageCache==null?null:viewerPageCache.get(position);
                 if(cached!=null && !cached.isRecycled()){
-                    image.setImageBitmap(cached);
                     int h=Math.max(dp(180),(int)Math.round(
                             targetWidth*(cached.getHeight()/(double)cached.getWidth())));
                     image.setLayoutParams(new LinearLayout.LayoutParams(-1,h));
+                    image.setPdfBitmap(cached);
                 }else{
-                    image.setImageDrawable(null);
+                    image.clearPdfBitmap();
                     image.setLayoutParams(new LinearLayout.LayoutParams(-1,dp(520)));
                     queueViewerContinuousPage(position,targetWidth,generation,this);
                 }
@@ -3497,7 +3690,7 @@ public class MainActivity extends Activity {
                         int w=Math.min(1000,Math.max(dp(320),targetWidth));
                         int h=Math.max(1,(int)Math.round(
                                 w*(page.getHeight()/(double)page.getWidth())));
-                        rendered=Bitmap.createBitmap(w,h,Bitmap.Config.RGB_565);
+                        rendered=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
                         Canvas c=new Canvas(rendered);
                         c.drawColor(Color.WHITE);
                         page.render(rendered,null,null,
