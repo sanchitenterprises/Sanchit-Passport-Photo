@@ -22,20 +22,21 @@ import java.math.RoundingMode;
 import java.util.Calendar;
 
 public class MainActivity extends Activity {
-    private final int BG = Color.rgb(9,18,34);
-    private final int PANEL = Color.rgb(28,42,74);
-    private final int PANEL2 = Color.rgb(31,70,104);
-    private final int ACCENT = Color.rgb(38,183,255);
-    private final int PURPLE = Color.rgb(115,92,255);
-    private final int TEAL = Color.rgb(24,196,170);
-    private final int GREEN = Color.rgb(38,183,108);
-    private final int ORANGE = Color.rgb(244,154,48);
-    private final int RED = Color.rgb(232,83,95);
-    private final int PINK = Color.rgb(232,86,173);
-    private final int INDIGO = Color.rgb(75,91,220);
-    private final int SURFACE = Color.rgb(13,27,48);
-    private final int SOFT = Color.rgb(172,190,220);
-    private final int WHITE = Color.WHITE;
+    // Eye-comfort theme: low-glare charcoal surfaces with muted accents.
+    private final int BG = Color.rgb(18,24,31);
+    private final int PANEL = Color.rgb(31,40,50);
+    private final int PANEL2 = Color.rgb(40,52,63);
+    private final int ACCENT = Color.rgb(83,145,174);
+    private final int PURPLE = Color.rgb(125,116,164);
+    private final int TEAL = Color.rgb(72,145,134);
+    private final int GREEN = Color.rgb(82,145,106);
+    private final int ORANGE = Color.rgb(174,128,78);
+    private final int RED = Color.rgb(166,88,94);
+    private final int PINK = Color.rgb(158,105,134);
+    private final int INDIGO = Color.rgb(101,112,158);
+    private final int SURFACE = Color.rgb(23,31,39);
+    private final int SOFT = Color.rgb(166,177,187);
+    private final int WHITE = Color.rgb(230,234,238);
     private LinearLayout root;
     private TextView title;
     private boolean devMode = false;
@@ -133,49 +134,49 @@ public class MainActivity extends Activity {
     private GradientDrawable fieldBg(){
         int accent=toolAccent();
         GradientDrawable g=grad(
-                mixColor(PANEL,accent,0.10f),
-                mixColor(PANEL2,accent,0.17f),
+                mixColor(PANEL,accent,0.05f),
+                mixColor(PANEL2,accent,0.09f),
                 15);
-        g.setStroke(dp(2),mixColor(accent,Color.WHITE,0.18f));
+        g.setStroke(dp(1),mixColor(PANEL2,accent,0.34f));
         return g;
     }
 
     private GradientDrawable focusedFieldBg(){
         int accent=toolAccent();
         GradientDrawable g=grad(
-                mixColor(PANEL,accent,0.18f),
-                mixColor(PANEL2,accent,0.28f),
+                mixColor(PANEL,accent,0.09f),
+                mixColor(PANEL2,accent,0.15f),
                 15);
-        g.setStroke(dp(2),mixColor(accent,Color.WHITE,0.42f));
+        g.setStroke(dp(2),mixColor(PANEL2,accent,0.52f));
         return g;
     }
 
     private GradientDrawable contentCardBg(){
         int accent=toolAccent();
         GradientDrawable g=grad(
-                mixColor(SURFACE,accent,0.08f),
-                mixColor(BG,accent,0.12f),
+                mixColor(SURFACE,accent,0.035f),
+                mixColor(BG,accent,0.055f),
                 20);
-        g.setStroke(dp(1),Color.argb(125,Color.red(accent),Color.green(accent),Color.blue(accent)));
+        g.setStroke(dp(1),Color.argb(70,Color.red(accent),Color.green(accent),Color.blue(accent)));
         return g;
     }
 
     private GradientDrawable actionBarBg(){
         int accent=toolAccent();
         GradientDrawable g=grad(
-                mixColor(PANEL,accent,0.16f),
-                mixColor(SURFACE,accent,0.22f),
+                mixColor(PANEL,accent,0.07f),
+                mixColor(SURFACE,accent,0.10f),
                 16);
-        g.setStroke(dp(1),mixColor(accent,Color.WHITE,0.16f));
+        g.setStroke(dp(1),mixColor(PANEL2,accent,0.30f));
         return g;
     }
 
     private android.graphics.drawable.Drawable touchBg(int color,float radius){
-        GradientDrawable base=grad(color,mixColor(color,Color.BLACK,0.18f),radius);
-        base.setStroke(dp(1),mixColor(color,Color.WHITE,0.18f));
+        GradientDrawable base=grad(mixColor(color,PANEL,0.16f),mixColor(color,BG,0.27f),radius);
+        base.setStroke(dp(1),mixColor(color,PANEL2,0.42f));
         if(Build.VERSION.SDK_INT>=21){
             return new android.graphics.drawable.RippleDrawable(
-                    android.content.res.ColorStateList.valueOf(Color.argb(95,255,255,255)),
+                    android.content.res.ColorStateList.valueOf(Color.argb(42,255,255,255)),
                     base,null);
         }
         return base;
@@ -187,8 +188,8 @@ public class MainActivity extends Activity {
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{
                         BG,
-                        mixColor(SURFACE,accent,0.10f),
-                        mixColor(BG,accent,0.07f),
+                        mixColor(SURFACE,accent,0.035f),
+                        mixColor(BG,accent,0.025f),
                         BG
                 });
     }
@@ -220,7 +221,7 @@ public class MainActivity extends Activity {
         b.setGravity(Gravity.CENTER);
         b.setPadding(dp(10),dp(8),dp(10),dp(8));
         b.setMinHeight(dp(48));
-        b.setElevation(dp(2));
+        b.setElevation(dp(1));
         b.setBackground(touchBg(actionColor(s),14));
         b.setOnTouchListener((v,e)->{
             if(e.getAction()==MotionEvent.ACTION_DOWN) haptic();
@@ -284,7 +285,7 @@ public class MainActivity extends Activity {
     private void attachInputBehavior(EditText e){
         e.setOnFocusChangeListener((v,focused)->{
             e.setBackground(focused?focusedFieldBg():fieldBg());
-            e.setElevation(dp(focused?4:1));
+            e.setElevation(dp(focused?2:1));
             if(focused) ensureInputVisible(e);
         });
     }
@@ -352,21 +353,21 @@ public class MainActivity extends Activity {
         t.setGravity(Gravity.CENTER);
         t.setTypeface(null,1);
         t.setPadding(dp(18),dp(16),dp(18),dp(16));
-        t.setElevation(dp(4));
+        t.setElevation(dp(2));
         GradientDrawable g=grad(
-                mixColor(PANEL2,toolAccent(),0.24f),
-                mixColor(SURFACE,toolAccent(),0.30f),16);
-        g.setStroke(dp(2),mixColor(toolAccent(),Color.WHITE,0.16f));
+                mixColor(PANEL2,toolAccent(),0.10f),
+                mixColor(SURFACE,toolAccent(),0.13f),16);
+        g.setStroke(dp(1),mixColor(PANEL2,toolAccent(),0.36f));
         t.setBackground(g);
     }
 
     private void styleProfessionalSpinner(Spinner s){
         int accent=toolAccent();
         GradientDrawable popup=grad(
-                mixColor(BG,accent,0.10f),
-                mixColor(PANEL,accent,0.15f),
+                mixColor(BG,accent,0.025f),
+                mixColor(PANEL,accent,0.055f),
                 16);
-        popup.setStroke(dp(1),mixColor(accent,Color.WHITE,0.22f));
+        popup.setStroke(dp(1),mixColor(PANEL2,accent,0.30f));
         s.setPopupBackgroundDrawable(popup);
         s.setDropDownVerticalOffset(dp(6));
         s.setDropDownWidth(Math.max(dp(260),getResources().getDisplayMetrics().widthPixels-dp(40)));
@@ -390,9 +391,9 @@ public class MainActivity extends Activity {
                 t.setPadding(dp(16),0,dp(16),0);
 
                 GradientDrawable g=grad(
-                        mixColor(PANEL2,toolAccent(),0.28f),
-                        mixColor(PANEL,toolAccent(),0.18f),15);
-                g.setStroke(dp(2),mixColor(toolAccent(),WHITE,0.20f));
+                        mixColor(PANEL2,toolAccent(),0.10f),
+                        mixColor(PANEL,toolAccent(),0.06f),15);
+                g.setStroke(dp(1),mixColor(PANEL2,toolAccent(),0.36f));
                 t.setBackground(g);
                 return t;
             }
@@ -406,12 +407,12 @@ public class MainActivity extends Activity {
 
                 boolean selected=pos==s.getSelectedItemPosition();
                 GradientDrawable g=grad(
-                        selected?mixColor(PANEL2,toolAccent(),0.48f):mixColor(PANEL,toolAccent(),0.13f),
-                        selected?mixColor(SURFACE,toolAccent(),0.38f):mixColor(PANEL2,toolAccent(),0.16f),
+                        selected?mixColor(PANEL2,toolAccent(),0.17f):mixColor(PANEL,toolAccent(),0.045f),
+                        selected?mixColor(SURFACE,toolAccent(),0.14f):mixColor(PANEL2,toolAccent(),0.06f),
                         12);
-                g.setStroke(dp(selected?2:1),
-                        selected?mixColor(toolAccent(),WHITE,0.38f)
-                                :Color.argb(90,Color.red(toolAccent()),Color.green(toolAccent()),Color.blue(toolAccent())));
+                g.setStroke(dp(1),
+                        selected?mixColor(PANEL2,toolAccent(),0.52f)
+                                :Color.argb(55,Color.red(toolAccent()),Color.green(toolAccent()),Color.blue(toolAccent())));
                 t.setBackground(g);
                 t.setTypeface(null,selected?1:0);
                 return t;
@@ -421,7 +422,7 @@ public class MainActivity extends Activity {
         s.setAdapter(a);
         s.setElevation(dp(3));
         s.setPopupBackgroundDrawable(contentCardBg());
-        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.28f),15));
+        s.setBackground(touchBg(mixColor(PANEL2,toolAccent(),0.10f),15));
         return s;
     }
 
@@ -626,7 +627,7 @@ public class MainActivity extends Activity {
 
         View accentLine=new View(this);
         accentLine.setBackgroundColor(toolAccent());
-        outer.addView(accentLine,new LinearLayout.LayoutParams(-1,dp(3)));
+        outer.addView(accentLine,new LinearLayout.LayoutParams(-1,dp(2)));
 
         ScrollView sc=new ScrollView(this);
         sc.setFillViewport(true);
@@ -639,7 +640,7 @@ public class MainActivity extends Activity {
         root.setGravity(Gravity.TOP);
         root.setPadding(dp(12),dp(12),dp(12),dp(12));
         root.setBackground(contentCardBg());
-        root.setElevation(dp(3));
+        root.setElevation(dp(1));
 
         sc.addView(root,new ScrollView.LayoutParams(-1,-1));
         outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
@@ -656,13 +657,13 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(8),dp(7),dp(8),dp(7));
         header.setBackground(grad(
-                mixColor(Color.rgb(20,43,74),accent,0.30f),
-                mixColor(Color.rgb(22,67,102),accent,0.38f),0));
+                mixColor(PANEL,accent,0.08f),
+                mixColor(PANEL2,accent,0.11f),0));
         header.setElevation(dp(5));
 
         TextView menu=tv("⋮",32,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(touchBg(mixColor(PANEL,accent,0.34f),14));
+        menu.setBackground(touchBg(mixColor(PANEL,accent,0.10f),14));
         LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(50),dp(50));
         mp.setMargins(0,0,dp(8),0);
         header.addView(menu,mp);
@@ -672,9 +673,9 @@ public class MainActivity extends Activity {
         selector.setGravity(Gravity.CENTER_VERTICAL);
         selector.setPadding(dp(14),0,dp(8),0);
         GradientDrawable selectorBg=grad(
-                mixColor(PANEL2,accent,0.30f),
-                mixColor(SURFACE,accent,0.28f),16);
-        selectorBg.setStroke(dp(2),mixColor(accent,WHITE,0.25f));
+                mixColor(PANEL2,accent,0.11f),
+                mixColor(SURFACE,accent,0.09f),16);
+        selectorBg.setStroke(dp(2),mixColor(PANEL2,accent,0.48f));
         selector.setBackground(selectorBg);
         selector.setElevation(dp(3));
 
@@ -712,13 +713,13 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(8),dp(7),dp(8),dp(7));
         header.setBackground(grad(
-                mixColor(Color.rgb(20,43,74),accent,0.30f),
-                mixColor(Color.rgb(22,67,102),accent,0.38f),0));
+                mixColor(PANEL,accent,0.08f),
+                mixColor(PANEL2,accent,0.11f),0));
         header.setElevation(dp(5));
 
         TextView menu=tv("⋮",32,WHITE);
         menu.setGravity(Gravity.CENTER);
-        menu.setBackground(touchBg(mixColor(PANEL,accent,0.34f),14));
+        menu.setBackground(touchBg(mixColor(PANEL,accent,0.10f),14));
         LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(dp(50),dp(50));
         mp.setMargins(0,0,dp(8),0);
         header.addView(menu,mp);
@@ -729,9 +730,9 @@ public class MainActivity extends Activity {
         selector.setPadding(dp(14),0,dp(8),0);
 
         GradientDrawable selectorBg=grad(
-                mixColor(PANEL2,accent,0.34f),
-                mixColor(SURFACE,accent,0.32f),16);
-        selectorBg.setStroke(dp(2),mixColor(accent,WHITE,0.32f));
+                mixColor(PANEL2,accent,0.13f),
+                mixColor(SURFACE,accent,0.10f),16);
+        selectorBg.setStroke(dp(2),mixColor(PANEL2,accent,0.52f));
         selector.setBackground(selectorBg);
         selector.setElevation(dp(4));
 
@@ -799,19 +800,19 @@ public class MainActivity extends Activity {
         row.setElevation(dp(selected?5:2));
 
         GradientDrawable card=grad(
-                selected?mixColor(PANEL2,accent,0.48f):mixColor(PANEL,accent,0.12f),
-                selected?mixColor(SURFACE,accent,0.38f):mixColor(PANEL2,accent,0.16f),
+                selected?mixColor(PANEL2,accent,0.17f):mixColor(PANEL,accent,0.035f),
+                selected?mixColor(SURFACE,accent,0.14f):mixColor(PANEL2,accent,0.05f),
                 17);
-        card.setStroke(dp(selected?2:1),
-                selected?mixColor(accent,WHITE,0.42f)
-                        :Color.argb(90,Color.red(accent),Color.green(accent),Color.blue(accent)));
+        card.setStroke(dp(1),
+                selected?mixColor(PANEL2,accent,0.52f)
+                        :Color.argb(48,Color.red(accent),Color.green(accent),Color.blue(accent)));
         row.setBackground(card);
 
         TextView dot=tv(selected?"✓":"•",selected?18:24,selected?WHITE:accent);
         dot.setGravity(Gravity.CENTER);
         dot.setTypeface(null,1);
         GradientDrawable dotBg=bg(
-                selected?accent:mixColor(PANEL2,accent,0.24f),
+                selected?mixColor(accent,PANEL2,0.25f):mixColor(PANEL2,accent,0.09f),
                 13);
         dot.setBackground(dotBg);
         LinearLayout.LayoutParams dpv=new LinearLayout.LayoutParams(dp(40),dp(40));
@@ -829,7 +830,7 @@ public class MainActivity extends Activity {
             TextView badge=tv(L("ACTIVE","चालू"),11,WHITE);
             badge.setGravity(Gravity.CENTER);
             badge.setTypeface(null,1);
-            badge.setBackground(bg(accent,10));
+            badge.setBackground(bg(mixColor(accent,PANEL2,0.18f),10));
             LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(dp(64),dp(30));
             bp.setMargins(dp(8),0,0,0);
             row.addView(badge,bp);
@@ -883,8 +884,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.59\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.59\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.60\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.60\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -914,7 +915,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.59\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.60\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1476,7 +1477,7 @@ public class MainActivity extends Activity {
             final int pos=i;
             LinearLayout line=new LinearLayout(this);
             line.setGravity(Gravity.CENTER_VERTICAL);
-            line.setBackground(i%2==0?bg(Color.rgb(11,24,43),8):bg(Color.rgb(15,32,55),8));
+            line.setBackground(i%2==0?bg(SURFACE,8):bg(mixColor(SURFACE,PANEL,0.35f),8));
 
             TextView note=tv("₹"+den[i],20,WHITE);
             note.setGravity(Gravity.CENTER);
@@ -1503,7 +1504,7 @@ public class MainActivity extends Activity {
             TextView a=tv("₹0",18,WHITE);
             a.setGravity(Gravity.CENTER);
             a.setTypeface(null,1);
-            a.setBackground(grad(Color.rgb(26,72,105),Color.rgb(29,107,116),8));
+            a.setBackground(grad(mixColor(PANEL2,TEAL,0.08f),mixColor(PANEL2,TEAL,0.16f),8));
             amount[i]=a;
             LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(0,dp(48),1.25f);
             ap.setMargins(dp(3),dp(3),dp(3),dp(3));
@@ -2988,8 +2989,8 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         int accent=toolAccent();
         header.setBackground(grad(
-                mixColor(Color.rgb(26,56,96),accent,0.28f),
-                mixColor(Color.rgb(31,94,135),accent,0.38f),0));
+                mixColor(PANEL,accent,0.08f),
+                mixColor(PANEL2,accent,0.12f),0));
         header.setElevation(dp(4));
 
         TextView left=tv("",1,WHITE);
@@ -3068,7 +3069,7 @@ public class MainActivity extends Activity {
         LinearLayout statusBar=new LinearLayout(this);
         statusBar.setOrientation(LinearLayout.HORIZONTAL);
         statusBar.setGravity(Gravity.CENTER_VERTICAL);
-        statusBar.setBackground(grad(PANEL2,Color.rgb(24,67,101),12));
+        statusBar.setBackground(grad(PANEL2,mixColor(PANEL2,ACCENT,0.10f),12));
 
         TextView status=tv(L("Open ⋮ to connect TV","TV कनेक्ट करने के लिए ⋮ खोलें"),16,SOFT);
         status.setGravity(Gravity.CENTER);
@@ -3077,7 +3078,7 @@ public class MainActivity extends Activity {
 
         TextView settings=tv("⋮",34,WHITE);
         settings.setGravity(Gravity.CENTER);
-        settings.setBackground(touchBg(Color.rgb(27,42,78),10));
+        settings.setBackground(touchBg(PANEL,10));
         LinearLayout.LayoutParams settingsParams=new LinearLayout.LayoutParams(dp(58),-1);
         settingsParams.setMargins(dp(2),dp(4),dp(4),dp(4));
         statusBar.addView(settings,settingsParams);
@@ -3087,7 +3088,7 @@ public class MainActivity extends Activity {
         LinearLayout remoteBox=new LinearLayout(this);
         remoteBox.setOrientation(LinearLayout.VERTICAL);
         remoteBox.setPadding(dp(3),dp(3),dp(3),dp(3));
-        remoteBox.setBackground(grad(Color.rgb(13,31,52),Color.rgb(20,50,75),14));
+        remoteBox.setBackground(grad(SURFACE,mixColor(PANEL,ACCENT,0.06f),14));
         root.addView(remoteBox,new LinearLayout.LayoutParams(-1,0,1));
 
         final TvDevice[] active={null};
@@ -3689,7 +3690,7 @@ public class MainActivity extends Activity {
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(dp(16));
             p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.rgb(43,76,105));
+            p.setColor(mixColor(PANEL2,ACCENT,0.12f));
             canvas.drawArc(arc,135,270,false,p);
 
             p.setStrokeWidth(dp(12));
@@ -3898,7 +3899,7 @@ public class MainActivity extends Activity {
         shell(L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट"));
 
         SpeedometerView meter=new SpeedometerView(this);
-        meter.setBackground(grad(Color.rgb(12,31,51),Color.rgb(18,47,72),16));
+        meter.setBackground(grad(SURFACE,mixColor(PANEL,ACCENT,0.07f),16));
         root.addView(meter,new LinearLayout.LayoutParams(-1,0,1));
 
         TextView status=tv(L("Ready to test your connection","कनेक्शन टेस्ट के लिए तैयार"),16,SOFT);
@@ -5062,7 +5063,7 @@ public class MainActivity extends Activity {
         out.setGravity(Gravity.TOP|Gravity.LEFT);
         out.setTextIsSelectable(true);
         out.setPadding(dp(12),dp(12),dp(12),dp(12));
-        out.setBackground(grad(PANEL2,Color.rgb(28,96,132),12));
+        out.setBackground(grad(PANEL2,mixColor(PANEL2,ACCENT,0.15f),12));
         root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
 
         addHistoryShareBar(root,"bill",L("QUICK BILL","क्विक बिल"),out);
@@ -5254,7 +5255,7 @@ public class MainActivity extends Activity {
         result.setGravity(Gravity.CENTER);
         result.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
         result.setPadding(dp(18),dp(18),dp(18),dp(18));
-        result.setBackground(grad(PANEL,Color.rgb(23,52,88),0));
+        result.setBackground(grad(PANEL,mixColor(PANEL,SURFACE,0.35f),0));
 
         String link=scannerWebLink(raw);
         if(link.isEmpty()){
@@ -5276,7 +5277,7 @@ public class MainActivity extends Activity {
                     }
                     @Override public void updateDrawState(android.text.TextPaint ds){
                         super.updateDrawState(ds);
-                        ds.setColor(Color.rgb(40,145,255));
+                        ds.setColor(ACCENT);
                         ds.setUnderlineText(true);
                     }
                 },pos,pos+link.length(),android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
