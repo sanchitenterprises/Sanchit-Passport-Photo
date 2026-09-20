@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.79\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.79\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.80\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.80\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.79\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.80\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4896,6 +4896,8 @@ public class MainActivity extends Activity {
                 "Universal IR तैयार है — remote buttons सीधे चलाएं"));
     }
 
+    // LOCKED UNIVERSAL IR AUTO-SCAN BASE.
+    // Do not change network / same-Wi-Fi TV logic from this IR-only flow.
     private void showUniversalIrAutoTest(
             TextView status,
             java.util.function.Consumer<TvDevice> connected){
@@ -4916,97 +4918,144 @@ public class MainActivity extends Activity {
 
         int savedProgress=irPrefs.getInt("universal_ir_test_index",0);
         if(savedProgress<0) savedProgress=0;
+        if(savedProgress>profiles.length) savedProgress=profiles.length;
 
-        final int[] index={Math.min(savedProgress,Math.max(0,profiles.length-1))};
-        final boolean[] exhausted={savedProgress>=profiles.length};
+        final int[] nextIndex={savedProgress};
+        final int[] lastSentIndex={-1};
+        final boolean[] scanning={false};
+        final boolean[] dialogAlive={true};
+
+        final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
 
         LinearLayout box=new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(14),dp(12),dp(14),dp(8));
         box.setBackgroundColor(BG);
 
-        TextView info=tv("",16,WHITE);
+        TextView info=tv("",19,WHITE);
         info.setGravity(Gravity.CENTER);
-        info.setPadding(dp(8),dp(8),dp(8),dp(12));
-        box.addView(info,new LinearLayout.LayoutParams(-1,dp(102)));
+        info.setTypeface(null,1);
+        info.setPadding(dp(8),dp(10),dp(8),dp(10));
+        box.addView(info,new LinearLayout.LayoutParams(-1,dp(118)));
 
-        Button test=btn(L("TEST POWER","POWER TEST"));
-        Button next=btn(L("NEXT CODE","अगला CODE"));
+        Button startScan=btn(L("START / RESUME AUTO SCAN","AUTO SCAN START / RESUME"));
+        Button stopScan=btn(L("STOP","रोकें"));
         Button working=btn(L("WORKING / SAVE","काम कर रहा है / SAVE"));
-        Button reset=btn(L("RESET TEST TO CODE 1","TEST RESET — CODE 1"));
+        Button reset=btn(L("RESET TO CODE 1","CODE 1 से RESET"));
 
-        box.addView(test,controlParams(56));
-        box.addView(next,controlParams(56));
-        box.addView(working,controlParams(56));
+        box.addView(startScan,controlParams(58));
+        box.addView(stopScan,controlParams(56));
+        box.addView(working,controlParams(58));
         box.addView(reset,controlParams(56));
 
         final Runnable[] refresh={null};
         refresh[0]=()->{
-            if(exhausted[0]){
+            if(nextIndex[0]>=profiles.length){
                 info.setText(L(
-                        "All "+profiles.length+" IR codes have been tested.\nUse RESET only if you want to start again from Code 1.",
-                        "सभी "+profiles.length+" IR codes test हो चुके हैं।\nफिर से Code 1 से शुरू करने के लिए ही RESET दबाएं।"));
-                test.setEnabled(false);
-                next.setEnabled(false);
-                working.setEnabled(false);
+                        "All "+profiles.length+" IR codes tested.\nUse RESET only to start again from Code 1.",
+                        "सभी "+profiles.length+" IR codes test हो चुके हैं।\nCode 1 से फिर शुरू करने के लिए ही RESET दबाएं।"));
+                startScan.setEnabled(false);
+            }else if(scanning[0] && lastSentIndex[0]>=0){
+                info.setText(L("Testing Code ","Testing Code ")
+                        +(lastSentIndex[0]+1)+" / "+profiles.length+"\n"
+                        +L("Watch the TV. If it responds, tap WORKING / SAVE.",
+                        "TV देखें। Respond करे तो WORKING / SAVE दबाएं।"));
+                startScan.setEnabled(false);
             }else{
-                info.setText(
-                        L("Universal IR Code ","Universal IR Code ")
-                                +(index[0]+1)+" / "+profiles.length+"\n"
-                                +L(
-                                "Point phone at TV and tap TEST POWER. If TV responds, tap WORKING / SAVE. Progress is saved automatically.",
-                                "फोन को TV की ओर रखें और TEST POWER दबाएं। TV respond करे तो WORKING / SAVE दबाएं। Progress अपने-आप save रहेगा।"));
-                test.setEnabled(true);
-                next.setEnabled(true);
-                working.setEnabled(true);
+                info.setText(L("Ready at Code ","Code पर तैयार: ")
+                        +(nextIndex[0]+1)+" / "+profiles.length+"\n"
+                        +L("Tap START once. Codes will be sent automatically every 2.5 seconds.",
+                        "START एक बार दबाएं। हर 2.5 सेकंड में अगला code अपने-आप जाएगा।"));
+                startScan.setEnabled(true);
             }
+
+            stopScan.setEnabled(scanning[0]);
+            working.setEnabled(lastSentIndex[0]>=0);
         };
+
+        final Runnable[] scanTick={null};
+        scanTick[0]=()->{
+            if(!dialogAlive[0] || !scanning[0]) return;
+
+            if(nextIndex[0]>=profiles.length){
+                scanning[0]=false;
+                irPrefs.edit().putInt("universal_ir_test_index",profiles.length).apply();
+                refresh[0].run();
+                status.setText(L(
+                        "Universal IR auto scan finished",
+                        "Universal IR auto scan पूरा हुआ"));
+                return;
+            }
+
+            final int sendingIndex=nextIndex[0];
+            lastSentIndex[0]=sendingIndex;
+
+            boolean sent=sendIrKey(profiles[sendingIndex],"POWER");
+
+            // Progress always points to the next untested code and survives
+            // dialog/app reopen and normal APK updates.
+            nextIndex[0]=sendingIndex+1;
+            irPrefs.edit().putInt("universal_ir_test_index",nextIndex[0]).apply();
+
+            info.setText(L("Testing Code ","Testing Code ")
+                    +(sendingIndex+1)+" / "+profiles.length+"\n"
+                    +L("Watch the TV. If it responds, tap WORKING / SAVE now.",
+                    "TV देखें। Respond करे तो अभी WORKING / SAVE दबाएं।"));
+
+            if(sent){
+                status.setText(L(
+                        "IR Code "+(sendingIndex+1)+" sent — watch the TV",
+                        "IR Code "+(sendingIndex+1)+" भेजा गया — TV देखें"));
+            }else{
+                status.setText(L(
+                        "IR Code "+(sendingIndex+1)+" could not be sent",
+                        "IR Code "+(sendingIndex+1)+" नहीं भेजा जा सका"));
+            }
+
+            if(scanning[0] && dialogAlive[0]){
+                handler.postDelayed(scanTick[0],2500L);
+            }
+            refresh[0].run();
+        };
+
         refresh[0].run();
 
         AlertDialog dialog=new AlertDialog.Builder(this)
-                .setTitle(L("UNIVERSAL IR AUTO TEST","UNIVERSAL IR AUTO TEST"))
+                .setTitle(L("UNIVERSAL IR AUTO SCAN","UNIVERSAL IR AUTO SCAN"))
                 .setView(box)
                 .setNegativeButton(L("CLOSE","बंद करें"),null)
                 .create();
 
-        test.setOnClickListener(v->{
-            if(exhausted[0]) return;
-
-            boolean sent=sendIrKey(profiles[index[0]],"POWER");
-            int nextProgress=index[0]+1;
-            irPrefs.edit().putInt("universal_ir_test_index",nextProgress).apply();
-
-            if(sent){
-                status.setText(L(
-                        "IR Code "+(index[0]+1)+" sent — check the TV",
-                        "IR Code "+(index[0]+1)+" भेजा गया — TV देखें"));
-            }else{
-                status.setText(L(
-                        "IR Code "+(index[0]+1)+" could not be sent",
-                        "IR Code "+(index[0]+1)+" नहीं भेजा जा सका"));
-            }
+        startScan.setOnClickListener(v->{
+            if(nextIndex[0]>=profiles.length) return;
+            scanning[0]=true;
+            refresh[0].run();
+            handler.removeCallbacks(scanTick[0]);
+            scanTick[0].run();
         });
 
-        next.setOnClickListener(v->{
-            if(exhausted[0]) return;
-
-            int nextIndex=index[0]+1;
-            if(nextIndex>=profiles.length){
-                exhausted[0]=true;
-                irPrefs.edit().putInt("universal_ir_test_index",profiles.length).apply();
-            }else{
-                index[0]=nextIndex;
-                irPrefs.edit().putInt("universal_ir_test_index",index[0]).apply();
-            }
+        stopScan.setOnClickListener(v->{
+            scanning[0]=false;
+            handler.removeCallbacks(scanTick[0]);
             refresh[0].run();
+            status.setText(L(
+                    "IR auto scan stopped. Progress saved.",
+                    "IR auto scan रुक गया। Progress save है।"));
         });
 
         working.setOnClickListener(v->{
-            if(exhausted[0]) return;
+            if(lastSentIndex[0]<0 || lastSentIndex[0]>=profiles.length) return;
 
-            String profile=profiles[index[0]];
+            scanning[0]=false;
+            handler.removeCallbacks(scanTick[0]);
+
+            String profile=profiles[lastSentIndex[0]];
             saveUniversalIrProfile(profile);
-            irPrefs.edit().putInt("universal_ir_test_index",index[0]+1).apply();
+
+            // Keep nextIndex as progress; saved working profile is permanent
+            // until the user explicitly resets the IR test.
+            irPrefs.edit().putInt("universal_ir_test_index",nextIndex[0]).apply();
+
             activateUniversalIr(profile,status,connected);
             Toast.makeText(this,
                     L("Working IR code saved permanently","काम करने वाला IR code permanently सेव हो गया"),
@@ -5015,16 +5064,27 @@ public class MainActivity extends Activity {
         });
 
         reset.setOnClickListener(v->{
+            scanning[0]=false;
+            handler.removeCallbacks(scanTick[0]);
+
             irPrefs.edit()
                     .putInt("universal_ir_test_index",0)
                     .remove("universal_ir_profile")
                     .apply();
-            index[0]=0;
-            exhausted[0]=false;
+
+            nextIndex[0]=0;
+            lastSentIndex[0]=-1;
             refresh[0].run();
+
             status.setText(L(
-                    "IR test reset to Code 1",
-                    "IR test Code 1 से reset हो गया"));
+                    "Universal IR reset to Code 1",
+                    "Universal IR Code 1 से reset हो गया"));
+        });
+
+        dialog.setOnDismissListener(d->{
+            dialogAlive[0]=false;
+            scanning[0]=false;
+            handler.removeCallbacks(scanTick[0]);
         });
 
         dialog.show();
