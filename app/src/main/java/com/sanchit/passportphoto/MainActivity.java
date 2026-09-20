@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.77\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.77\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.78\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.78\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.77\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.78\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4709,6 +4709,204 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean transmitPanasonic48(long command24,boolean lsbWithinBytes){
+        try{
+            android.hardware.ConsumerIrManager ir=(android.hardware.ConsumerIrManager)
+                    getSystemService(Context.CONSUMER_IR_SERVICE);
+            if(ir==null || !ir.hasIrEmitter()) return false;
+
+            long frame=(0x400401L<<24)|(command24&0xFFFFFFL);
+            java.util.ArrayList<Integer> p=new java.util.ArrayList<>();
+            p.add(3553); p.add(1726);
+
+            if(lsbWithinBytes){
+                for(int byteIndex=5;byteIndex>=0;byteIndex--){
+                    int b=(int)((frame>>(byteIndex*8))&0xff);
+                    for(int bit=0;bit<8;bit++){
+                        p.add(472);
+                        p.add(((b>>bit)&1)==1?1275:402);
+                    }
+                }
+            }else{
+                for(int bit=47;bit>=0;bit--){
+                    p.add(472);
+                    p.add(((frame>>bit)&1L)==1L?1275:402);
+                }
+            }
+
+            p.add(485);
+            int[] pattern=new int[p.size()];
+            for(int i=0;i<p.size();i++) pattern[i]=p.get(i);
+            ir.transmit(37000,pattern);
+            return true;
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    private boolean sendPanasonicIrKey(String profile,String key){
+        java.util.HashMap<String,Long> m=new java.util.HashMap<>();
+        m.put("POWER",0x00BCBDL);
+        m.put("INPUT",0x00A0A1L);
+        m.put("VOL_UP",0x000405L);
+        m.put("VOL_DOWN",0x008485L);
+        m.put("MUTE",0x004C4DL);
+        m.put("CH_UP",0x002C2DL);
+        m.put("CH_DOWN",0x00ACADL);
+        m.put("MENU",0x004A4BL);
+        m.put("HOME",0x90A938L);
+        m.put("INFO",0x009C9DL);
+        m.put("GUIDE",0x90E170L);
+        m.put("EXIT",0x00CBCAL);
+        m.put("BACK",0x002B2AL);
+        m.put("UP",0x005253L);
+        m.put("DOWN",0x00D2D3L);
+        m.put("LEFT",0x007273L);
+        m.put("RIGHT",0x00F2F3L);
+        m.put("OK",0x009293L);
+        m.put("1",0x000809L);
+        m.put("2",0x008889L);
+        m.put("3",0x004849L);
+        m.put("4",0x00C8C9L);
+        m.put("5",0x002829L);
+        m.put("6",0x00A8A9L);
+        m.put("7",0x006869L);
+        m.put("8",0x00E8E9L);
+        m.put("9",0x001819L);
+        m.put("0",0x009899L);
+        m.put("PLAY",0x900392L);
+        m.put("PAUSE",0x908312L);
+        m.put("STOP",0x9043D2L);
+        m.put("REW",0x9023B2L);
+        m.put("FF",0x90C352L);
+
+        Long code=m.get(key);
+        if(code==null) return false;
+        return transmitPanasonic48(code,"PANASONIC_LSB".equals(profile));
+    }
+
+    private String[] universalIrProfiles(){
+        // Internal profiles only. User never has to choose a brand/name.
+        // Two Panasonic bit-order variants are kept because different Android IR
+        // implementations/remotes expose this family differently.
+        return new String[]{
+                "SAMSUNG",
+                "LG",
+                "SONY",
+                "PANASONIC_LSB",
+                "PANASONIC_MSB"
+        };
+    }
+
+    private String savedUniversalIrProfile(){
+        return getSharedPreferences("sts",0).getString("universal_ir_profile","");
+    }
+
+    private void saveUniversalIrProfile(String profile){
+        getSharedPreferences("sts",0).edit()
+                .putString("universal_ir_profile",profile==null?"":profile)
+                .apply();
+    }
+
+    private void activateUniversalIr(
+            String profile,
+            TextView status,
+            java.util.function.Consumer<TvDevice> connected){
+
+        if(profile==null || profile.trim().isEmpty()) return;
+        TvDevice irTv=new TvDevice("Universal IR",profile,"IR");
+        connected.accept(irTv);
+        status.setText(L(
+                "Universal IR ready — use remote buttons directly",
+                "Universal IR तैयार है — remote buttons सीधे चलाएं"));
+    }
+
+    private void showUniversalIrAutoTest(
+            TextView status,
+            java.util.function.Consumer<TvDevice> connected){
+
+        if(!hasIrEmitter()){
+            new AlertDialog.Builder(this)
+                    .setTitle(L("Universal IR Remote","Universal IR Remote"))
+                    .setMessage(L(
+                            "This phone does not have an IR blaster.",
+                            "इस फोन में IR blaster नहीं है।"))
+                    .setPositiveButton("OK",null)
+                    .show();
+            return;
+        }
+
+        final String[] profiles=universalIrProfiles();
+        final int[] index={0};
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14),dp(12),dp(14),dp(8));
+        box.setBackgroundColor(BG);
+
+        TextView info=tv("",16,WHITE);
+        info.setGravity(Gravity.CENTER);
+        info.setPadding(dp(8),dp(8),dp(8),dp(12));
+        box.addView(info,new LinearLayout.LayoutParams(-1,dp(88)));
+
+        Button test=btn(L("TEST POWER","POWER TEST"));
+        Button next=btn(L("NEXT CODE","अगला CODE"));
+        Button working=btn(L("WORKING / SAVE","काम कर रहा है / SAVE"));
+
+        box.addView(test,controlParams(56));
+        box.addView(next,controlParams(56));
+        box.addView(working,controlParams(56));
+
+        Runnable refresh=()->info.setText(
+                L("Universal IR code ","Universal IR code ")
+                        +(index[0]+1)+" / "+profiles.length+"\n"
+                        +L("Point phone at TV, tap TEST POWER. If TV responds, tap WORKING / SAVE.",
+                        "फोन को TV की ओर रखें, TEST POWER दबाएं। TV respond करे तो WORKING / SAVE दबाएं।"));
+        refresh.run();
+
+        AlertDialog dialog=new AlertDialog.Builder(this)
+                .setTitle(L("UNIVERSAL IR AUTO TEST","UNIVERSAL IR AUTO TEST"))
+                .setView(box)
+                .setNegativeButton(L("CLOSE","बंद करें"),null)
+                .create();
+
+        test.setOnClickListener(v->{
+            boolean sent=sendIrKey(profiles[index[0]],"POWER");
+            if(sent){
+                status.setText(L(
+                        "IR power code sent — check the TV",
+                        "IR power code भेजा गया — TV देखें"));
+            }else{
+                status.setText(L(
+                        "IR code could not be sent",
+                        "IR code नहीं भेजा जा सका"));
+            }
+        });
+
+        next.setOnClickListener(v->{
+            index[0]=(index[0]+1)%profiles.length;
+            refresh.run();
+            boolean sent=sendIrKey(profiles[index[0]],"POWER");
+            if(sent){
+                status.setText(L(
+                        "Next IR power code sent — check the TV",
+                        "अगला IR power code भेजा गया — TV देखें"));
+            }
+        });
+
+        working.setOnClickListener(v->{
+            String profile=profiles[index[0]];
+            saveUniversalIrProfile(profile);
+            activateUniversalIr(profile,status,connected);
+            Toast.makeText(this,
+                    L("Universal IR profile saved","Universal IR profile सेव हो गया"),
+                    Toast.LENGTH_SHORT).show();
+            dialog.dismiss();
+        });
+
+        dialog.show();
+    }
+
     private boolean sendIrKey(String profile,String key){
         if(profile==null) return false;
 
@@ -4751,6 +4949,11 @@ public class MainActivity extends Activity {
             Integer code=m.get(key);
             return code!=null && transmitSony12(code);
         }
+
+        if("PANASONIC_LSB".equals(profile) || "PANASONIC_MSB".equals(profile)){
+            return sendPanasonicIrKey(profile,key);
+        }
+
         return false;
     }
 
@@ -5011,9 +5214,12 @@ public class MainActivity extends Activity {
                 status.setText(L("This phone does not have an IR blaster.","इस फोन में IR blaster नहीं है।"));
                 return;
             }
-            saveConnectedTv(d);
+            // IR is direct hardware control: no pairing/connect and do not touch
+            // the separately saved Wi-Fi TV.
             connected.accept(d);
-            status.setText(L("IR Remote: ","IR रिमोट: ")+d.name);
+            status.setText(L(
+                    "Universal IR ready — direct control",
+                    "Universal IR तैयार है — direct control"));
             return;
         }
 
@@ -5103,8 +5309,15 @@ public class MainActivity extends Activity {
                     new Thread(()->{
                         boolean ok=sendTvKey(d,key);
                         runOnUiThread(()->{
-                            if(ok) status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
-                            else status.setText(L(
+                            if(ok){
+                                if("IR".equals(d.type)){
+                                    status.setText(L(
+                                            "Universal IR command sent",
+                                            "Universal IR command भेजा गया"));
+                                }else{
+                                    status.setText(L("Connected: ","कनेक्टेड: ")+d.name);
+                                }
+                            }else status.setText(L(
                                     "This command is not supported by the current TV / connection.",
                                     "यह command वर्तमान TV / connection पर supported नहीं है।"));
                         });
@@ -5135,6 +5348,7 @@ public class MainActivity extends Activity {
             menu.getMenu().add(L("MANUAL IP / TV TYPE","MANUAL IP / TV TYPE"));
             menu.getMenu().add(L("SAVED TV / RECONNECT","सेव TV / दोबारा कनेक्ट"));
             menu.getMenu().add(L("IR REMOTE MODE","IR रिमोट मोड"));
+            menu.getMenu().add(L("IR AUTO TEST / RESET","IR AUTO TEST / RESET"));
             menu.getMenu().add(L("CONNECTION INFO","कनेक्शन जानकारी"));
             menu.getMenu().add(L("FORGET SAVED TV","सेव TV हटाएं"));
 
@@ -5244,25 +5458,26 @@ public class MainActivity extends Activity {
                 if(title.equals(L("IR REMOTE MODE","IR रिमोट मोड"))){
                     if(!hasIrEmitter()){
                         new AlertDialog.Builder(this)
-                                .setTitle(L("IR Remote","IR रिमोट"))
+                                .setTitle(L("Universal IR Remote","Universal IR Remote"))
                                 .setMessage(L(
-                                        "This phone does not have an IR blaster. Use Wi-Fi / Manual IP connection instead.",
-                                        "इस फोन में IR blaster नहीं है। Wi-Fi / Manual IP connection इस्तेमाल करें।"))
+                                        "This phone does not have an IR blaster.",
+                                        "इस फोन में IR blaster नहीं है।"))
                                 .setPositiveButton("OK",null)
                                 .show();
                         return true;
                     }
 
-                    String[] profiles={"Samsung IR","LG IR","Sony IR"};
-                    new AlertDialog.Builder(this)
-                            .setTitle(L("Select IR TV Profile","IR TV profile चुनें"))
-                            .setItems(profiles,(d,which)->{
-                                String profile=which==0?"SAMSUNG":which==1?"LG":"SONY";
-                                TvDevice irTv=new TvDevice(profiles[which],profile,"IR");
-                                connectUniversalTv(irTv,status,onConnected);
-                            })
-                            .setNegativeButton(L("CANCEL","रद्द करें"),null)
-                            .show();
+                    String savedIr=savedUniversalIrProfile();
+                    if(savedIr.isEmpty()){
+                        showUniversalIrAutoTest(status,onConnected);
+                    }else{
+                        activateUniversalIr(savedIr,status,onConnected);
+                    }
+                    return true;
+                }
+
+                if(title.equals(L("IR AUTO TEST / RESET","IR AUTO TEST / RESET"))){
+                    showUniversalIrAutoTest(status,onConnected);
                     return true;
                 }
 
@@ -5271,6 +5486,10 @@ public class MainActivity extends Activity {
                     String msg;
                     if(d==null){
                         msg=L("No TV is connected.","कोई TV कनेक्ट नहीं है।");
+                    }else if("IR".equals(d.type)){
+                        msg=L(
+                                "Mode: Universal IR\nConnection: Not required\nSaved profile: Yes",
+                                "Mode: Universal IR\nConnection: जरूरी नहीं\nSaved profile: हाँ");
                     }else{
                         msg=L("Name: ","नाम: ")+d.name
                                 +"\n"+L("Type: ","प्रकार: ")+d.type
