@@ -46,6 +46,7 @@ public class MainActivity extends Activity {
     private final StringBuilder appLogs = new StringBuilder();
     private final DecimalFormat df = new DecimalFormat("#,##0.00");
     private AndroidTvV2 androidTvV2;
+    private ScrollView activeInputScroll;
 
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
     private static final int REQ_GALLERY_SCAN=9013;
@@ -64,6 +65,7 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         devMode=sp.getBoolean("devMode",false);
@@ -228,15 +230,101 @@ public class MainActivity extends Activity {
         e.setPadding(dp(16),dp(8),dp(16),dp(8));
         e.setBackground(fieldBg());
         e.setElevation(dp(1));
-        e.setOnFocusChangeListener((v,focused)->{
-            e.setBackground(focused?focusedFieldBg():fieldBg());
-            e.setElevation(dp(focused?4:1));
-        });
+        attachInputBehavior(e);
         e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER|android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,dp(56));
         p.setMargins(0,dp(5),0,dp(5));
         e.setLayoutParams(p);
         return e;
+    }
+
+    private boolean isInside(View child,ViewGroup parent){
+        View v=child;
+        while(v!=null){
+            if(v==parent) return true;
+            android.view.ViewParent p=v.getParent();
+            if(!(p instanceof View)) break;
+            v=(View)p;
+        }
+        return false;
+    }
+
+    private void ensureInputVisible(EditText e){
+        final ScrollView sc=activeInputScroll;
+        if(sc==null || e==null || !isInside(e,sc)) return;
+        sc.postDelayed(()->{
+            if(activeInputScroll!=sc || !isInside(e,sc)) return;
+            int[] fieldPos=new int[2];
+            int[] scrollPos=new int[2];
+            e.getLocationOnScreen(fieldPos);
+            sc.getLocationOnScreen(scrollPos);
+
+            int safeTop=scrollPos[1]+dp(10);
+            int safeBottom=scrollPos[1]+sc.getHeight()-sc.getPaddingBottom()-dp(18);
+            int fieldTop=fieldPos[1];
+            int fieldBottom=fieldTop+e.getHeight();
+
+            if(fieldBottom>safeBottom){
+                sc.smoothScrollBy(0,fieldBottom-safeBottom+dp(12));
+            }else if(fieldTop<safeTop){
+                sc.smoothScrollBy(0,fieldTop-safeTop-dp(8));
+            }
+        },140);
+    }
+
+    private void attachInputBehavior(EditText e){
+        e.setOnFocusChangeListener((v,focused)->{
+            e.setBackground(focused?focusedFieldBg():fieldBg());
+            e.setElevation(dp(focused?4:1));
+            if(focused) ensureInputVisible(e);
+        });
+    }
+
+    private void registerInputScroll(ScrollView sc){
+        activeInputScroll=sc;
+        sc.setFillViewport(true);
+        sc.setClipToPadding(false);
+
+        final int left=sc.getPaddingLeft();
+        final int top=sc.getPaddingTop();
+        final int right=sc.getPaddingRight();
+        final int bottom=sc.getPaddingBottom();
+        final int[] closedObstruction={-1};
+        final View decor=getWindow().getDecorView();
+
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(()->{
+            if(activeInputScroll!=sc || sc.getWindowToken()==null) return;
+
+            int keyboard=0;
+            if(Build.VERSION.SDK_INT>=30){
+                android.view.WindowInsets wi=decor.getRootWindowInsets();
+                if(wi!=null){
+                    keyboard=wi.getInsets(android.view.WindowInsets.Type.ime()).bottom;
+                }
+            }else{
+                Rect visible=new Rect();
+                decor.getWindowVisibleDisplayFrame(visible);
+                int obstruction=Math.max(0,decor.getHeight()-visible.bottom);
+                if(closedObstruction[0]<0) closedObstruction[0]=obstruction;
+                if(obstruction<closedObstruction[0]+dp(40)){
+                    closedObstruction[0]=Math.min(closedObstruction[0],obstruction);
+                }
+                keyboard=Math.max(0,obstruction-Math.max(0,closedObstruction[0]));
+            }
+
+            if(keyboard<dp(120)) keyboard=0;
+            int targetBottom=bottom+(keyboard>0?keyboard+dp(18):0);
+            if(sc.getPaddingBottom()!=targetBottom){
+                sc.setPadding(left,top,right,targetBottom);
+            }
+
+            if(keyboard>0){
+                View focused=getCurrentFocus();
+                if(focused instanceof EditText && isInside(focused,sc)){
+                    ensureInputVisible((EditText)focused);
+                }
+            }
+        });
     }
 
     private LinearLayout.LayoutParams controlParams(int heightDp){
@@ -515,6 +603,7 @@ public class MainActivity extends Activity {
 
         sc.addView(root,new ScrollView.LayoutParams(-1,-1));
         outer.addView(sc,new LinearLayout.LayoutParams(-1,0,1));
+        registerInputScroll(sc);
 
         setContentView(outer);
         return sc;
@@ -1194,10 +1283,18 @@ public class MainActivity extends Activity {
 
         addFixedDropdown(outer,L("CASH COUNTER","कैश काउंटर"));
 
+        ScrollView cashScroll=new ScrollView(this);
+        cashScroll.setFillViewport(true);
+        cashScroll.setClipToPadding(false);
+        cashScroll.setBackground(screenBg());
+
         LinearLayout body=new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setBackground(screenBg());
-        outer.addView(body,new LinearLayout.LayoutParams(-1,0,1));
+        body.setPadding(dp(6),dp(4),dp(6),dp(16));
+        cashScroll.addView(body,new ScrollView.LayoutParams(-1,-2));
+        outer.addView(cashScroll,new LinearLayout.LayoutParams(-1,0,1));
+        registerInputScroll(cashScroll);
 
         EditText partyName=new EditText(this);
         partyName.setHint(L("Party / Customer / Company Name","Party / Customer / Company Name"));
@@ -1208,6 +1305,8 @@ public class MainActivity extends Activity {
         partyName.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         partyName.setPadding(dp(14),dp(8),dp(14),dp(8));
         partyName.setBackground(fieldBg());
+        partyName.setElevation(dp(1));
+        attachInputBehavior(partyName);
         LinearLayout.LayoutParams partyParams=new LinearLayout.LayoutParams(-1,dp(56));
         partyParams.setMargins(dp(6),dp(6),dp(6),dp(4));
         body.addView(partyName,partyParams);
@@ -1243,7 +1342,7 @@ public class MainActivity extends Activity {
 
         LinearLayout rowsBox=new LinearLayout(this);
         rowsBox.setOrientation(LinearLayout.VERTICAL);
-        body.addView(rowsBox,new LinearLayout.LayoutParams(-1,0,1));
+        body.addView(rowsBox,new LinearLayout.LayoutParams(-1,-2));
 
         final BigInteger[] grandTotal={BigInteger.ZERO};
 
@@ -1285,6 +1384,8 @@ public class MainActivity extends Activity {
             q.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
             q.setPadding(dp(6),dp(4),dp(6),dp(4));
             q.setBackground(fieldBg());
+            q.setElevation(dp(1));
+            attachInputBehavior(q);
             qty[i]=q;
             LinearLayout.LayoutParams qp=new LinearLayout.LayoutParams(0,dp(48),0.85f);
             qp.setMargins(dp(3),dp(3),dp(3),dp(3));
@@ -1305,7 +1406,7 @@ public class MainActivity extends Activity {
                 @Override public void afterTextChanged(android.text.Editable e){}
             });
 
-            rowsBox.addView(line,new LinearLayout.LayoutParams(-1,0,1));
+            rowsBox.addView(line,new LinearLayout.LayoutParams(-1,dp(56)));
         }
 
         history.setOnClickListener(v->{
@@ -1656,6 +1757,8 @@ public class MainActivity extends Activity {
                 |android.text.InputType.TYPE_DATETIME_VARIATION_DATE);
         dateInput.setPadding(dp(14),dp(8),dp(14),dp(8));
         dateInput.setBackground(fieldBg());
+        dateInput.setElevation(dp(1));
+        attachInputBehavior(dateInput);
 
         LinearLayout.LayoutParams dateParams=new LinearLayout.LayoutParams(0,dp(58),1);
         dateParams.setMargins(0,dp(4),dp(4),dp(4));
