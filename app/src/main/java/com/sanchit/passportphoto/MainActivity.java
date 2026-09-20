@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.75\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.75\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.76\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.76\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.75\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.76\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1842,6 +1842,70 @@ public class MainActivity extends Activity {
         sp.edit().putString(pref,keep.toString()).apply();
     }
 
+    private String panelHistoryResultOnly(String decoded){
+        if(decoded==null) return "";
+        String[] lines=decoded.split("\n",-1);
+        if(lines.length<=2) return decoded.trim();
+        StringBuilder b=new StringBuilder();
+        for(int i=2;i<lines.length;i++){
+            if(i>2) b.append("\n");
+            b.append(lines[i]);
+        }
+        return b.toString().trim();
+    }
+
+    private String panelHistoryStamp(String decoded){
+        if(decoded==null) return "";
+        int nl=decoded.indexOf('\n');
+        return nl<0?decoded.trim():decoded.substring(0,nl).trim();
+    }
+
+    private void printPanelHistoryCopy(String key,String title,String decoded){
+        String result=panelHistoryResultOnly(decoded);
+        if(!meaningfulResult(result)) return;
+
+        if("bill".equals(key)){
+            printQuickBill58mm(result);
+        }else{
+            print58mmText(
+                    result,
+                    "STS-DigiKit-History-Copy.pdf",
+                    title+" - "+L("Print Copy","प्रिंट कॉपी"),
+                    "Nothing to print",
+                    "प्रिंट करने के लिए कुछ नहीं है",
+                    "GENERIC");
+        }
+    }
+
+    private void showPanelHistoryEntry(String key,String title,String decoded){
+        String result=panelHistoryResultOnly(decoded);
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(10),dp(8),dp(10),dp(8));
+        box.setBackgroundColor(BG);
+
+        TextView content=tv(decoded==null?"":decoded,16,WHITE);
+        content.setGravity(Gravity.LEFT|Gravity.TOP);
+        content.setTextIsSelectable(true);
+        content.setPadding(dp(12),dp(12),dp(12),dp(12));
+        content.setBackground(bg(PANEL,10));
+
+        ScrollView sc=new ScrollView(this);
+        sc.addView(content,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(430)));
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(box)
+                .setPositiveButton(L("CLOSE","बंद करें"),null)
+                .setNegativeButton(L("PRINT COPY","प्रिंट कॉपी"),(d,w)->
+                        printPanelHistoryCopy(key,title,decoded))
+                .setNeutralButton(L("SHARE","शेयर"),(d,w)->
+                        sharePanelText(title,result))
+                .show();
+    }
+
     private void showPanelHistory(String key,String title){
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         String raw=sp.getString(panelHistoryKey(key),"");
@@ -1852,28 +1916,65 @@ public class MainActivity extends Activity {
         box.setBackgroundColor(BG);
 
         ScrollView sc=new ScrollView(this);
-        TextView content=tv("",16,WHITE);
-        content.setGravity(Gravity.LEFT|Gravity.TOP);
-        content.setTextIsSelectable(true);
-        content.setBackground(bg(PANEL,10));
+        LinearLayout list=new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(2),dp(2),dp(2),dp(2));
+        sc.addView(list,new ScrollView.LayoutParams(-1,-2));
+        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(500)));
 
         if(raw==null || raw.isEmpty()){
-            content.setText(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"));
+            TextView empty=tv(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"),16,SOFT);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
         }else{
-            StringBuilder out=new StringBuilder();
             String[] rows=raw.split("\\u001e",-1);
             for(String row:rows){
                 try{
-                    String item=new String(android.util.Base64.decode(row,android.util.Base64.NO_WRAP),java.nio.charset.StandardCharsets.UTF_8);
-                    if(out.length()>0) out.append("\n\n--------------------\n\n");
-                    out.append(item);
+                    final String decoded=new String(
+                            android.util.Base64.decode(row,android.util.Base64.NO_WRAP),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    final String result=panelHistoryResultOnly(decoded);
+
+                    LinearLayout card=new LinearLayout(this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dp(10),dp(8),dp(10),dp(8));
+                    card.setBackground(contentCardBg());
+
+                    TextView stamp=tv(panelHistoryStamp(decoded),13,SOFT);
+                    card.addView(stamp,new LinearLayout.LayoutParams(-1,dp(30)));
+
+                    String preview=result.replace("\n"," ").trim();
+                    if(preview.length()>135) preview=preview.substring(0,135)+"…";
+                    TextView pv=tv(preview,15,WHITE);
+                    pv.setGravity(Gravity.LEFT|Gravity.TOP);
+                    card.addView(pv,new LinearLayout.LayoutParams(-1,dp(68)));
+
+                    LinearLayout buttons=new LinearLayout(this);
+                    buttons.setOrientation(LinearLayout.HORIZONTAL);
+                    Button view=btn(L("VIEW","देखें"));
+                    Button print=btn(L("PRINT COPY","प्रिंट कॉपी"));
+                    Button share=btn(L("SHARE","शेयर"));
+                    buttons.addView(view,new LinearLayout.LayoutParams(0,dp(50),1));
+                    buttons.addView(print,new LinearLayout.LayoutParams(0,dp(50),1));
+                    buttons.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
+                    card.addView(buttons,new LinearLayout.LayoutParams(-1,dp(52)));
+
+                    view.setOnClickListener(v->showPanelHistoryEntry(key,title,decoded));
+                    print.setOnClickListener(v->printPanelHistoryCopy(key,title,decoded));
+                    share.setOnClickListener(v->sharePanelText(title,result));
+
+                    LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
+                    cp.setMargins(0,0,0,dp(10));
+                    list.addView(card,cp);
                 }catch(Exception ignored){}
             }
-            content.setText(out.toString());
-        }
 
-        sc.addView(content,new ScrollView.LayoutParams(-1,-2));
-        box.addView(sc,new LinearLayout.LayoutParams(-1,dp(430)));
+            if(list.getChildCount()==0){
+                TextView empty=tv(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"),16,SOFT);
+                empty.setGravity(Gravity.CENTER);
+                list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
+            }
+        }
 
         AlertDialog dialog=new AlertDialog.Builder(this)
                 .setTitle(title+" - "+L("HISTORY","हिस्ट्री"))
@@ -1881,9 +1982,13 @@ public class MainActivity extends Activity {
                 .setPositiveButton(L("CLOSE","बंद करें"),null)
                 .setNegativeButton(L("CLEAR HISTORY","हिस्ट्री साफ करें"),null)
                 .create();
+
         dialog.setOnShowListener(x->dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{
             sp.edit().remove(panelHistoryKey(key)).apply();
-            content.setText(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"));
+            list.removeAllViews();
+            TextView empty=tv(L("No history yet.","अभी कोई हिस्ट्री नहीं है।"),16,SOFT);
+            empty.setGravity(Gravity.CENTER);
+            list.addView(empty,new LinearLayout.LayoutParams(-1,dp(120)));
         }));
         dialog.show();
     }
@@ -6292,6 +6397,127 @@ public class MainActivity extends Activity {
                     b.trim().isEmpty()?buildNotepadText(t,b):b);
         });
 
+        editItems.setOnClickListener(v->{
+            if(billItems.isEmpty()){
+                Toast.makeText(this,
+                        L("No added items yet","अभी कोई item add नहीं है"),
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            LinearLayout list=new LinearLayout(this);
+            list.setOrientation(LinearLayout.VERTICAL);
+            list.setPadding(dp(8),dp(8),dp(8),dp(8));
+            list.setBackgroundColor(BG);
+
+            ScrollView scroll=new ScrollView(this);
+            LinearLayout cards=new LinearLayout(this);
+            cards.setOrientation(LinearLayout.VERTICAL);
+            scroll.addView(cards,new ScrollView.LayoutParams(-1,-2));
+            list.addView(scroll,new LinearLayout.LayoutParams(-1,dp(480)));
+
+            AlertDialog dialog=new AlertDialog.Builder(this)
+                    .setTitle(L("EDIT / DELETE ITEMS","ITEM EDIT / DELETE"))
+                    .setView(list)
+                    .setPositiveButton(L("CLOSE","बंद करें"),null)
+                    .create();
+
+            final Runnable[] rebuild={null};
+            rebuild[0]=()->{
+                cards.removeAllViews();
+                for(int i=0;i<billItems.size();i++){
+                    final int index=i;
+                    QuickBillItem row=billItems.get(i);
+
+                    LinearLayout card=new LinearLayout(this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dp(10),dp(8),dp(10),dp(8));
+                    card.setBackground(contentCardBg());
+
+                    String details=row.name+"   |   "
+                            +L("Qty ","मात्रा ")+trim(row.qty)+"   |   "
+                            +L("Rate ₹","दर ₹")+df.format(row.rate)
+                            +(row.gst>0?"   |   GST "+trim(row.gst)+"%":"");
+                    TextView itemText=tv(details,15,WHITE);
+                    itemText.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
+                    card.addView(itemText,new LinearLayout.LayoutParams(-1,dp(54)));
+
+                    LinearLayout actions=new LinearLayout(this);
+                    actions.setOrientation(LinearLayout.HORIZONTAL);
+                    Button edit=btn(L("EDIT","एडिट"));
+                    Button delete=btn(L("DELETE","डिलीट"));
+                    actions.addView(edit,new LinearLayout.LayoutParams(0,dp(50),1));
+                    actions.addView(delete,new LinearLayout.LayoutParams(0,dp(50),1));
+                    card.addView(actions,new LinearLayout.LayoutParams(-1,dp(52)));
+
+                    edit.setOnClickListener(x->{
+                        QuickBillItem selected=billItems.get(index);
+                        editingItemIndex[0]=index;
+                        name.setText(selected.name);
+                        qty.setText(trim(selected.qty));
+                        rate.setText(trim(selected.rate));
+                        gst.setText(selected.gst>0?trim(selected.gst):"");
+                        addItem.setText(L("UPDATE","अपडेट"));
+                        dialog.dismiss();
+                    });
+
+                    delete.setOnClickListener(x->{
+                        billItems.remove(index);
+                        if(editingItemIndex[0]==index){
+                            editingItemIndex[0]=-1;
+                            addItem.setText("+");
+                            name.setText("");
+                            qty.setText("");
+                            rate.setText("");
+                            gst.setText("");
+                        }else if(editingItemIndex[0]>index){
+                            editingItemIndex[0]--;
+                        }
+                        updateBill.run();
+                        if(billItems.isEmpty()){
+                            dialog.dismiss();
+                        }else{
+                            rebuild[0].run();
+                        }
+                    });
+
+                    LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
+                    cp.setMargins(0,0,0,dp(8));
+                    cards.addView(card,cp);
+                }
+            };
+
+            rebuild[0].run();
+            dialog.show();
+        });
+
+        newBill.setOnClickListener(v->new AlertDialog.Builder(this)
+                .setTitle(L("NEW / CLEAR BILL","नया / क्लियर बिल"))
+                .setMessage(L(
+                        "Clear the current customer and all items to start a new bill? Shop / Company Name will stay saved.",
+                        "मौजूदा customer और सभी items साफ करके नया bill शुरू करें? Shop / Company Name सेव रहेगा।"))
+                .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                .setPositiveButton(L("CLEAR & NEW","क्लियर करके नया"),(d,w)->{
+                    customer.setText("");
+                    billItems.clear();
+                    editingItemIndex[0]=-1;
+                    addItem.setText("+");
+                    name.setText("");
+                    qty.setText("");
+                    rate.setText("");
+                    gst.setText("");
+
+                    billNumberCommitted[0]=false;
+                    billSequence[0]=quickBillNextNumber(shopCompanyName[0]);
+                    billNo[0]=quickBillNumber(shopCompanyName[0],billSequence[0]);
+                    billDate[0]=new java.text.SimpleDateFormat(
+                            "dd/MM/yyyy, hh:mm a",
+                            java.util.Locale.getDefault()).format(new java.util.Date());
+
+                    updateBill.run();
+                })
+                .show());
+
         print.setOnClickListener(v->{
             String t=noteTitle.getText().toString();
             String b=noteBody.getText().toString();
@@ -7037,8 +7263,9 @@ public class MainActivity extends Activity {
         currentTool="BILL";
         shell(L("QUICK BILL","क्विक बिल"));
 
-        final String billDate=new java.text.SimpleDateFormat("dd/MM/yyyy, hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date());
+        final String[] billDate={new java.text.SimpleDateFormat("dd/MM/yyyy, hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date())};
         final java.util.ArrayList<QuickBillItem> billItems=new java.util.ArrayList<>();
+        final int[] editingItemIndex={-1};
 
         android.content.SharedPreferences qbPrefs=getSharedPreferences("sts",0);
         final String[] shopCompanyName={qbPrefs.getString("quick_bill_default_shop_name","")};
@@ -7104,6 +7331,9 @@ public class MainActivity extends Activity {
         valuesRow.addView(gst,gstParams);
         root.addView(valuesRow,new LinearLayout.LayoutParams(-1,dp(62)));
 
+        Button editItems=btn(L("ITEMS / EDIT","आइटम / एडिट"));
+        root.addView(editItems,controlParams(52));
+
         TextView out=tv(L("Bill preview will appear here","बिल यहाँ दिखाई देगा"),14,WHITE);
         out.setTypeface("HINDI".equals(language)
                 ?android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)
@@ -7116,11 +7346,20 @@ public class MainActivity extends Activity {
 
         addHistoryShareBar(root,"bill",L("QUICK BILL","क्विक बिल"),out);
 
+        LinearLayout billActions=new LinearLayout(this);
+        billActions.setOrientation(LinearLayout.HORIZONTAL);
+        Button newBill=btn(L("NEW / CLEAR BILL","नया / क्लियर बिल"));
         Button print=btn(L("PRINT","प्रिंट"));
-        root.addView(print,controlParams(60));
+        LinearLayout.LayoutParams newBillParams=new LinearLayout.LayoutParams(0,dp(60),1);
+        newBillParams.setMargins(0,0,dp(3),0);
+        LinearLayout.LayoutParams printParams=new LinearLayout.LayoutParams(0,dp(60),1);
+        printParams.setMargins(dp(3),0,0,0);
+        billActions.addView(newBill,newBillParams);
+        billActions.addView(print,printParams);
+        root.addView(billActions,new LinearLayout.LayoutParams(-1,dp(62)));
 
         Runnable updateBill=()->out.setText(
-                buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate));
+                buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate[0]));
 
         customerMenu.setOnClickListener(v->{
             android.widget.PopupMenu menu=new android.widget.PopupMenu(this,customerMenu);
@@ -7176,7 +7415,14 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            billItems.add(pending);
+            if(editingItemIndex[0]>=0 && editingItemIndex[0]<billItems.size()){
+                billItems.set(editingItemIndex[0],pending);
+                editingItemIndex[0]=-1;
+                addItem.setText("+");
+            }else{
+                billItems.add(pending);
+            }
+
             name.setText("");
             qty.setText("");
             rate.setText("");
@@ -7185,7 +7431,7 @@ public class MainActivity extends Activity {
         });
 
         print.setOnClickListener(v->{
-            String bill=buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate);
+            String bill=buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate[0]);
             out.setText(bill);
             if(meaningfulResult(bill)){
                 if(!billNumberCommitted[0]){
