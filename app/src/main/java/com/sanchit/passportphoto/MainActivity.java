@@ -931,8 +931,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.61\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.61\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.62\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.62\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -962,7 +962,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.61\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.62\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2456,22 +2456,12 @@ public class MainActivity extends Activity {
             }
             new AlertDialog.Builder(this)
                     .setTitle(L("DOWNLOAD QR","QR डाउनलोड"))
-                    .setItems(new String[]{"PNG","JPG"},(d,which)->{
-                        pendingQrSaveFormat=which==1?"JPG":"PNG";
-                        try{
-                            Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);
-                            save.addCategory(Intent.CATEGORY_OPENABLE);
-                            save.setType("JPG".equals(pendingQrSaveFormat)?"image/jpeg":"image/png");
-                            String stamp=new java.text.SimpleDateFormat(
-                                    "yyyyMMdd-HHmmss",
-                                    java.util.Locale.US).format(new java.util.Date());
-                            save.putExtra(
-                                    Intent.EXTRA_TITLE,
-                                    "STS-DigiKit-QR-"+stamp+("JPG".equals(pendingQrSaveFormat)?".jpg":".png"));
-                            startActivityForResult(save,REQ_SAVE_QR_IMAGE);
-                        }catch(Exception e){
-                            Toast.makeText(this,L("Save screen could not open","Save screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
-                        }
+                    .setItems(new String[]{"JPG","JPEG","PNG","PDF"},(d,which)->{
+                        pendingQrSaveFormat=new String[]{"JPG","JPEG","PNG","PDF"}[which];
+                        String stamp=new java.text.SimpleDateFormat(
+                                "yyyyMMdd-HHmmss",
+                                java.util.Locale.US).format(new java.util.Date());
+                        launchBitmapSave("STS-DigiKit-QR-"+stamp,pendingQrSaveFormat,REQ_SAVE_QR_IMAGE);
                     })
                     .show();
         });
@@ -6622,21 +6612,127 @@ public class MainActivity extends Activity {
                 try{
                     out=getContentResolver().openOutputStream(data.getData());
                     if(out==null) throw new java.io.IOException("No output stream");
-                    boolean jpg="JPG".equals(pendingQrSaveFormat);
-                    boolean ok=lastGeneratedQrBitmap.compress(
-                            jpg?Bitmap.CompressFormat.JPEG:Bitmap.CompressFormat.PNG,
-                            jpg?96:100,
-                            out);
+                    writeBitmapExport(lastGeneratedQrBitmap,out,pendingQrSaveFormat,0);
                     out.flush();
-                    if(!ok) throw new java.io.IOException("Image compression failed");
-                    Toast.makeText(this,
-                            L("QR saved as ","QR सेव हुआ: ")+pendingQrSaveFormat,
-                            Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this,L("QR saved as ","QR सेव हुआ: ")+pendingQrSaveFormat,Toast.LENGTH_SHORT).show();
                 }catch(Exception e){
                     Toast.makeText(this,L("QR could not be saved","QR सेव नहीं हो सका"),Toast.LENGTH_SHORT).show();
                 }finally{
                     if(out!=null) try{out.close();}catch(Exception ignored){}
                 }
+            }
+            return;
+        }
+
+        if(requestCode==REQ_PICK_RESIZER_IMAGE){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
+                Uri uri=data.getData();
+                try{
+                    getContentResolver().takePersistableUriPermission(
+                            uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                }catch(Exception ignored){}
+                try{
+                    Bitmap bm=loadWorkBitmap(uri,2600);
+                    if(resizerSourceBitmap!=null && !resizerSourceBitmap.isRecycled()){
+                        try{resizerSourceBitmap.recycle();}catch(Exception ignored){}
+                    }
+                    if(resizerOutputBitmap!=null && resizerOutputBitmap!=resizerSourceBitmap && !resizerOutputBitmap.isRecycled()){
+                        try{resizerOutputBitmap.recycle();}catch(Exception ignored){}
+                    }
+                    resizerSourceUri=uri;
+                    resizerSourceBitmap=bm;
+                    resizerOutputBitmap=null;
+                    showPhotoSignatureResizer();
+                }catch(Exception e){
+                    Toast.makeText(this,L("Image could not open","Image नहीं खुल सकी"),Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+
+        if(requestCode==REQ_SAVE_RESIZER){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null && resizerOutputBitmap!=null){
+                java.io.OutputStream out=null;
+                try{
+                    out=getContentResolver().openOutputStream(data.getData());
+                    if(out==null) throw new java.io.IOException("No output stream");
+                    writeBitmapExport(resizerOutputBitmap,out,pendingResizerFormat,resizerTargetKb);
+                    out.flush();
+                    Toast.makeText(this,L("Saved as ","सेव हुआ: ")+pendingResizerFormat,Toast.LENGTH_SHORT).show();
+                }catch(Exception e){
+                    Toast.makeText(this,L("Image could not be saved","Image सेव नहीं हो सकी"),Toast.LENGTH_LONG).show();
+                }finally{
+                    if(out!=null) try{out.close();}catch(Exception ignored){}
+                }
+            }
+            return;
+        }
+
+        if(requestCode==REQ_PICK_PDFS){
+            if(resultCode==RESULT_OK && data!=null){
+                java.util.ArrayList<Uri> incoming=new java.util.ArrayList<>();
+                if(data.getClipData()!=null){
+                    android.content.ClipData cd=data.getClipData();
+                    for(int i=0;i<cd.getItemCount();i++){
+                        Uri u=cd.getItemAt(i).getUri();
+                        if(u!=null) incoming.add(u);
+                    }
+                }else if(data.getData()!=null){
+                    incoming.add(data.getData());
+                }
+                for(Uri u:incoming){
+                    if(!pdfToolUris.contains(u)) pdfToolUris.add(u);
+                    try{
+                        getContentResolver().takePersistableUriPermission(
+                                u,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    }catch(Exception ignored){}
+                }
+                lastJoinedPdfBytes=null;
+                showPdfJoinResize();
+            }
+            return;
+        }
+
+        if(requestCode==REQ_SAVE_JOINED_PDF){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null && lastJoinedPdfBytes!=null){
+                java.io.OutputStream out=null;
+                try{
+                    out=getContentResolver().openOutputStream(data.getData());
+                    if(out==null) throw new java.io.IOException("No output stream");
+                    out.write(lastJoinedPdfBytes);
+                    out.flush();
+                    Toast.makeText(this,L("PDF saved","PDF सेव हो गया"),Toast.LENGTH_SHORT).show();
+                }catch(Exception e){
+                    Toast.makeText(this,L("PDF could not be saved","PDF सेव नहीं हो सका"),Toast.LENGTH_LONG).show();
+                }finally{
+                    if(out!=null) try{out.close();}catch(Exception ignored){}
+                }
+            }
+            return;
+        }
+
+        if(requestCode==REQ_SAVE_PDF_IMAGES_DIR){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
+                exportPdfSourcesAsImages(data.getData(),pendingPdfExportFormat);
+            }
+            return;
+        }
+
+        if(requestCode==REQ_SAVE_VIEWER_PDF){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null && viewerPdfUri!=null){
+                try{
+                    copyUri(viewerPdfUri,data.getData());
+                    Toast.makeText(this,L("PDF downloaded","PDF डाउनलोड हो गया"),Toast.LENGTH_SHORT).show();
+                }catch(Exception e){
+                    Toast.makeText(this,L("PDF could not be saved","PDF सेव नहीं हो सका"),Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+
+        if(requestCode==REQ_SAVE_VIEWER_IMAGES_DIR){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null && viewerPdfUri!=null){
+                exportViewerPagesToTree(data.getData(),pendingViewerExportFormat);
             }
             return;
         }
@@ -6682,6 +6778,11 @@ public class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed(){
+        if("PDF_VIEWER".equals(currentTool)){
+            closePdfViewerResources();
+            finish();
+            return;
+        }
         if("SCAN".equals(currentTool) && scannerActive){
             try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
             embeddedScanner=null;
@@ -6708,5 +6809,10 @@ public class MainActivity extends Activity {
         }else{
             finish();
         }
+    }
+
+    @Override protected void onDestroy(){
+        closePdfViewerResources();
+        super.onDestroy();
     }
 }
