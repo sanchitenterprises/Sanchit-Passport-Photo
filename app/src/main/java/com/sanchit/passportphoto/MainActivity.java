@@ -83,7 +83,7 @@ public class MainActivity extends Activity {
     private android.graphics.pdf.PdfRenderer viewerPdfRenderer;
     private android.graphics.pdf.PdfRenderer.Page viewerPdfPage;
     private int viewerPageIndex=0;
-    private ImageView viewerImage;
+    private ContinuousPdfPageView viewerImage;
     private TextView viewerPageLabel;
     private Bitmap viewerBitmap;
     private final Matrix viewerMatrix=new Matrix();
@@ -944,8 +944,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.66\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.66\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.67\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.67\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -975,7 +975,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.66\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.67\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3238,99 +3238,26 @@ public class MainActivity extends Activity {
 
         viewerViewport=new FrameLayout(this);
         viewerViewport.setBackgroundColor(BG);
-        viewerImage=new ImageView(this);
-        viewerImage.setScaleType(ImageView.ScaleType.MATRIX);
+        viewerImage=new ContinuousPdfPageView(this);
         viewerImage.setBackgroundColor(BG);
+        viewerImage.setHorizontalPageSwipe(
+                true,
+                ()->{
+                    if(viewerPageIndex>0){
+                        viewerPageIndex--;
+                        renderViewerPage();
+                    }
+                },
+                ()->{
+                    if(viewerPdfRenderer!=null
+                            && viewerPageIndex<viewerPdfRenderer.getPageCount()-1){
+                        viewerPageIndex++;
+                        renderViewerPage();
+                    }
+                });
         viewerViewport.addView(viewerImage,new FrameLayout.LayoutParams(-1,-1));
         outer.addView(viewerViewport,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(outer);
-
-        final float[] downX={0},lastX={0},lastY={0};
-        final boolean[] moved={false};
-
-        final android.view.GestureDetector tapDetector=new android.view.GestureDetector(
-                this,new android.view.GestureDetector.SimpleOnGestureListener(){
-                    @Override public boolean onDown(MotionEvent e){return true;}
-
-                    @Override public boolean onDoubleTap(MotionEvent e){
-                        if(viewerZoom<1.75f){
-                            viewerScaleAround(2f/viewerZoom,e.getX(),e.getY());
-                        }else{
-                            resetViewerTransform();
-                        }
-                        return true;
-                    }
-                });
-
-        final android.view.ScaleGestureDetector scaleDetector=new android.view.ScaleGestureDetector(
-                this,new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener(){
-                    @Override public boolean onScaleBegin(android.view.ScaleGestureDetector detector){
-                        return true;
-                    }
-
-                    @Override public boolean onScale(android.view.ScaleGestureDetector detector){
-                        viewerScaleAround(
-                                detector.getScaleFactor(),
-                                detector.getFocusX(),
-                                detector.getFocusY());
-                        return true;
-                    }
-
-                    @Override public void onScaleEnd(android.view.ScaleGestureDetector detector){
-                        constrainViewerMatrix();
-                        if(viewerImage!=null) viewerImage.setImageMatrix(viewerMatrix);
-                    }
-                });
-
-        viewerImage.setOnTouchListener((v,event)->{
-            tapDetector.onTouchEvent(event);
-            scaleDetector.onTouchEvent(event);
-
-            switch(event.getActionMasked()){
-                case MotionEvent.ACTION_DOWN:
-                    downX[0]=event.getX();
-                    lastX[0]=event.getX();
-                    lastY[0]=event.getY();
-                    moved[0]=false;
-                    return true;
-
-                case MotionEvent.ACTION_MOVE:
-                    if(!scaleDetector.isInProgress()
-                            && viewerZoom>1.01f
-                            && event.getPointerCount()==1){
-                        float dx=event.getX()-lastX[0];
-                        float dy=event.getY()-lastY[0];
-                        if(Math.abs(dx)>1f || Math.abs(dy)>1f) moved[0]=true;
-
-                        viewerMatrix.postTranslate(dx,dy);
-                        constrainViewerMatrix();
-                        viewerImage.setImageMatrix(viewerMatrix);
-
-                        lastX[0]=event.getX();
-                        lastY[0]=event.getY();
-                    }
-                    return true;
-
-                case MotionEvent.ACTION_UP:
-                    if(!scaleDetector.isInProgress() && viewerZoom<=1.01f){
-                        float dx=event.getX()-downX[0];
-                        if(Math.abs(dx)>dp(80)){
-                            if(dx<0 && viewerPageIndex<viewerPdfRenderer.getPageCount()-1){
-                                viewerPageIndex++;
-                                renderViewerPage();
-                            }else if(dx>0 && viewerPageIndex>0){
-                                viewerPageIndex--;
-                                renderViewerPage();
-                            }
-                        }
-                    }
-                    return true;
-
-                case MotionEvent.ACTION_CANCEL:
-                    return true;
-            }
-            return true;
-        });
 
         viewerModeButton.setOnClickListener(v->{
             haptic();
@@ -3365,7 +3292,7 @@ public class MainActivity extends Activity {
                 try{viewerBitmap.recycle();}catch(Exception ignored){}
             }
             viewerBitmap=null;
-            viewerImage.setImageDrawable(null);
+            viewerImage.clearPdfBitmap();
             viewerImage.setVisibility(View.GONE);
 
             showViewerContinuousPages();
@@ -3399,6 +3326,10 @@ public class MainActivity extends Activity {
         private float pageZoom=1f;
         private float pageBaseScale=1f;
         private float lastX=0f,lastY=0f;
+        private float downX=0f,downY=0f;
+        private boolean horizontalPageSwipeEnabled=false;
+        private Runnable previousPageAction;
+        private Runnable nextPageAction;
         private Bitmap currentPdfBitmap;
 
         ContinuousPdfPageView(Context context){
@@ -3452,6 +3383,8 @@ public class MainActivity extends Activity {
 
                 switch(event.getActionMasked()){
                     case MotionEvent.ACTION_DOWN:
+                        downX=event.getX();
+                        downY=event.getY();
                         lastX=event.getX();
                         lastY=event.getY();
                         if(pageZoom>1.01f){
@@ -3484,13 +3417,40 @@ public class MainActivity extends Activity {
                         return true;
 
                     case MotionEvent.ACTION_UP:
-                    case MotionEvent.ACTION_CANCEL:
+                        if(!pageScaleDetector.isInProgress()
+                                && pageZoom<=1.01f
+                                && horizontalPageSwipeEnabled){
+                            float dx=event.getX()-downX;
+                            float dy=event.getY()-downY;
+                            if(Math.abs(dx)>dp(80)
+                                    && Math.abs(dx)>Math.abs(dy)*1.20f){
+                                if(dx<0){
+                                    if(nextPageAction!=null) nextPageAction.run();
+                                }else{
+                                    if(previousPageAction!=null) previousPageAction.run();
+                                }
+                            }
+                        }
                         android.view.ViewParent p=getParent();
                         if(p!=null) p.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
+                        return true;
+
+                    case MotionEvent.ACTION_CANCEL:
+                        android.view.ViewParent p2=getParent();
+                        if(p2!=null) p2.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
                         return true;
                 }
                 return true;
             });
+        }
+
+        void setHorizontalPageSwipe(
+                boolean enabled,
+                Runnable previousAction,
+                Runnable nextAction){
+            horizontalPageSwipeEnabled=enabled;
+            previousPageAction=previousAction;
+            nextPageAction=nextAction;
         }
 
         void setPdfBitmap(Bitmap bitmap){
@@ -3640,6 +3600,7 @@ public class MainActivity extends Activity {
                     card.addView(label,new LinearLayout.LayoutParams(-1,dp(28)));
 
                     image=new ContinuousPdfPageView(MainActivity.this);
+                    image.setHorizontalPageSwipe(false,null,null);
                     image.setAdjustViewBounds(false);
                     card.addView(image,new LinearLayout.LayoutParams(-1,dp(520)));
                 }
@@ -3740,12 +3701,14 @@ public class MainActivity extends Activity {
             viewerPdfPage.render(bm,null,null,android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
         }
 
-        if(viewerBitmap!=null && viewerBitmap!=bm && !viewerBitmap.isRecycled()){
-            try{viewerBitmap.recycle();}catch(Exception ignored){}
-        }
+        Bitmap oldViewerBitmap=viewerBitmap;
         viewerBitmap=bm;
-        viewerImage.setImageBitmap(viewerBitmap);
-        resetViewerTransform();
+        viewerImage.setPdfBitmap(viewerBitmap);
+        if(oldViewerBitmap!=null
+                && oldViewerBitmap!=viewerBitmap
+                && !oldViewerBitmap.isRecycled()){
+            try{oldViewerBitmap.recycle();}catch(Exception ignored){}
+        }
         if(viewerPageLabel!=null){
             viewerPageLabel.setText(L("Page ","पेज ")+(viewerPageIndex+1)+" / "+viewerPdfRenderer.getPageCount()
                     +"  •  "+L("Swipe • Pinch zoom • Double-tap","Swipe • Pinch zoom • Double-tap"));
