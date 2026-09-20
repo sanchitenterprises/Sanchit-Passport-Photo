@@ -2130,7 +2130,7 @@ public class MainActivity extends Activity {
                 .replace(";","\\;")
                 .replace(",","\\,")
                 .replace(":","\\:")
-                .replace(""","\\"");
+                .replace("\"","\\\"");
     }
 
     private void showQr(){
