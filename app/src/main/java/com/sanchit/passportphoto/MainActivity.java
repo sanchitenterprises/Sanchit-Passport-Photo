@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.72\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.72\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.73\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.73\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.72\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.73\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -5967,22 +5967,18 @@ public class MainActivity extends Activity {
         double total=subTotal+gstTotal;
 
         res.append(line).append("\n");
-        res.append(qbPadRight(L("Sub Total","उप-योग"),23))
-                .append(qbPadLeft(df.format(subTotal),11)).append("\n");
 
         if(gstTotal>0){
+            res.append(qbPadRight(L("Sub Total","उप-योग"),23))
+                    .append(qbPadLeft(df.format(subTotal),11)).append("\n");
             res.append(qbPadRight(L("GST","जीएसटी"),23))
                     .append(qbPadLeft(df.format(gstTotal),11)).append("\n");
+            res.append(line).append("\n");
         }
 
-        res.append(line).append("\n");
         res.append(qbPadRight(L("TOTAL","कुल"),22))
                 .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         res.append(line).append("\n");
-        res.append(qbPadRight(L("Cash","नकद"),22))
-                .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
-        res.append(qbPadRight(L("Cash Given","प्राप्त नकद"),22))
-                .append(qbPadLeft("Rs "+df.format(total),12)).append("\n");
         return res.toString();
     }
 
@@ -6707,6 +6703,8 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    // Single gateway for every 58mm thermal print in STS DigiKit.
+    // Main print buttons and history Print Copy actions must route through here.
     private void print58mmText(String content,String fileName,String jobName,String emptyEn,String emptyHi,String printMode){
         if(!meaningfulResult(content)){
             Toast.makeText(this,L(emptyEn,emptyHi),Toast.LENGTH_SHORT).show();
