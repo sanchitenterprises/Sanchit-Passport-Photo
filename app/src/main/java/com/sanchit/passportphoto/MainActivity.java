@@ -944,8 +944,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.67\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.67\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.68\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.68\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -975,7 +975,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.67\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.68\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3336,6 +3336,8 @@ public class MainActivity extends Activity {
             super(context);
             setScaleType(ImageView.ScaleType.MATRIX);
             setBackgroundColor(Color.WHITE);
+            setClickable(true);
+            setLongClickable(false);
 
             pageScaleDetector=new android.view.ScaleGestureDetector(
                     context,new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener(){
@@ -3359,6 +3361,7 @@ public class MainActivity extends Activity {
                             if(p!=null) p.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
                         }
                     });
+            pageScaleDetector.setQuickScaleEnabled(false);
 
             pageTapDetector=new android.view.GestureDetector(
                     context,new android.view.GestureDetector.SimpleOnGestureListener(){
@@ -3378,10 +3381,23 @@ public class MainActivity extends Activity {
                     });
 
             setOnTouchListener((v,event)->{
+                final int action=event.getActionMasked();
+
+                // Lock the entire touch chain to this page as soon as a
+                // second finger lands. This prevents ListView/page parents
+                // from stealing ACTION_MOVE events during pinch zoom.
+                if(action==MotionEvent.ACTION_POINTER_DOWN || event.getPointerCount()>=2){
+                    android.view.ViewParent p=getParent();
+                    while(p!=null){
+                        p.requestDisallowInterceptTouchEvent(true);
+                        p=p.getParent();
+                    }
+                }
+
                 pageTapDetector.onTouchEvent(event);
                 pageScaleDetector.onTouchEvent(event);
 
-                switch(event.getActionMasked()){
+                switch(action){
                     case MotionEvent.ACTION_DOWN:
                         downX=event.getX();
                         downY=event.getY();
@@ -3389,14 +3405,28 @@ public class MainActivity extends Activity {
                         lastY=event.getY();
                         if(pageZoom>1.01f){
                             android.view.ViewParent p=getParent();
-                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                            while(p!=null){
+                                p.requestDisallowInterceptTouchEvent(true);
+                                p=p.getParent();
+                            }
                         }
                         return true;
 
+                    case MotionEvent.ACTION_POINTER_DOWN:
+                        return true;
+
                     case MotionEvent.ACTION_MOVE:
-                        if(!pageScaleDetector.isInProgress()
-                                && pageZoom>1.01f
-                                && event.getPointerCount()==1){
+                        // Never release interception while pinch is active.
+                        if(pageScaleDetector.isInProgress() || event.getPointerCount()>=2){
+                            android.view.ViewParent p=getParent();
+                            while(p!=null){
+                                p.requestDisallowInterceptTouchEvent(true);
+                                p=p.getParent();
+                            }
+                            return true;
+                        }
+
+                        if(pageZoom>1.01f && event.getPointerCount()==1){
                             float dx=event.getX()-lastX;
                             float dy=event.getY()-lastY;
                             pageMatrix.postTranslate(dx,dy);
@@ -3406,13 +3436,24 @@ public class MainActivity extends Activity {
                             lastY=event.getY();
 
                             android.view.ViewParent p=getParent();
-                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                            while(p!=null){
+                                p.requestDisallowInterceptTouchEvent(true);
+                                p=p.getParent();
+                            }
                             return true;
                         }
 
                         if(pageZoom<=1.01f){
                             android.view.ViewParent p=getParent();
                             if(p!=null) p.requestDisallowInterceptTouchEvent(false);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_POINTER_UP:
+                        // Keep gesture locked until the scale detector fully ends.
+                        if(pageScaleDetector.isInProgress()){
+                            android.view.ViewParent p=getParent();
+                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
                         }
                         return true;
 
