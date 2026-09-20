@@ -50,6 +50,8 @@ public class MainActivity extends Activity {
     private ScrollView activeInputScroll;
     private String pendingThermalPrintText="";
     private boolean pendingThermalSetup=false;
+    private FrameLayout globalContentRoot;
+    private int safeInsetLeft=0,safeInsetTop=0,safeInsetRight=0,safeInsetBottom=0;
 
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
     private static final int REQ_GALLERY_SCAN=9013;
@@ -118,7 +120,10 @@ public class MainActivity extends Activity {
         getWindow().setStatusBarColor(BG);
         getWindow().setNavigationBarColor(BG);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        // Do not force content into system bars. Android 15 may still use
+        // edge-to-edge automatically, so a global inset guard is installed below.
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        installGlobalSafeArea();
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         devMode=sp.getBoolean("devMode",false);
         vibrationEnabled=sp.getBoolean("vibration",true);
@@ -134,6 +139,82 @@ public class MainActivity extends Activity {
         setIntent(intent);
         if(!handleIncomingPdfIntent(intent)){
             reopenCurrentTool();
+        }
+    }
+
+
+    private void installGlobalSafeArea(){
+        View content=findViewById(android.R.id.content);
+        if(!(content instanceof FrameLayout)) return;
+        globalContentRoot=(FrameLayout)content;
+        globalContentRoot.setClipToPadding(false);
+
+        globalContentRoot.setOnApplyWindowInsetsListener((v,insets)->{
+            int left=insets.getSystemWindowInsetLeft();
+            int top=insets.getSystemWindowInsetTop();
+            int right=insets.getSystemWindowInsetRight();
+            int bottom=insets.getSystemWindowInsetBottom();
+
+            if(Build.VERSION.SDK_INT>=28){
+                try{
+                    android.view.DisplayCutout cutout=insets.getDisplayCutout();
+                    if(cutout!=null){
+                        left=Math.max(left,cutout.getSafeInsetLeft());
+                        top=Math.max(top,cutout.getSafeInsetTop());
+                        right=Math.max(right,cutout.getSafeInsetRight());
+                        bottom=Math.max(bottom,cutout.getSafeInsetBottom());
+                    }
+                }catch(Throwable ignored){}
+            }
+
+            safeInsetLeft=Math.max(0,left);
+            safeInsetTop=Math.max(0,top);
+            safeInsetRight=Math.max(0,right);
+            safeInsetBottom=Math.max(0,bottom);
+
+            v.post(this::applyGlobalSafeAreaPadding);
+            return insets;
+        });
+
+        globalContentRoot.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or_,ob)->
+                applyGlobalSafeAreaPadding());
+
+        if(Build.VERSION.SDK_INT>=20){
+            globalContentRoot.requestApplyInsets();
+        }
+    }
+
+    private void applyGlobalSafeAreaPadding(){
+        if(globalContentRoot==null) return;
+        View decor=getWindow().getDecorView();
+        if(decor==null || decor.getWidth()<=0 || decor.getHeight()<=0
+                || globalContentRoot.getWidth()<=0 || globalContentRoot.getHeight()<=0) return;
+
+        int[] loc=new int[2];
+        globalContentRoot.getLocationInWindow(loc);
+
+        int contentLeft=loc[0];
+        int contentTop=loc[1];
+        int contentRight=contentLeft+globalContentRoot.getWidth();
+        int contentBottom=contentTop+globalContentRoot.getHeight();
+
+        int safeLeftEdge=safeInsetLeft;
+        int safeTopEdge=safeInsetTop;
+        int safeRightEdge=decor.getWidth()-safeInsetRight;
+        int safeBottomEdge=decor.getHeight()-safeInsetBottom;
+
+        // Only compensate for the part that actually overlaps a system area.
+        // If an OEM already inset the Activity, these values naturally become 0.
+        int padLeft=Math.max(0,safeLeftEdge-contentLeft);
+        int padTop=Math.max(0,safeTopEdge-contentTop);
+        int padRight=Math.max(0,contentRight-safeRightEdge);
+        int padBottom=Math.max(0,contentBottom-safeBottomEdge);
+
+        if(globalContentRoot.getPaddingLeft()!=padLeft
+                || globalContentRoot.getPaddingTop()!=padTop
+                || globalContentRoot.getPaddingRight()!=padRight
+                || globalContentRoot.getPaddingBottom()!=padBottom){
+            globalContentRoot.setPadding(padLeft,padTop,padRight,padBottom);
         }
     }
 
@@ -944,8 +1025,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.68\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.68\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.69\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.69\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -975,7 +1056,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.68\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.69\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -7074,7 +7155,7 @@ public class MainActivity extends Activity {
         scannerFullScreen=false;
         try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
         embeddedScanner=null;
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
