@@ -435,9 +435,8 @@ public class MainActivity extends Activity {
         else if("SAVINGS".equals(key)) showSavings();
         else if("EMI".equals(key)) showEmiInterest();
         else if("WORDS".equals(key)) showNumberWords();
-        else if("QR".equals(key)) showQr(false);
+        else if("QR".equals(key) || "WIFI_QR".equals(key)) showQr();
         else if("GST".equals(key)) showGst();
-        else if("WIFI_QR".equals(key)) showQr(true);
         else if("REMOTE".equals(key)) showRemote();
         else if("UNIT".equals(key)) showUnitConverter();
         else if("SPEED".equals(key)) openSpeedTest();
@@ -456,9 +455,8 @@ public class MainActivity extends Activity {
         if("SAVINGS".equals(key)) return L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर");
         if("EMI".equals(key)) return L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर");
         if("WORDS".equals(key)) return L("NUMBER TO WORDS","संख्या शब्दों में");
-        if("QR".equals(key)) return L("QR CODE GENERATOR","QR कोड जनरेटर");
+        if("QR".equals(key) || "WIFI_QR".equals(key)) return L("QR GENERATOR","QR जनरेटर");
         if("GST".equals(key)) return L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर");
-        if("WIFI_QR".equals(key)) return L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर");
         if("REMOTE".equals(key)) return L("REMOTE","रिमोट");
         if("UNIT".equals(key)) return L("UNIT CONVERTER","यूनिट कन्वर्टर");
         if("SPEED".equals(key)) return L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट");
@@ -472,48 +470,50 @@ public class MainActivity extends Activity {
     }
 
     private String[] defaultToolOrder(){
-        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","GST","WIFI_QR","REMOTE","UNIT","SPEED","BILL","SCAN"};
+        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","GST","REMOTE","UNIT","SPEED","BILL","SCAN"};
     }
 
     private String[] getToolOrder(){
         String saved=getSharedPreferences("sts",0).getString("toolOrder","");
         String[] def=defaultToolOrder();
         if(saved==null || saved.trim().isEmpty()) return def;
-        String[] arr=saved.split(",");
 
         java.util.HashSet<String> valid=new java.util.HashSet<>();
         for(String x:def) valid.add(x);
 
-        if(arr.length==def.length-1){
-            java.util.HashSet<String> oldSeen=new java.util.HashSet<>();
-            boolean oldValid=true;
-            for(String x:arr){
-                if(!valid.contains(x) || "NOTEPAD".equals(x) || !oldSeen.add(x)){
-                    oldValid=false;
-                    break;
-                }
+        java.util.ArrayList<String> migrated=new java.util.ArrayList<>();
+        java.util.HashSet<String> seen=new java.util.HashSet<>();
+        boolean changed=false;
+
+        String[] arr=saved.split(",");
+        for(String raw:arr){
+            String x=raw==null?"":raw.trim();
+            if(x.isEmpty()) continue;
+
+            // Old separate Wi-Fi QR entry is now merged into QR Generator.
+            if("WIFI_QR".equals(x)){
+                x="QR";
+                changed=true;
             }
-            if(oldValid){
-                java.util.ArrayList<String> migrated=new java.util.ArrayList<>();
-                boolean added=false;
-                for(String x:arr){
-                    migrated.add(x);
-                    if("CALCULATOR".equals(x)){
-                        migrated.add("NOTEPAD");
-                        added=true;
-                    }
-                }
-                if(!added) migrated.add(0,"NOTEPAD");
-                String[] result=migrated.toArray(new String[0]);
-                saveToolOrder(result);
-                return result;
+
+            if(valid.contains(x) && seen.add(x)){
+                migrated.add(x);
+            }else{
+                changed=true;
             }
         }
 
-        if(arr.length!=def.length) return def;
-        java.util.HashSet<String> seen=new java.util.HashSet<>();
-        for(String x:arr) if(!valid.contains(x) || !seen.add(x)) return def;
-        return arr;
+        // Keep the user's order and append only tools that were missing in an older version.
+        for(String x:def){
+            if(seen.add(x)){
+                migrated.add(x);
+                changed=true;
+            }
+        }
+
+        String[] result=migrated.toArray(new String[0]);
+        if(changed || result.length!=arr.length) saveToolOrder(result);
+        return result;
     }
 
     private void saveToolOrder(String[] order){
@@ -879,8 +879,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.57\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.57\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.58\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.58\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -910,7 +910,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.57\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.58\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2099,81 +2099,175 @@ public class MainActivity extends Activity {
     }
     private String under100(int n){String[] a={"","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"};String[] t={"","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"};if(n<20)return a[n];return t[n/10]+(n%10>0?" "+a[n%10]:"");}
 
-    private void showQr(boolean wifi){
-        currentTool=wifi?"WIFI_QR":"QR";
-        String title=wifi?L("WI-FI QR GENERATOR","वाई-फाई QR जनरेटर"):L("QR CODE GENERATOR","QR कोड जनरेटर");
-        shell(title);
+    private void migrateMergedQrHistory(){
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        if(sp.getBoolean("merged_qr_history_v1",false)) return;
 
-        EditText a=input(wifi?L("Wi-Fi Name (SSID)","वाई-फाई नाम (SSID)"):L("Text / URL","टेक्स्ट / URL"));
-        a.setInputType(android.text.InputType.TYPE_CLASS_TEXT
-                |android.text.InputType.TYPE_TEXT_VARIATION_URI);
-        a.setSingleLine(true);
-        a.setLongClickable(true);
-        root.addView(a);
+        String wifiRaw=sp.getString(panelHistoryKey("wifi_qr"),"");
+        String qrRaw=sp.getString(panelHistoryKey("qr"),"");
 
-        EditText b=null;
-        if(wifi){
-            b=input(L("Wi-Fi Password","वाई-फाई पासवर्ड"));
-            b.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
-            root.addView(b);
+        if(wifiRaw!=null && !wifiRaw.isEmpty()){
+            String merged=(qrRaw==null || qrRaw.isEmpty())?wifiRaw:wifiRaw+"\u001e"+qrRaw;
+            String[] rows=merged.split("\\u001e",-1);
+            StringBuilder keep=new StringBuilder();
+            java.util.HashSet<String> seen=new java.util.HashSet<>();
+            int count=0;
+            for(String row:rows){
+                if(row==null || row.isEmpty() || !seen.add(row)) continue;
+                if(count>0) keep.append("\u001e");
+                keep.append(row);
+                count++;
+                if(count>=30) break;
+            }
+            sp.edit().putString(panelHistoryKey("qr"),keep.toString()).apply();
         }
+        sp.edit().putBoolean("merged_qr_history_v1",true).apply();
+    }
+
+    private String wifiQrEscape(String value){
+        if(value==null) return "";
+        return value.replace("\\","\\\\")
+                .replace(";","\\;")
+                .replace(",","\\,")
+                .replace(":","\\:")
+                .replace(""","\\"");
+    }
+
+    private void showQr(){
+        currentTool="QR";
+        shell(L("QR GENERATOR","QR जनरेटर"));
+        root.setPadding(dp(4),dp(4),dp(4),dp(4));
+        migrateMergedQrHistory();
+
+        Spinner type=dropdown(new String[]{
+                L("TEXT / LINK QR","TEXT / LINK QR"),
+                L("WI-FI QR","WI-FI QR")
+        });
+        root.addView(type,controlParams(58));
+
+        EditText text=input(L("Text / URL","टेक्स्ट / URL"));
+        text.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                |android.text.InputType.TYPE_TEXT_VARIATION_URI
+                |android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        text.setSingleLine(false);
+        text.setMaxLines(3);
+        root.addView(text);
+
+        EditText ssid=input(L("Wi-Fi Name (SSID)","वाई-फाई नाम (SSID)"));
+        ssid.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        ssid.setSingleLine(true);
+        root.addView(ssid);
+
+        EditText password=input(L("Wi-Fi Password","वाई-फाई पासवर्ड"));
+        password.setInputType(android.text.InputType.TYPE_CLASS_TEXT);
+        password.setSingleLine(true);
+        root.addView(password);
+
+        Spinner security=dropdown(new String[]{"WPA / WPA2","OPEN","WEP"});
+        root.addView(security,controlParams(56));
 
         Button go=btn(L("GENERATE QR","QR बनाएं"));
-        root.addView(go,controlParams(60));
+        root.addView(go,controlParams(58));
 
-        TextView info=tv(L("Generate a QR code to enable History / Share","History / Share के लिए QR बनाएं"),16,SOFT);
+        TextView info=tv(L("Enter text/link and generate QR","Text/Link डालकर QR बनाएं"),15,SOFT);
         info.setGravity(Gravity.CENTER);
-        root.addView(info,controlParams(50));
+        root.addView(info,controlParams(44));
 
         ImageView img=new ImageView(this);
         img.setAdjustViewBounds(true);
         img.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         img.setBackground(bg(Color.WHITE,12));
-        root.addView(img,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout.LayoutParams imageParams=new LinearLayout.LayoutParams(-1,0,1);
+        imageParams.setMargins(0,dp(4),0,dp(4));
+        root.addView(img,imageParams);
 
         LinearLayout actions=new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
         Button history=btn(L("HISTORY","हिस्ट्री"));
         Button share=btn(L("SHARE","शेयर"));
-        actions.addView(history,new LinearLayout.LayoutParams(0,dp(50),1));
-        actions.addView(share,new LinearLayout.LayoutParams(0,dp(50),1));
-        root.addView(actions,controlParams(52));
+        actions.addView(history,new LinearLayout.LayoutParams(0,dp(52),1));
+        actions.addView(share,new LinearLayout.LayoutParams(0,dp(52),1));
+        root.addView(actions,new LinearLayout.LayoutParams(-1,dp(54)));
 
-        EditText pass=b;
         final String[] shareValue={""};
         final String[] historyValue={""};
 
-        go.setOnClickListener(v->{
-            String primary=a.getText().toString().trim();
-            if(primary.isEmpty()){
-                Toast.makeText(this,L("Enter data first","पहले जानकारी दर्ज करें"),Toast.LENGTH_SHORT).show();
-                return;
+        Runnable updateMode=()->{
+            boolean wifi=type.getSelectedItemPosition()==1;
+            text.setVisibility(wifi?View.GONE:View.VISIBLE);
+            ssid.setVisibility(wifi?View.VISIBLE:View.GONE);
+            password.setVisibility(wifi?View.VISIBLE:View.GONE);
+            security.setVisibility(wifi?View.VISIBLE:View.GONE);
+            info.setText(wifi
+                    ?L("Enter Wi-Fi details and generate QR","Wi-Fi जानकारी भरकर QR बनाएं")
+                    :L("Enter text/link and generate QR","Text/Link डालकर QR बनाएं"));
+        };
+
+        type.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
+                updateMode.run();
+                img.setImageDrawable(null);
+                shareValue[0]="";
+                historyValue[0]="";
             }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+        updateMode.run();
+
+        go.setOnClickListener(v->{
+            boolean wifi=type.getSelectedItemPosition()==1;
             String data;
+            String hist;
+
             if(wifi){
-                String pwd=pass==null?"":pass.getText().toString();
-                data="WIFI:T:WPA;S:"+primary+";P:"+pwd+";;";
-                shareValue[0]=data;
-                historyValue[0]="SSID: "+primary;
-                info.setText(L("Wi-Fi QR generated for: ","वाई-फाई QR बना: ")+primary);
+                String network=ssid.getText().toString().trim();
+                if(network.isEmpty()){
+                    Toast.makeText(this,L("Enter Wi-Fi name first","पहले Wi-Fi नाम भरें"),Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                String sec=security.getSelectedItemPosition()==1
+                        ?"nopass"
+                        :(security.getSelectedItemPosition()==2?"WEP":"WPA");
+                String pwd=password.getText().toString();
+
+                data="WIFI:T:"+sec+";S:"+wifiQrEscape(network)+";";
+                if(!"nopass".equals(sec)) data+="P:"+wifiQrEscape(pwd)+";";
+                data+=";";
+
+                hist=L("Wi-Fi: ","Wi-Fi: ")+network+"  ["+
+                        (security.getSelectedItem()==null?"WPA / WPA2":security.getSelectedItem().toString())+"]";
+                info.setText(L("Wi-Fi QR generated for: ","Wi-Fi QR बना: ")+network);
             }else{
-                data=primary;
-                shareValue[0]=primary;
-                historyValue[0]=primary;
+                String value=text.getText().toString().trim();
+                if(value.isEmpty()){
+                    Toast.makeText(this,L("Enter text or link first","पहले text या link भरें"),Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                data=value;
+                hist=value;
                 info.setText(L("QR generated","QR बन गया"));
             }
+
             Bitmap bm=qrBitmap(data,800);
             if(bm!=null){
                 img.setImageBitmap(bm);
-                savePanelHistory(wifi?"wifi_qr":"qr",title,historyValue[0]);
+                shareValue[0]=data;
+                historyValue[0]=hist;
+                savePanelHistory("qr",L("QR GENERATOR","QR जनरेटर"),hist);
             }
         });
 
         history.setOnClickListener(v->{
-            if(meaningfulResult(historyValue[0])) savePanelHistory(wifi?"wifi_qr":"qr",title,historyValue[0]);
-            showPanelHistory(wifi?"wifi_qr":"qr",title);
+            if(meaningfulResult(historyValue[0])){
+                savePanelHistory("qr",L("QR GENERATOR","QR जनरेटर"),historyValue[0]);
+            }
+            showPanelHistory("qr",L("QR GENERATOR","QR जनरेटर"));
         });
 
-        share.setOnClickListener(v->sharePanelText(title,shareValue[0]));
+        share.setOnClickListener(v->sharePanelText(
+                L("QR GENERATOR","QR जनरेटर"),
+                shareValue[0]));
     }
 
     private Bitmap qrBitmap(String data,int size){try{BitMatrix m=new MultiFormatWriter().encode(data,BarcodeFormat.QR_CODE,size,size);Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.RGB_565);for(int y=0;y<size;y++)for(int x=0;x<size;x++)b.setPixel(x,y,m.get(x,y)?Color.BLACK:Color.WHITE);return b;}catch(Exception e){Toast.makeText(this,"QR error",Toast.LENGTH_SHORT).show();return null;}}
