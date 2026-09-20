@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.76\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.76\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.77\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.77\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.76\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.77\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4412,17 +4412,19 @@ public class MainActivity extends Activity {
                     String description=location.isEmpty()?"":fetchLanText(location,1200);
                     String all=(response+"\n"+description).toLowerCase(java.util.Locale.US);
 
+                    boolean androidRemote=all.contains("android tv") || all.contains("google tv")
+                            || portOpen(ip,6466,450) || portOpen(ip,6467,450);
                     boolean tvLike=all.contains("roku") || all.contains("samsung") || all.contains("webos")
                             || all.contains("lg electronics") || all.contains("mediarenderer")
-                            || all.contains("smarttv") || all.contains("television") || all.contains("dial");
+                            || all.contains("smarttv") || all.contains("television") || all.contains("dial")
+                            || androidRemote;
                     if(!tvLike) continue;
 
                     String type="UPNP";
                     if(all.contains("roku")) type="ROKU";
                     else if(all.contains("samsung")) type="SAMSUNG";
                     else if(all.contains("webos") || all.contains("lg electronics")) type="LG";
-                    else if(all.contains("android tv") || all.contains("google tv")
-                            || portOpen(ip,6466,450) || portOpen(ip,6467,450)) type="ANDROID_TV";
+                    else if(androidRemote) type="ANDROID_TV";
 
                     String friendly=xmlTag(description,"friendlyName");
                     String manufacturer=xmlTag(description,"manufacturer");
@@ -4769,7 +4771,83 @@ public class MainActivity extends Activity {
                 .putString("tv_name",d.name)
                 .putString("tv_ip",d.ip)
                 .putString("tv_type",d.type)
+                .putLong("tv_last_connected",System.currentTimeMillis())
                 .apply();
+    }
+
+    private void reconnectSavedTv(
+            TvDevice saved,
+            TextView status,
+            java.util.function.Consumer<TvDevice> connected){
+
+        if(saved==null) return;
+
+        if(!"ANDROID_TV".equals(saved.type)){
+            connectUniversalTv(saved,status,connected);
+            return;
+        }
+
+        if(androidTvV2==null) androidTvV2=new AndroidTvV2(this);
+        status.setText(L(
+                "Reconnecting saved Android TV...",
+                "सेव Android TV दोबारा कनेक्ट कर रहे हैं..."));
+
+        new Thread(()->{
+            try{
+                if(androidTvV2.connect(saved.ip)){
+                    runOnUiThread(()->{
+                        saveConnectedTv(saved);
+                        status.setText(L("Connected: ","कनेक्टेड: ")+saved.name);
+                        connected.accept(saved);
+                    });
+                    return;
+                }
+            }catch(Exception ignored){}
+
+            runOnUiThread(()->status.setText(L(
+                    "Saved TV did not answer on its old IP. Searching this Wi-Fi...",
+                    "सेव TV पुराने IP पर नहीं मिला। इस Wi-Fi पर खोज रहे हैं...")));
+
+            java.util.ArrayList<TvDevice> found=discoverTvs();
+            java.util.ArrayList<TvDevice> androidCandidates=new java.util.ArrayList<>();
+
+            // Prefer the same saved TV name first, then other Android/Google TVs.
+            for(TvDevice d:found){
+                if(!"ANDROID_TV".equals(d.type)) continue;
+                if(saved.name!=null && d.name!=null
+                        && saved.name.trim().equalsIgnoreCase(d.name.trim())){
+                    androidCandidates.add(0,d);
+                }else{
+                    androidCandidates.add(d);
+                }
+            }
+
+            for(TvDevice candidate:androidCandidates){
+                try{
+                    if(androidTvV2.connect(candidate.ip)){
+                        final TvDevice restored=new TvDevice(
+                                candidate.name==null || candidate.name.trim().isEmpty()
+                                        ?saved.name:candidate.name,
+                                candidate.ip,
+                                "ANDROID_TV");
+                        runOnUiThread(()->{
+                            saveConnectedTv(restored);
+                            status.setText(L(
+                                    "Reconnected saved TV: ",
+                                    "सेव TV फिर कनेक्ट हो गया: ")+restored.name);
+                            connected.accept(restored);
+                        });
+                        return;
+                    }
+                }catch(Exception ignored){}
+            }
+
+            runOnUiThread(()->{
+                status.setText(L(
+                        "Saved TV is still remembered, but it is not reachable now. Keep TV and phone on the same Wi-Fi, then use ⋮ > AUTO FIND TV. Re-pair only if the TV asks for a code.",
+                        "सेव TV अभी भी याद है, लेकिन अभी reachable नहीं है। TV और phone को एक ही Wi-Fi पर रखें, फिर ⋮ > AUTO FIND TV करें। TV code तभी दोबारा डालें जब TV खुद मांगे।"));
+            });
+        }).start();
     }
 
     private void connectAndroidTv(TvDevice d,TextView status,Runnable connected){
@@ -5155,7 +5233,10 @@ public class MainActivity extends Activity {
                     if(ip.isEmpty() || type.isEmpty()){
                         status.setText(L("No saved TV yet","अभी कोई TV सेव नहीं है"));
                     }else{
-                        connectUniversalTv(new TvDevice(name.isEmpty()?"Saved TV":name,ip,type),status,onConnected);
+                        reconnectSavedTv(
+                                new TvDevice(name.isEmpty()?"Saved TV":name,ip,type),
+                                status,
+                                onConnected);
                     }
                     return true;
                 }
@@ -5224,7 +5305,7 @@ public class MainActivity extends Activity {
         if(!savedIp.isEmpty() && !savedType.isEmpty()){
             TvDevice saved=new TvDevice(savedName,savedIp,savedType);
             status.setText(L("Reconnecting saved TV...","सेव TV दोबारा कनेक्ट कर रहे हैं..."));
-            connectUniversalTv(saved,status,onConnected);
+            reconnectSavedTv(saved,status,onConnected);
         }
     }
 
