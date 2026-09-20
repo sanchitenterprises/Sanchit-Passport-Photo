@@ -53,6 +53,9 @@ public class MainActivity extends Activity {
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
     private static final int REQ_GALLERY_SCAN=9013;
     private static final int REQ_THERMAL_BLUETOOTH=9014;
+    private static final int REQ_SAVE_QR_IMAGE=9015;
+    private Bitmap lastGeneratedQrBitmap;
+    private String pendingQrSaveFormat="PNG";
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private FrameLayout scannerViewport;
     private TextView scannerStatus;
@@ -433,10 +436,9 @@ public class MainActivity extends Activity {
         else if("CASH_COUNTER".equals(key)) showCashCounter();
         else if("AGE".equals(key)) showAge();
         else if("SAVINGS".equals(key)) showSavings();
-        else if("EMI".equals(key)) showEmiInterest();
+        else if("EMI".equals(key) || "GST".equals(key)) showEmiInterest();
         else if("WORDS".equals(key)) showNumberWords();
         else if("QR".equals(key) || "WIFI_QR".equals(key)) showQr();
-        else if("GST".equals(key)) showGst();
         else if("REMOTE".equals(key)) showRemote();
         else if("UNIT".equals(key)) showUnitConverter();
         else if("SPEED".equals(key)) openSpeedTest();
@@ -453,10 +455,9 @@ public class MainActivity extends Activity {
         if("CASH_COUNTER".equals(key)) return L("CASH COUNTER","कैश काउंटर");
         if("AGE".equals(key)) return L("AGE CALCULATOR","आयु कैलकुलेटर");
         if("SAVINGS".equals(key)) return L("RD / FD / SIP CALCULATOR","आरडी / एफडी / एसआईपी कैलकुलेटर");
-        if("EMI".equals(key)) return L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर");
+        if("EMI".equals(key) || "GST".equals(key)) return L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट");
         if("WORDS".equals(key)) return L("NUMBER TO WORDS","संख्या शब्दों में");
         if("QR".equals(key) || "WIFI_QR".equals(key)) return L("QR GENERATOR","QR जनरेटर");
-        if("GST".equals(key)) return L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर");
         if("REMOTE".equals(key)) return L("REMOTE","रिमोट");
         if("UNIT".equals(key)) return L("UNIT CONVERTER","यूनिट कन्वर्टर");
         if("SPEED".equals(key)) return L("INTERNET SPEED TEST","इंटरनेट स्पीड टेस्ट");
@@ -470,7 +471,7 @@ public class MainActivity extends Activity {
     }
 
     private String[] defaultToolOrder(){
-        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","GST","REMOTE","UNIT","SPEED","BILL","SCAN"};
+        return new String[]{"CALCULATOR","NOTEPAD","CASH_COUNTER","AGE","SAVINGS","EMI","WORDS","QR","REMOTE","UNIT","SPEED","BILL","SCAN"};
     }
 
     private String[] getToolOrder(){
@@ -490,9 +491,12 @@ public class MainActivity extends Activity {
             String x=raw==null?"":raw.trim();
             if(x.isEmpty()) continue;
 
-            // Old separate Wi-Fi QR entry is now merged into QR Generator.
+            // Old separate entries are now merged into their combined modules.
             if("WIFI_QR".equals(x)){
                 x="QR";
+                changed=true;
+            }else if("GST".equals(x)){
+                x="EMI";
                 changed=true;
             }
 
@@ -879,8 +883,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.58\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.58\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.59\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.59\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -910,7 +914,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.58\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.59\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2021,48 +2025,143 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void migrateMergedFinanceHistory(){
+        android.content.SharedPreferences sp=getSharedPreferences("sts",0);
+        if(sp.getBoolean("merged_finance_history_v1",false)) return;
+
+        String emiRaw=sp.getString(panelHistoryKey("emi"),"");
+        String gstRaw=sp.getString(panelHistoryKey("gst"),"");
+
+        if(gstRaw!=null && !gstRaw.isEmpty()){
+            String merged=(emiRaw==null || emiRaw.isEmpty())?gstRaw:gstRaw+"\u001e"+emiRaw;
+            String[] rows=merged.split("\\u001e",-1);
+            StringBuilder keep=new StringBuilder();
+            java.util.HashSet<String> seen=new java.util.HashSet<>();
+            int count=0;
+            for(String row:rows){
+                if(row==null || row.isEmpty() || !seen.add(row)) continue;
+                if(count>0) keep.append("\u001e");
+                keep.append(row);
+                count++;
+                if(count>=30) break;
+            }
+            sp.edit().putString(panelHistoryKey("emi"),keep.toString()).apply();
+        }
+        sp.edit().putBoolean("merged_finance_history_v1",true).apply();
+    }
+
     private void showEmiInterest(){
         currentTool="EMI";
-        shell(L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"));
+        shell(L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट"));
+        root.setPadding(dp(4),dp(4),dp(4),dp(4));
+        migrateMergedFinanceHistory();
 
-        Spinner mode=dropdown(new String[]{"EMI","SIMPLE INTEREST"});
-        root.addView(mode,controlParams(58));
-
-        EditText loan=input(L("Loan / Principal Amount","लोन / मूल राशि"));
-        EditText rate=input(L("Annual Interest %","वार्षिक ब्याज %"));
-        EditText months=input(L("Tenure in Months","अवधि (महीने)"));
-        root.addView(loan);
-        root.addView(rate);
-        root.addView(months);
-
-        Button calc=btn(L("CALCULATE","गणना करें"));
-        root.addView(calc,controlParams(58));
-
-        TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
-        styleResult(out);
-        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
-        addHistoryShareBar(root,"emi",L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"),out);
-
-        calc.setOnClickListener(v->{
-            double P=val(loan);
-            String res;
-            if(mode.getSelectedItemPosition()==0){
-                double i=val(rate)/1200.0;
-                int n=(int)val(months);
-                double e=i==0?(n==0?0:P/n):P*i*Math.pow(1+i,n)/(Math.pow(1+i,n)-1);
-                double total=e*n;
-                res="EMI: ₹"+df.format(e)
-                        +"\n"+L("Interest: ₹","ब्याज: ₹")+df.format(total-P)
-                        +"\n"+L("Total: ₹","कुल: ₹")+df.format(total);
-            }else{
-                double r=val(rate)/100.0,t=val(months)/12.0;
-                double si=P*r*t;
-                res=L("Interest: ₹","ब्याज: ₹")+df.format(si)
-                        +"\n"+L("Total: ₹","कुल: ₹")+df.format(P+si);
-            }
-            out.setText(res);
-            savePanelHistory("emi",L("EMI / INTEREST CALCULATOR","ईएमआई / ब्याज कैलकुलेटर"),res);
+        Spinner calculatorType=dropdown(new String[]{
+                L("EMI / INTEREST","EMI / ब्याज"),
+                L("GST / DISCOUNT","GST / डिस्काउंट")
         });
+        root.addView(calculatorType,controlParams(58));
+
+        LinearLayout financeBody=new LinearLayout(this);
+        financeBody.setOrientation(LinearLayout.VERTICAL);
+        financeBody.setBackgroundColor(Color.TRANSPARENT);
+        root.addView(financeBody,new LinearLayout.LayoutParams(-1,0,1));
+
+        Runnable render=()->{
+            financeBody.removeAllViews();
+
+            if(calculatorType.getSelectedItemPosition()==1){
+                EditText amt=input(L("Amount","राशि"));
+                EditText disc=input(L("Discount %","छूट %"));
+                EditText gst=input("GST %");
+                financeBody.addView(amt);
+                financeBody.addView(disc);
+                financeBody.addView(gst);
+
+                Button go=btn(L("CALCULATE GST / DISCOUNT","GST / डिस्काउंट गणना"));
+                financeBody.addView(go,controlParams(60));
+
+                TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
+                styleResult(out);
+                financeBody.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+                addHistoryShareBar(
+                        financeBody,
+                        "emi",
+                        L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट"),
+                        out);
+
+                go.setOnClickListener(v->{
+                    double a=val(amt);
+                    double d=a*val(disc)/100.0;
+                    double after=a-d;
+                    double g=after*val(gst)/100.0;
+                    String res=L("GST / DISCOUNT","GST / डिस्काउंट")
+                            +"\n"+L("Discount: ₹","छूट: ₹")+df.format(d)
+                            +"\n"+L("After Discount: ₹","छूट के बाद: ₹")+df.format(after)
+                            +"\nGST: ₹"+df.format(g)
+                            +"\n"+L("Final: ₹","अंतिम: ₹")+df.format(after+g);
+                    out.setText(res);
+                    savePanelHistory(
+                            "emi",
+                            L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट"),
+                            res);
+                });
+            }else{
+                Spinner mode=dropdown(new String[]{"EMI",L("SIMPLE INTEREST","साधारण ब्याज")});
+                financeBody.addView(mode,controlParams(58));
+
+                EditText loan=input(L("Loan / Principal Amount","लोन / मूल राशि"));
+                EditText rate=input(L("Annual Interest %","वार्षिक ब्याज %"));
+                EditText months=input(L("Tenure in Months","अवधि (महीने)"));
+                financeBody.addView(loan);
+                financeBody.addView(rate);
+                financeBody.addView(months);
+
+                Button calc=btn(L("CALCULATE","गणना करें"));
+                financeBody.addView(calc,controlParams(58));
+
+                TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
+                styleResult(out);
+                financeBody.addView(out,new LinearLayout.LayoutParams(-1,0,1));
+                addHistoryShareBar(
+                        financeBody,
+                        "emi",
+                        L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट"),
+                        out);
+
+                calc.setOnClickListener(v->{
+                    double P=val(loan);
+                    String res;
+                    if(mode.getSelectedItemPosition()==0){
+                        double i=val(rate)/1200.0;
+                        int n=(int)val(months);
+                        double e=i==0?(n==0?0:P/n):P*i*Math.pow(1+i,n)/(Math.pow(1+i,n)-1);
+                        double total=e*n;
+                        res="EMI: ₹"+df.format(e)
+                                +"\n"+L("Interest: ₹","ब्याज: ₹")+df.format(total-P)
+                                +"\n"+L("Total: ₹","कुल: ₹")+df.format(total);
+                    }else{
+                        double r=val(rate)/100.0,t=val(months)/12.0;
+                        double si=P*r*t;
+                        res=L("Simple Interest: ₹","साधारण ब्याज: ₹")+df.format(si)
+                                +"\n"+L("Total: ₹","कुल: ₹")+df.format(P+si);
+                    }
+                    out.setText(res);
+                    savePanelHistory(
+                            "emi",
+                            L("EMI / INTEREST + GST / DISCOUNT","ईएमआई / ब्याज + GST / डिस्काउंट"),
+                            res);
+                });
+            }
+        };
+
+        calculatorType.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
+                render.run();
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+        render.run();
     }
 
     private void showNumberWords(){
@@ -2185,8 +2284,10 @@ public class MainActivity extends Activity {
         actions.setOrientation(LinearLayout.HORIZONTAL);
         Button history=btn(L("HISTORY","हिस्ट्री"));
         Button share=btn(L("SHARE","शेयर"));
+        Button download=btn(L("DOWNLOAD","डाउनलोड"));
         actions.addView(history,new LinearLayout.LayoutParams(0,dp(52),1));
         actions.addView(share,new LinearLayout.LayoutParams(0,dp(52),1));
+        actions.addView(download,new LinearLayout.LayoutParams(0,dp(52),1));
         root.addView(actions,new LinearLayout.LayoutParams(-1,dp(54)));
 
         final String[] shareValue={""};
@@ -2251,6 +2352,10 @@ public class MainActivity extends Activity {
 
             Bitmap bm=qrBitmap(data,800);
             if(bm!=null){
+                if(lastGeneratedQrBitmap!=null && lastGeneratedQrBitmap!=bm){
+                    try{lastGeneratedQrBitmap.recycle();}catch(Exception ignored){}
+                }
+                lastGeneratedQrBitmap=bm;
                 img.setImageBitmap(bm);
                 shareValue[0]=data;
                 historyValue[0]=hist;
@@ -2268,37 +2373,39 @@ public class MainActivity extends Activity {
         share.setOnClickListener(v->sharePanelText(
                 L("QR GENERATOR","QR जनरेटर"),
                 shareValue[0]));
+
+        download.setOnClickListener(v->{
+            if(lastGeneratedQrBitmap==null || lastGeneratedQrBitmap.isRecycled()){
+                Toast.makeText(this,L("Generate QR first","पहले QR बनाएं"),Toast.LENGTH_SHORT).show();
+                return;
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(L("DOWNLOAD QR","QR डाउनलोड"))
+                    .setItems(new String[]{"PNG","JPG"},(d,which)->{
+                        pendingQrSaveFormat=which==1?"JPG":"PNG";
+                        try{
+                            Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                            save.addCategory(Intent.CATEGORY_OPENABLE);
+                            save.setType("JPG".equals(pendingQrSaveFormat)?"image/jpeg":"image/png");
+                            String stamp=new java.text.SimpleDateFormat(
+                                    "yyyyMMdd-HHmmss",
+                                    java.util.Locale.US).format(new java.util.Date());
+                            save.putExtra(
+                                    Intent.EXTRA_TITLE,
+                                    "STS-DigiKit-QR-"+stamp+("JPG".equals(pendingQrSaveFormat)?".jpg":".png"));
+                            startActivityForResult(save,REQ_SAVE_QR_IMAGE);
+                        }catch(Exception e){
+                            Toast.makeText(this,L("Save screen could not open","Save screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
+                        }
+                    })
+                    .show();
+        });
     }
 
     private Bitmap qrBitmap(String data,int size){try{BitMatrix m=new MultiFormatWriter().encode(data,BarcodeFormat.QR_CODE,size,size);Bitmap b=Bitmap.createBitmap(size,size,Bitmap.Config.RGB_565);for(int y=0;y<size;y++)for(int x=0;x<size;x++)b.setPixel(x,y,m.get(x,y)?Color.BLACK:Color.WHITE);return b;}catch(Exception e){Toast.makeText(this,"QR error",Toast.LENGTH_SHORT).show();return null;}}
 
     private void showGst(){
-        currentTool="GST";
-        shell(L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"));
-
-        EditText amt=input(L("Amount","राशि"));
-        EditText disc=input(L("Discount %","छूट %"));
-        EditText gst=input("GST %");
-        root.addView(amt);
-        root.addView(disc);
-        root.addView(gst);
-
-        Button go=btn(L("CALCULATE","गणना करें"));
-        root.addView(go,controlParams(60));
-
-        TextView out=tv(L("Enter values and calculate","मान भरें और गणना करें"),20,WHITE);
-        styleResult(out);
-        root.addView(out,new LinearLayout.LayoutParams(-1,0,1));
-        addHistoryShareBar(root,"gst",L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"),out);
-
-        go.setOnClickListener(v->{
-            double a=val(amt),d=a*val(disc)/100.0,after=a-d,g=after*val(gst)/100.0;
-            String res=L("Discount: ₹","छूट: ₹")+df.format(d)
-                    +"\nGST: ₹"+df.format(g)
-                    +"\n"+L("Final: ₹","अंतिम: ₹")+df.format(after+g);
-            out.setText(res);
-            savePanelHistory("gst",L("GST / DISCOUNT CALCULATOR","GST / डिस्काउंट कैलकुलेटर"),res);
-        });
+        showEmiInterest();
     }
 
     private static class TvDevice{
@@ -5567,6 +5674,35 @@ public class MainActivity extends Activity {
     }
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        if(requestCode==REQ_SAVE_QR_IMAGE){
+            if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
+                if(lastGeneratedQrBitmap==null || lastGeneratedQrBitmap.isRecycled()){
+                    Toast.makeText(this,L("QR image is no longer available","QR image उपलब्ध नहीं है"),Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                java.io.OutputStream out=null;
+                try{
+                    out=getContentResolver().openOutputStream(data.getData());
+                    if(out==null) throw new java.io.IOException("No output stream");
+                    boolean jpg="JPG".equals(pendingQrSaveFormat);
+                    boolean ok=lastGeneratedQrBitmap.compress(
+                            jpg?Bitmap.CompressFormat.JPEG:Bitmap.CompressFormat.PNG,
+                            jpg?96:100,
+                            out);
+                    out.flush();
+                    if(!ok) throw new java.io.IOException("Image compression failed");
+                    Toast.makeText(this,
+                            L("QR saved as ","QR सेव हुआ: ")+pendingQrSaveFormat,
+                            Toast.LENGTH_SHORT).show();
+                }catch(Exception e){
+                    Toast.makeText(this,L("QR could not be saved","QR सेव नहीं हो सका"),Toast.LENGTH_SHORT).show();
+                }finally{
+                    if(out!=null) try{out.close();}catch(Exception ignored){}
+                }
+            }
+            return;
+        }
+
         if(requestCode==REQ_GALLERY_SCAN){
             if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
                 final android.net.Uri uri=data.getData();
