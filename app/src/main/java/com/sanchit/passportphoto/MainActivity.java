@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.73\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.73\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.74\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.74\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.73\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.74\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1441,12 +1441,22 @@ public class MainActivity extends Activity {
     }
 
     private String buildCashSummary(String partyName,int[] den, EditText[] qty, BigInteger total){
+        final int W=34;
+        final String line="----------------------------------";
         StringBuilder b=new StringBuilder();
-        b.append("STS DigiKit - Cash Counter\n");
+
+        b.append(qbCenter("STS DigiKit - Cash Counter",W)).append("\n");
         if(partyName!=null && !partyName.trim().isEmpty()){
-            b.append("Party / Customer / Company: ").append(partyName.trim()).append("\n");
+            b.append(qbPadRight("Party: "+partyName.trim(),W)).append("\n");
         }
-        b.append("TOTAL: ₹").append(formatCash(total)).append("\n\n");
+        b.append(line).append("\n");
+        b.append(qbPadRight("TOTAL",19))
+                .append(qbPadLeft("₹"+formatCash(total),15))
+                .append("\n");
+        b.append(line).append("\n\n");
+
+        // Fixed grid: denomination | x | quantity | = | amount.
+        // Every row has the same 34-character width.
         for(int i=0;i<den.length;i++){
             String q=qty[i].getText().toString().trim();
             if(q.isEmpty()) continue;
@@ -1454,13 +1464,26 @@ public class MainActivity extends Activity {
                 BigInteger n=new BigInteger(q);
                 if(n.signum()==0) continue;
                 BigInteger amount=n.multiply(BigInteger.valueOf(den[i]));
-                b.append("₹").append(den[i])
-                        .append(" × ").append(n)
-                        .append(" = ₹").append(formatCash(amount))
+
+                String denomination="₹"+den[i];
+                String quantity=n.toString();
+                String amountText="₹"+formatCash(amount);
+
+                b.append(qbPadLeft(denomination,7))
+                        .append("  x  ")
+                        .append(qbPadLeft(quantity,5))
+                        .append("  =  ")
+                        .append(qbPadLeft(amountText,12))
                         .append("\n");
             }catch(Exception ignored){}
         }
-        b.append("\n").append(new java.text.SimpleDateFormat("dd/MM/yyyy hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date()));
+
+        b.append("\n")
+                .append(qbCenter(
+                        new java.text.SimpleDateFormat(
+                                "dd/MM/yyyy hh:mm a",
+                                java.util.Locale.getDefault()).format(new java.util.Date()),
+                        W));
         return b.toString();
     }
 
@@ -6478,19 +6501,27 @@ public class MainActivity extends Activity {
             while(remaining.length()>0){
                 int fit=paint.breakText(remaining,true,maxWidth,null);
                 if(fit<=0) fit=Math.min(1,remaining.length());
-                if(fit<remaining.length()){
-                    int space=remaining.lastIndexOf(' ',fit-1);
-                    if(space>0 && space>fit/2) fit=space+1;
+
+                // If the complete fixed-width row fits, preserve every padding space.
+                if(fit>=remaining.length()){
+                    lines.add(remaining);
+                    break;
                 }
-                String part=remaining.substring(0,fit).trim();
-                lines.add(part);
-                remaining=remaining.substring(fit).trim();
+
+                // Long free text may wrap, but do not destroy leading column padding.
+                int split=fit;
+                int space=remaining.lastIndexOf(' ',fit-1);
+                if(space>0 && space>fit/2) split=space+1;
+
+                lines.add(remaining.substring(0,split));
+                remaining=remaining.substring(split);
+                while(remaining.startsWith(" ")) remaining=remaining.substring(1);
             }
         }
         return lines;
     }
 
-    private android.graphics.Bitmap renderThermalBitmap(String content){
+    private android.graphics.Bitmap renderThermalBitmap(String content,String printMode){
         // Keep the proven 384-dot raster width used by this 58mm printer.
         // Only shift the content slightly right to balance the visible paper margins.
         final int width=384;
@@ -6501,8 +6532,20 @@ public class MainActivity extends Activity {
 
         android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.BLACK);
-        paint.setTextSize(24f);
-        paint.setTypeface(android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL));
+        paint.setTypeface(android.graphics.Typeface.MONOSPACE);
+
+        // Bills and Cash Counter use a 34-column fixed grid. Choose the largest
+        // readable mono text size that keeps all 34 columns on one physical line.
+        float textSize=24f;
+        if("BILL".equals(printMode) || "CASH".equals(printMode)){
+            paint.setTextSize(textSize);
+            float cell=Math.max(1f,paint.measureText("0"));
+            float required=cell*34f;
+            if(required>usable){
+                textSize=Math.max(16f,textSize*(usable/required));
+            }
+        }
+        paint.setTextSize(textSize);
 
         java.util.ArrayList<String> lines=thermalWrapLines(content,paint,usable);
         android.graphics.Paint.FontMetrics fm=paint.getFontMetrics();
@@ -6665,7 +6708,7 @@ public class MainActivity extends Activity {
             try{
                 android.bluetooth.BluetoothDevice device=adapter.getRemoteDevice(address);
                 socket=openThermalSocket(device);
-                bitmap=renderThermalBitmap(content);
+                bitmap=renderThermalBitmap(content,printMode);
                 java.io.OutputStream out=socket.getOutputStream();
                 sendEscPosBitmapSafe(out,bitmap,printMode);
                 try{out.flush();}catch(Exception ignored){}
