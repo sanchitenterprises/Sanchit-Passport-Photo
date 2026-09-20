@@ -6397,127 +6397,6 @@ public class MainActivity extends Activity {
                     b.trim().isEmpty()?buildNotepadText(t,b):b);
         });
 
-        editItems.setOnClickListener(v->{
-            if(billItems.isEmpty()){
-                Toast.makeText(this,
-                        L("No added items yet","अभी कोई item add नहीं है"),
-                        Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            LinearLayout list=new LinearLayout(this);
-            list.setOrientation(LinearLayout.VERTICAL);
-            list.setPadding(dp(8),dp(8),dp(8),dp(8));
-            list.setBackgroundColor(BG);
-
-            ScrollView scroll=new ScrollView(this);
-            LinearLayout cards=new LinearLayout(this);
-            cards.setOrientation(LinearLayout.VERTICAL);
-            scroll.addView(cards,new ScrollView.LayoutParams(-1,-2));
-            list.addView(scroll,new LinearLayout.LayoutParams(-1,dp(480)));
-
-            AlertDialog dialog=new AlertDialog.Builder(this)
-                    .setTitle(L("EDIT / DELETE ITEMS","ITEM EDIT / DELETE"))
-                    .setView(list)
-                    .setPositiveButton(L("CLOSE","बंद करें"),null)
-                    .create();
-
-            final Runnable[] rebuild={null};
-            rebuild[0]=()->{
-                cards.removeAllViews();
-                for(int i=0;i<billItems.size();i++){
-                    final int index=i;
-                    QuickBillItem row=billItems.get(i);
-
-                    LinearLayout card=new LinearLayout(this);
-                    card.setOrientation(LinearLayout.VERTICAL);
-                    card.setPadding(dp(10),dp(8),dp(10),dp(8));
-                    card.setBackground(contentCardBg());
-
-                    String details=row.name+"   |   "
-                            +L("Qty ","मात्रा ")+trim(row.qty)+"   |   "
-                            +L("Rate ₹","दर ₹")+df.format(row.rate)
-                            +(row.gst>0?"   |   GST "+trim(row.gst)+"%":"");
-                    TextView itemText=tv(details,15,WHITE);
-                    itemText.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
-                    card.addView(itemText,new LinearLayout.LayoutParams(-1,dp(54)));
-
-                    LinearLayout actions=new LinearLayout(this);
-                    actions.setOrientation(LinearLayout.HORIZONTAL);
-                    Button edit=btn(L("EDIT","एडिट"));
-                    Button delete=btn(L("DELETE","डिलीट"));
-                    actions.addView(edit,new LinearLayout.LayoutParams(0,dp(50),1));
-                    actions.addView(delete,new LinearLayout.LayoutParams(0,dp(50),1));
-                    card.addView(actions,new LinearLayout.LayoutParams(-1,dp(52)));
-
-                    edit.setOnClickListener(x->{
-                        QuickBillItem selected=billItems.get(index);
-                        editingItemIndex[0]=index;
-                        name.setText(selected.name);
-                        qty.setText(trim(selected.qty));
-                        rate.setText(trim(selected.rate));
-                        gst.setText(selected.gst>0?trim(selected.gst):"");
-                        addItem.setText(L("UPDATE","अपडेट"));
-                        dialog.dismiss();
-                    });
-
-                    delete.setOnClickListener(x->{
-                        billItems.remove(index);
-                        if(editingItemIndex[0]==index){
-                            editingItemIndex[0]=-1;
-                            addItem.setText("+");
-                            name.setText("");
-                            qty.setText("");
-                            rate.setText("");
-                            gst.setText("");
-                        }else if(editingItemIndex[0]>index){
-                            editingItemIndex[0]--;
-                        }
-                        updateBill.run();
-                        if(billItems.isEmpty()){
-                            dialog.dismiss();
-                        }else{
-                            rebuild[0].run();
-                        }
-                    });
-
-                    LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
-                    cp.setMargins(0,0,0,dp(8));
-                    cards.addView(card,cp);
-                }
-            };
-
-            rebuild[0].run();
-            dialog.show();
-        });
-
-        newBill.setOnClickListener(v->new AlertDialog.Builder(this)
-                .setTitle(L("NEW / CLEAR BILL","नया / क्लियर बिल"))
-                .setMessage(L(
-                        "Clear the current customer and all items to start a new bill? Shop / Company Name will stay saved.",
-                        "मौजूदा customer और सभी items साफ करके नया bill शुरू करें? Shop / Company Name सेव रहेगा।"))
-                .setNegativeButton(L("CANCEL","रद्द करें"),null)
-                .setPositiveButton(L("CLEAR & NEW","क्लियर करके नया"),(d,w)->{
-                    customer.setText("");
-                    billItems.clear();
-                    editingItemIndex[0]=-1;
-                    addItem.setText("+");
-                    name.setText("");
-                    qty.setText("");
-                    rate.setText("");
-                    gst.setText("");
-
-                    billNumberCommitted[0]=false;
-                    billSequence[0]=quickBillNextNumber(shopCompanyName[0]);
-                    billNo[0]=quickBillNumber(shopCompanyName[0],billSequence[0]);
-                    billDate[0]=new java.text.SimpleDateFormat(
-                            "dd/MM/yyyy, hh:mm a",
-                            java.util.Locale.getDefault()).format(new java.util.Date());
-
-                    updateBill.run();
-                })
-                .show());
-
         print.setOnClickListener(v->{
             String t=noteTitle.getText().toString();
             String b=noteBody.getText().toString();
@@ -7429,6 +7308,127 @@ public class MainActivity extends Activity {
             gst.setText("");
             updateBill.run();
         });
+
+        editItems.setOnClickListener(v->{
+            if(billItems.isEmpty()){
+                Toast.makeText(this,
+                        L("No added items yet","अभी कोई item add नहीं है"),
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            LinearLayout list=new LinearLayout(this);
+            list.setOrientation(LinearLayout.VERTICAL);
+            list.setPadding(dp(8),dp(8),dp(8),dp(8));
+            list.setBackgroundColor(BG);
+
+            ScrollView scroll=new ScrollView(this);
+            LinearLayout cards=new LinearLayout(this);
+            cards.setOrientation(LinearLayout.VERTICAL);
+            scroll.addView(cards,new ScrollView.LayoutParams(-1,-2));
+            list.addView(scroll,new LinearLayout.LayoutParams(-1,dp(480)));
+
+            AlertDialog dialog=new AlertDialog.Builder(this)
+                    .setTitle(L("EDIT / DELETE ITEMS","ITEM EDIT / DELETE"))
+                    .setView(list)
+                    .setPositiveButton(L("CLOSE","बंद करें"),null)
+                    .create();
+
+            final Runnable[] rebuild={null};
+            rebuild[0]=()->{
+                cards.removeAllViews();
+                for(int i=0;i<billItems.size();i++){
+                    final int index=i;
+                    QuickBillItem row=billItems.get(i);
+
+                    LinearLayout card=new LinearLayout(this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dp(10),dp(8),dp(10),dp(8));
+                    card.setBackground(contentCardBg());
+
+                    String details=row.name+"   |   "
+                            +L("Qty ","मात्रा ")+trim(row.qty)+"   |   "
+                            +L("Rate ₹","दर ₹")+df.format(row.rate)
+                            +(row.gst>0?"   |   GST "+trim(row.gst)+"%":"");
+                    TextView itemText=tv(details,15,WHITE);
+                    itemText.setGravity(Gravity.LEFT|Gravity.CENTER_VERTICAL);
+                    card.addView(itemText,new LinearLayout.LayoutParams(-1,dp(54)));
+
+                    LinearLayout actions=new LinearLayout(this);
+                    actions.setOrientation(LinearLayout.HORIZONTAL);
+                    Button edit=btn(L("EDIT","एडिट"));
+                    Button delete=btn(L("DELETE","डिलीट"));
+                    actions.addView(edit,new LinearLayout.LayoutParams(0,dp(50),1));
+                    actions.addView(delete,new LinearLayout.LayoutParams(0,dp(50),1));
+                    card.addView(actions,new LinearLayout.LayoutParams(-1,dp(52)));
+
+                    edit.setOnClickListener(x->{
+                        QuickBillItem selected=billItems.get(index);
+                        editingItemIndex[0]=index;
+                        name.setText(selected.name);
+                        qty.setText(trim(selected.qty));
+                        rate.setText(trim(selected.rate));
+                        gst.setText(selected.gst>0?trim(selected.gst):"");
+                        addItem.setText(L("UPDATE","अपडेट"));
+                        dialog.dismiss();
+                    });
+
+                    delete.setOnClickListener(x->{
+                        billItems.remove(index);
+                        if(editingItemIndex[0]==index){
+                            editingItemIndex[0]=-1;
+                            addItem.setText("+");
+                            name.setText("");
+                            qty.setText("");
+                            rate.setText("");
+                            gst.setText("");
+                        }else if(editingItemIndex[0]>index){
+                            editingItemIndex[0]--;
+                        }
+                        updateBill.run();
+                        if(billItems.isEmpty()){
+                            dialog.dismiss();
+                        }else{
+                            rebuild[0].run();
+                        }
+                    });
+
+                    LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2);
+                    cp.setMargins(0,0,0,dp(8));
+                    cards.addView(card,cp);
+                }
+            };
+
+            rebuild[0].run();
+            dialog.show();
+        });
+
+        newBill.setOnClickListener(v->new AlertDialog.Builder(this)
+                .setTitle(L("NEW / CLEAR BILL","नया / क्लियर बिल"))
+                .setMessage(L(
+                        "Clear the current customer and all items to start a new bill? Shop / Company Name will stay saved.",
+                        "मौजूदा customer और सभी items साफ करके नया bill शुरू करें? Shop / Company Name सेव रहेगा।"))
+                .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                .setPositiveButton(L("CLEAR & NEW","क्लियर करके नया"),(d,w)->{
+                    customer.setText("");
+                    billItems.clear();
+                    editingItemIndex[0]=-1;
+                    addItem.setText("+");
+                    name.setText("");
+                    qty.setText("");
+                    rate.setText("");
+                    gst.setText("");
+
+                    billNumberCommitted[0]=false;
+                    billSequence[0]=quickBillNextNumber(shopCompanyName[0]);
+                    billNo[0]=quickBillNumber(shopCompanyName[0],billSequence[0]);
+                    billDate[0]=new java.text.SimpleDateFormat(
+                            "dd/MM/yyyy, hh:mm a",
+                            java.util.Locale.getDefault()).format(new java.util.Date());
+
+                    updateBill.run();
+                })
+                .show());
 
         print.setOnClickListener(v->{
             String bill=buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate[0]);
