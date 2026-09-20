@@ -4990,12 +4990,12 @@ public class MainActivity extends Activity {
         next.setOnClickListener(v->{
             if(exhausted[0]) return;
 
-            int next=index[0]+1;
-            if(next>=profiles.length){
+            int nextIndex=index[0]+1;
+            if(nextIndex>=profiles.length){
                 exhausted[0]=true;
                 irPrefs.edit().putInt("universal_ir_test_index",profiles.length).apply();
             }else{
-                index[0]=next;
+                index[0]=nextIndex;
                 irPrefs.edit().putInt("universal_ir_test_index",index[0]).apply();
             }
             refresh[0].run();
