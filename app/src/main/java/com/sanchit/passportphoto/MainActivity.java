@@ -1113,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.78\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.78\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.79\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.79\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1144,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.78\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.79\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4785,16 +4785,91 @@ public class MainActivity extends Activity {
         return transmitPanasonic48(code,"PANASONIC_LSB".equals(profile));
     }
 
+    private boolean transmitNikai24(long code){
+        try{
+            android.hardware.ConsumerIrManager ir=(android.hardware.ConsumerIrManager)
+                    getSystemService(Context.CONSUMER_IR_SERVICE);
+            if(ir==null || !ir.hasIrEmitter()) return false;
+
+            java.util.ArrayList<Integer> p=new java.util.ArrayList<>();
+            p.add(4000); p.add(4000);
+            for(int bit=23;bit>=0;bit--){
+                p.add(500);
+                p.add(((code>>bit)&1L)==1L?2000:1000);
+            }
+            p.add(500); p.add(8500);
+
+            int[] pattern=new int[p.size()];
+            for(int i=0;i<p.size();i++) pattern[i]=p.get(i);
+            ir.transmit(38000,pattern);
+            return true;
+        }catch(Exception e){
+            return false;
+        }
+    }
+
+    private boolean sendTclRokuIrKey(String profile,String key){
+        java.util.HashMap<String,Long> m=new java.util.HashMap<>();
+
+        long power;
+        if("TCL_ROKU_POWER_OFF".equals(profile)) power=0x57E318E7L;
+        else if("TCL_ROKU_POWER_ON".equals(profile)) power=0x57E316E9L;
+        else power=0x57E3E817L;
+
+        m.put("POWER",power);
+        m.put("VOL_UP",0x57E3F00FL);
+        m.put("VOL_DOWN",0x57E308F7L);
+        m.put("MUTE",0x57E304FBL);
+        m.put("HOME",0x57E3C03FL);
+        m.put("UP",0x57E39867L);
+        m.put("DOWN",0x57E3CC33L);
+        m.put("LEFT",0x57E37887L);
+        m.put("RIGHT",0x57E3B44BL);
+        m.put("OK",0x57E354ABL);
+        m.put("BACK",0x57E36699L);
+        m.put("REW",0x57E31EE1L);
+        m.put("FF",0x57E3AA55L);
+        m.put("INPUT",0x57E3748BL);
+
+        Long code=m.get(key);
+        return code!=null && transmitNec(code);
+    }
+
+    private boolean sendTclAndroidIrKey(String key){
+        java.util.HashMap<String,Long> m=new java.util.HashMap<>();
+        m.put("POWER",0x0D5F2AL);
+        m.put("MUTE",0x0C0F3FL);
+        m.put("MENU",0x013FECL);
+        m.put("HOME",0x0F7F08L);
+        m.put("INPUT",0x05CFA3L);
+        m.put("UP",0x0A6F59L);
+        m.put("DOWN",0x0A7F58L);
+        m.put("RIGHT",0x0A8F57L);
+        m.put("LEFT",0x0A9F56L);
+        m.put("OK",0x00BFF4L);
+        m.put("BACK",0x0D8F27L);
+        m.put("VOL_UP",0x0D0F2FL);
+        m.put("VOL_DOWN",0x0D1F2EL);
+        m.put("CH_UP",0x0D2F2DL);
+        m.put("CH_DOWN",0x0D3F2CL);
+
+        Long code=m.get(key);
+        return code!=null && transmitNikai24(code);
+    }
+
     private String[] universalIrProfiles(){
-        // Internal profiles only. User never has to choose a brand/name.
-        // Two Panasonic bit-order variants are kept because different Android IR
-        // implementations/remotes expose this family differently.
+        // Internal profiles only. User never chooses a brand/name.
+        // Keep known-good families first, then TCL Roku/Android variants.
         return new String[]{
                 "SAMSUNG",
                 "LG",
                 "SONY",
                 "PANASONIC_LSB",
-                "PANASONIC_MSB"
+                "PANASONIC_MSB",
+                "TCL_ROKU_POWER_TOGGLE",
+                "TCL_ROKU_POWER_OFF",
+                "TCL_ROKU_POWER_ON",
+                "TCL_ANDROID_NIKAI"
         };
     }
 
@@ -4837,7 +4912,13 @@ public class MainActivity extends Activity {
         }
 
         final String[] profiles=universalIrProfiles();
-        final int[] index={0};
+        final android.content.SharedPreferences irPrefs=getSharedPreferences("sts",0);
+
+        int savedProgress=irPrefs.getInt("universal_ir_test_index",0);
+        if(savedProgress<0) savedProgress=0;
+
+        final int[] index={Math.min(savedProgress,Math.max(0,profiles.length-1))};
+        final boolean[] exhausted={savedProgress>=profiles.length};
 
         LinearLayout box=new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -4847,22 +4928,40 @@ public class MainActivity extends Activity {
         TextView info=tv("",16,WHITE);
         info.setGravity(Gravity.CENTER);
         info.setPadding(dp(8),dp(8),dp(8),dp(12));
-        box.addView(info,new LinearLayout.LayoutParams(-1,dp(88)));
+        box.addView(info,new LinearLayout.LayoutParams(-1,dp(102)));
 
         Button test=btn(L("TEST POWER","POWER TEST"));
         Button next=btn(L("NEXT CODE","अगला CODE"));
         Button working=btn(L("WORKING / SAVE","काम कर रहा है / SAVE"));
+        Button reset=btn(L("RESET TEST TO CODE 1","TEST RESET — CODE 1"));
 
         box.addView(test,controlParams(56));
         box.addView(next,controlParams(56));
         box.addView(working,controlParams(56));
+        box.addView(reset,controlParams(56));
 
-        Runnable refresh=()->info.setText(
-                L("Universal IR code ","Universal IR code ")
-                        +(index[0]+1)+" / "+profiles.length+"\n"
-                        +L("Point phone at TV, tap TEST POWER. If TV responds, tap WORKING / SAVE.",
-                        "फोन को TV की ओर रखें, TEST POWER दबाएं। TV respond करे तो WORKING / SAVE दबाएं।"));
-        refresh.run();
+        final Runnable[] refresh={null};
+        refresh[0]=()->{
+            if(exhausted[0]){
+                info.setText(L(
+                        "All "+profiles.length+" IR codes have been tested.\nUse RESET only if you want to start again from Code 1.",
+                        "सभी "+profiles.length+" IR codes test हो चुके हैं।\nफिर से Code 1 से शुरू करने के लिए ही RESET दबाएं।"));
+                test.setEnabled(false);
+                next.setEnabled(false);
+                working.setEnabled(false);
+            }else{
+                info.setText(
+                        L("Universal IR Code ","Universal IR Code ")
+                                +(index[0]+1)+" / "+profiles.length+"\n"
+                                +L(
+                                "Point phone at TV and tap TEST POWER. If TV responds, tap WORKING / SAVE. Progress is saved automatically.",
+                                "फोन को TV की ओर रखें और TEST POWER दबाएं। TV respond करे तो WORKING / SAVE दबाएं। Progress अपने-आप save रहेगा।"));
+                test.setEnabled(true);
+                next.setEnabled(true);
+                working.setEnabled(true);
+            }
+        };
+        refresh[0].run();
 
         AlertDialog dialog=new AlertDialog.Builder(this)
                 .setTitle(L("UNIVERSAL IR AUTO TEST","UNIVERSAL IR AUTO TEST"))
@@ -4871,37 +4970,61 @@ public class MainActivity extends Activity {
                 .create();
 
         test.setOnClickListener(v->{
+            if(exhausted[0]) return;
+
             boolean sent=sendIrKey(profiles[index[0]],"POWER");
+            int nextProgress=index[0]+1;
+            irPrefs.edit().putInt("universal_ir_test_index",nextProgress).apply();
+
             if(sent){
                 status.setText(L(
-                        "IR power code sent — check the TV",
-                        "IR power code भेजा गया — TV देखें"));
+                        "IR Code "+(index[0]+1)+" sent — check the TV",
+                        "IR Code "+(index[0]+1)+" भेजा गया — TV देखें"));
             }else{
                 status.setText(L(
-                        "IR code could not be sent",
-                        "IR code नहीं भेजा जा सका"));
+                        "IR Code "+(index[0]+1)+" could not be sent",
+                        "IR Code "+(index[0]+1)+" नहीं भेजा जा सका"));
             }
         });
 
         next.setOnClickListener(v->{
-            index[0]=(index[0]+1)%profiles.length;
-            refresh.run();
-            boolean sent=sendIrKey(profiles[index[0]],"POWER");
-            if(sent){
-                status.setText(L(
-                        "Next IR power code sent — check the TV",
-                        "अगला IR power code भेजा गया — TV देखें"));
+            if(exhausted[0]) return;
+
+            int next=index[0]+1;
+            if(next>=profiles.length){
+                exhausted[0]=true;
+                irPrefs.edit().putInt("universal_ir_test_index",profiles.length).apply();
+            }else{
+                index[0]=next;
+                irPrefs.edit().putInt("universal_ir_test_index",index[0]).apply();
             }
+            refresh[0].run();
         });
 
         working.setOnClickListener(v->{
+            if(exhausted[0]) return;
+
             String profile=profiles[index[0]];
             saveUniversalIrProfile(profile);
+            irPrefs.edit().putInt("universal_ir_test_index",index[0]+1).apply();
             activateUniversalIr(profile,status,connected);
             Toast.makeText(this,
-                    L("Universal IR profile saved","Universal IR profile सेव हो गया"),
+                    L("Working IR code saved permanently","काम करने वाला IR code permanently सेव हो गया"),
                     Toast.LENGTH_SHORT).show();
             dialog.dismiss();
+        });
+
+        reset.setOnClickListener(v->{
+            irPrefs.edit()
+                    .putInt("universal_ir_test_index",0)
+                    .remove("universal_ir_profile")
+                    .apply();
+            index[0]=0;
+            exhausted[0]=false;
+            refresh[0].run();
+            status.setText(L(
+                    "IR test reset to Code 1",
+                    "IR test Code 1 से reset हो गया"));
         });
 
         dialog.show();
@@ -4952,6 +5075,14 @@ public class MainActivity extends Activity {
 
         if("PANASONIC_LSB".equals(profile) || "PANASONIC_MSB".equals(profile)){
             return sendPanasonicIrKey(profile,key);
+        }
+
+        if(profile.startsWith("TCL_ROKU_")){
+            return sendTclRokuIrKey(profile,key);
+        }
+
+        if("TCL_ANDROID_NIKAI".equals(profile)){
+            return sendTclAndroidIrKey(key);
         }
 
         return false;
