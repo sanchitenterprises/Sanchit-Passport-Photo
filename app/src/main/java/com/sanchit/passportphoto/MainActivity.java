@@ -47,9 +47,12 @@ public class MainActivity extends Activity {
     private final DecimalFormat df = new DecimalFormat("#,##0.00");
     private AndroidTvV2 androidTvV2;
     private ScrollView activeInputScroll;
+    private String pendingThermalPrintText="";
+    private boolean pendingThermalSetup=false;
 
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
     private static final int REQ_GALLERY_SCAN=9013;
+    private static final int REQ_THERMAL_BLUETOOTH=9014;
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private FrameLayout scannerViewport;
     private TextView scannerStatus;
@@ -837,6 +840,7 @@ public class MainActivity extends Activity {
         PopupMenu p=new PopupMenu(this,anchor);
         p.getMenu().add(L("LANGUAGE","भाषा"));
         p.getMenu().add(L("DROPDOWN LIST ORDER","ड्रॉपडाउन लिस्ट क्रम"));
+        p.getMenu().add(L("THERMAL PRINTER SETUP","थर्मल प्रिंटर सेटअप"));
         p.getMenu().add(L("ABOUT","ऐप के बारे में"));
         p.setOnMenuItemClickListener(item->{
             String s=item.getTitle().toString();
@@ -863,12 +867,18 @@ public class MainActivity extends Activity {
                 return true;
             }
 
+            if(s.equals(L("THERMAL PRINTER SETUP","थर्मल प्रिंटर सेटअप"))){
+                pendingThermalSetup=true;
+                ensureThermalBluetoothPermission();
+                return true;
+            }
+
             if(s.equals(L("ABOUT","ऐप के बारे में"))){
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.50\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.50\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.53\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.53\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -898,7 +908,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.50\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.53\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4177,134 +4187,396 @@ public class MainActivity extends Activity {
         });
     }
 
+    private boolean hasThermalBluetoothPermission(){
+        return Build.VERSION.SDK_INT<31 ||
+                checkSelfPermission("android.permission.BLUETOOTH_CONNECT")==PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void ensureThermalBluetoothPermission(){
+        if(hasThermalBluetoothPermission()){
+            if(pendingThermalSetup){
+                pendingThermalSetup=false;
+                showThermalPrinterSetup();
+            }else if(pendingThermalPrintText!=null && !pendingThermalPrintText.trim().isEmpty()){
+                String p=pendingThermalPrintText;
+                pendingThermalPrintText="";
+                directThermalPrint(p);
+            }
+            return;
+        }
+
+        if(Build.VERSION.SDK_INT>=31){
+            try{
+                requestPermissions(
+                        new String[]{"android.permission.BLUETOOTH_CONNECT"},
+                        REQ_THERMAL_BLUETOOTH);
+            }catch(Exception e){
+                pendingThermalSetup=false;
+                pendingThermalPrintText="";
+                Toast.makeText(this,
+                        L("Bluetooth permission could not be requested","Bluetooth permission request नहीं हो सकी"),
+                        Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private String thermalPrinterAddress(){
+        return getSharedPreferences("sts",0).getString("thermal_printer_address","");
+    }
+
+    private String thermalPrinterName(){
+        return getSharedPreferences("sts",0).getString("thermal_printer_name","");
+    }
+
+    private void openBluetoothSettings(){
+        try{
+            startActivity(new Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS));
+        }catch(Exception e){
+            Toast.makeText(this,
+                    L("Bluetooth settings could not be opened","Bluetooth settings नहीं खुल सकी"),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void showThermalPrinterSetup(){
+        if(!hasThermalBluetoothPermission()){
+            pendingThermalSetup=true;
+            ensureThermalBluetoothPermission();
+            return;
+        }
+
+        android.bluetooth.BluetoothAdapter adapter=android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+        if(adapter==null){
+            Toast.makeText(this,
+                    L("Bluetooth is not available on this device","इस डिवाइस में Bluetooth उपलब्ध नहीं है"),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if(!adapter.isEnabled()){
+            new AlertDialog.Builder(this)
+                    .setTitle(L("Bluetooth is OFF","Bluetooth बंद है"))
+                    .setMessage(L(
+                            "Turn on Bluetooth, pair your 58mm thermal printer in phone settings, then return here.",
+                            "Bluetooth चालू करें, फोन की settings में 58mm thermal printer pair करें, फिर यहाँ वापस आएँ।"))
+                    .setPositiveButton(L("BLUETOOTH SETTINGS","BLUETOOTH SETTINGS"),(d,w)->openBluetoothSettings())
+                    .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                    .show();
+            return;
+        }
+
+        java.util.ArrayList<android.bluetooth.BluetoothDevice> devices=new java.util.ArrayList<>();
+        try{
+            java.util.Set<android.bluetooth.BluetoothDevice> bonded=adapter.getBondedDevices();
+            if(bonded!=null) devices.addAll(bonded);
+        }catch(SecurityException e){
+            pendingThermalSetup=true;
+            ensureThermalBluetoothPermission();
+            return;
+        }
+
+        java.util.Collections.sort(devices,(a,b)->{
+            String an=a.getName()==null?"":a.getName();
+            String bn=b.getName()==null?"":b.getName();
+            return an.compareToIgnoreCase(bn);
+        });
+
+        if(devices.isEmpty()){
+            new AlertDialog.Builder(this)
+                    .setTitle(L("No paired printer found","कोई paired printer नहीं मिला"))
+                    .setMessage(L(
+                            "First pair the 58mm thermal printer in Bluetooth settings. Then open Thermal Printer Setup again.",
+                            "पहले Bluetooth settings में 58mm thermal printer को pair करें। फिर Thermal Printer Setup खोलें।"))
+                    .setPositiveButton(L("BLUETOOTH SETTINGS","BLUETOOTH SETTINGS"),(d,w)->openBluetoothSettings())
+                    .setNegativeButton(L("CLOSE","बंद करें"),null)
+                    .show();
+            return;
+        }
+
+        String saved=thermalPrinterAddress();
+        String[] labels=new String[devices.size()];
+        int checked=-1;
+        for(int i=0;i<devices.size();i++){
+            android.bluetooth.BluetoothDevice d=devices.get(i);
+            String name=d.getName();
+            if(name==null || name.trim().isEmpty()) name=L("Unnamed device","बिना नाम डिवाइस");
+            labels[i]=name+"\n"+d.getAddress();
+            if(d.getAddress().equalsIgnoreCase(saved)) checked=i;
+        }
+
+        final int[] selected={checked};
+        AlertDialog dialog=new AlertDialog.Builder(this)
+                .setTitle(L("58MM THERMAL PRINTER","58MM थर्मल प्रिंटर"))
+                .setSingleChoiceItems(labels,checked,(d,which)->selected[0]=which)
+                .setPositiveButton(L("SAVE DEFAULT","DEFAULT सेव करें"),null)
+                .setNeutralButton(L("TEST PRINT","टेस्ट प्रिंट"),null)
+                .setNegativeButton(L("PAIR / SETTINGS","PAIR / SETTINGS"),null)
+                .create();
+
+        dialog.setOnShowListener(x->{
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                if(selected[0]<0 || selected[0]>=devices.size()){
+                    Toast.makeText(this,L("Select a printer first","पहले printer चुनें"),Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                android.bluetooth.BluetoothDevice d=devices.get(selected[0]);
+                String name=d.getName();
+                if(name==null || name.trim().isEmpty()) name="Thermal Printer";
+                getSharedPreferences("sts",0).edit()
+                        .putString("thermal_printer_address",d.getAddress())
+                        .putString("thermal_printer_name",name)
+                        .apply();
+                Toast.makeText(this,
+                        L("Default printer saved: ","Default printer सेव: ")+name,
+                        Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+
+                if(pendingThermalPrintText!=null && !pendingThermalPrintText.trim().isEmpty()){
+                    String pending=pendingThermalPrintText;
+                    pendingThermalPrintText="";
+                    directThermalPrint(pending);
+                }
+            });
+
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
+                if(selected[0]<0 || selected[0]>=devices.size()){
+                    Toast.makeText(this,L("Select a printer first","पहले printer चुनें"),Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                android.bluetooth.BluetoothDevice d=devices.get(selected[0]);
+                String name=d.getName();
+                if(name==null || name.trim().isEmpty()) name="Thermal Printer";
+                getSharedPreferences("sts",0).edit()
+                        .putString("thermal_printer_address",d.getAddress())
+                        .putString("thermal_printer_name",name)
+                        .apply();
+                directThermalPrint(
+                        "STS DigiKit\n58mm Thermal Printer Test\n\n"+
+                        "English: OK\n"+
+                        "हिंदी: प्रिंटर परीक्षण सफल\n"+
+                        new java.text.SimpleDateFormat("dd/MM/yyyy hh:mm a",java.util.Locale.getDefault())
+                                .format(new java.util.Date()));
+            });
+
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->openBluetoothSettings());
+        });
+        dialog.show();
+    }
+
+    private java.util.ArrayList<String> thermalWrapLines(String text,android.graphics.Paint paint,int maxWidth){
+        java.util.ArrayList<String> lines=new java.util.ArrayList<>();
+        String safe=text==null?"":text.replace("\r","");
+        String[] paragraphs=safe.split("\n",-1);
+
+        for(String paragraph:paragraphs){
+            if(paragraph.length()==0){
+                lines.add("");
+                continue;
+            }
+
+            String remaining=paragraph;
+            while(remaining.length()>0){
+                int fit=paint.breakText(remaining,true,maxWidth,null);
+                if(fit<=0) fit=Math.min(1,remaining.length());
+                if(fit<remaining.length()){
+                    int space=remaining.lastIndexOf(' ',fit-1);
+                    if(space>0 && space>fit/2) fit=space+1;
+                }
+                String part=remaining.substring(0,fit).trim();
+                lines.add(part);
+                remaining=remaining.substring(fit).trim();
+            }
+        }
+        return lines;
+    }
+
+    private android.graphics.Bitmap renderThermalBitmap(String content){
+        final int width=384;
+        final int margin=10;
+        final int usable=width-(margin*2);
+
+        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.BLACK);
+        paint.setTextSize(24f);
+        paint.setTypeface(android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL));
+
+        java.util.ArrayList<String> lines=thermalWrapLines(content,paint,usable);
+        android.graphics.Paint.FontMetrics fm=paint.getFontMetrics();
+        int lineHeight=Math.max(28,(int)Math.ceil(fm.descent-fm.ascent)+4);
+        int height=Math.max(80,margin*2+(lines.size()*lineHeight)+18);
+
+        android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(
+                width,height,android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
+        canvas.drawColor(Color.WHITE);
+
+        float y=margin-fm.ascent;
+        for(String line:lines){
+            canvas.drawText(line,margin,y,paint);
+            y+=lineHeight;
+        }
+        return bitmap;
+    }
+
+    private void sendEscPosBitmap(java.io.OutputStream out,android.graphics.Bitmap bitmap) throws Exception{
+        final int width=bitmap.getWidth();
+        final int widthBytes=(width+7)/8;
+        final int stripeHeight=192;
+
+        out.write(new byte[]{0x1B,0x40});
+        out.write(new byte[]{0x1B,0x61,0x00});
+
+        for(int startY=0;startY<bitmap.getHeight();startY+=stripeHeight){
+            int h=Math.min(stripeHeight,bitmap.getHeight()-startY);
+            int[] pixels=new int[width*h];
+            bitmap.getPixels(pixels,0,width,0,startY,width,h);
+
+            byte[] data=new byte[widthBytes*h];
+            for(int y=0;y<h;y++){
+                for(int x=0;x<width;x++){
+                    int c=pixels[y*width+x];
+                    int a=Color.alpha(c);
+                    int lum=(Color.red(c)*299+Color.green(c)*587+Color.blue(c)*114)/1000;
+                    if(a>80 && lum<185){
+                        int index=y*widthBytes+(x/8);
+                        data[index]|=(byte)(0x80>>(x&7));
+                    }
+                }
+            }
+
+            byte[] header=new byte[]{
+                    0x1D,0x76,0x30,0x00,
+                    (byte)(widthBytes&0xFF),(byte)((widthBytes>>8)&0xFF),
+                    (byte)(h&0xFF),(byte)((h>>8)&0xFF)
+            };
+            out.write(header);
+            out.write(data);
+            out.flush();
+            try{Thread.sleep(35);}catch(InterruptedException ignored){}
+        }
+
+        out.write(new byte[]{0x0A,0x0A,0x0A});
+        out.flush();
+    }
+
+    private android.bluetooth.BluetoothSocket openThermalSocket(android.bluetooth.BluetoothDevice device) throws Exception{
+        final java.util.UUID spp=java.util.UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+        android.bluetooth.BluetoothSocket socket=null;
+
+        try{
+            socket=device.createRfcommSocketToServiceRecord(spp);
+            socket.connect();
+            return socket;
+        }catch(Exception first){
+            if(socket!=null) try{socket.close();}catch(Exception ignored){}
+            try{
+                java.lang.reflect.Method m=device.getClass().getMethod("createRfcommSocket",int.class);
+                socket=(android.bluetooth.BluetoothSocket)m.invoke(device,1);
+                socket.connect();
+                return socket;
+            }catch(Exception second){
+                if(socket!=null) try{socket.close();}catch(Exception ignored){}
+                throw first;
+            }
+        }
+    }
+
+    private void directThermalPrint(String content){
+        if(!meaningfulResult(content)){
+            Toast.makeText(this,
+                    L("Nothing to print yet","अभी print करने के लिए कुछ नहीं है"),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if(!hasThermalBluetoothPermission()){
+            pendingThermalPrintText=content;
+            pendingThermalSetup=false;
+            ensureThermalBluetoothPermission();
+            return;
+        }
+
+        android.bluetooth.BluetoothAdapter adapter=android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+        if(adapter==null){
+            Toast.makeText(this,
+                    L("Bluetooth is not available","Bluetooth उपलब्ध नहीं है"),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if(!adapter.isEnabled()){
+            pendingThermalPrintText=content;
+            new AlertDialog.Builder(this)
+                    .setTitle(L("Bluetooth is OFF","Bluetooth बंद है"))
+                    .setMessage(L(
+                            "Turn on Bluetooth and keep the saved thermal printer ON.",
+                            "Bluetooth चालू करें और saved thermal printer को ON रखें।"))
+                    .setPositiveButton(L("BLUETOOTH SETTINGS","BLUETOOTH SETTINGS"),(d,w)->openBluetoothSettings())
+                    .setNegativeButton(L("CANCEL","रद्द करें"),null)
+                    .show();
+            return;
+        }
+
+        final String address=thermalPrinterAddress();
+        if(address==null || address.trim().isEmpty()){
+            pendingThermalPrintText=content;
+            showThermalPrinterSetup();
+            return;
+        }
+
+        final String printerName=thermalPrinterName();
+        Toast.makeText(this,
+                L("Connecting to ","Printer से connect हो रहा है: ")+
+                        (printerName==null||printerName.isEmpty()?address:printerName),
+                Toast.LENGTH_SHORT).show();
+
+        new Thread(()->{
+            android.bluetooth.BluetoothSocket socket=null;
+            android.graphics.Bitmap bitmap=null;
+            try{
+                android.bluetooth.BluetoothDevice device=adapter.getRemoteDevice(address);
+                socket=openThermalSocket(device);
+                bitmap=renderThermalBitmap(content);
+                java.io.OutputStream out=socket.getOutputStream();
+                sendEscPosBitmap(out,bitmap);
+                try{out.flush();}catch(Exception ignored){}
+
+                runOnUiThread(()->Toast.makeText(
+                        MainActivity.this,
+                        L("Print sent successfully","Print सफलतापूर्वक भेज दिया गया"),
+                        Toast.LENGTH_SHORT).show());
+            }catch(SecurityException e){
+                pendingThermalPrintText=content;
+                runOnUiThread(()->{
+                    pendingThermalSetup=false;
+                    ensureThermalBluetoothPermission();
+                });
+            }catch(Exception e){
+                final String msg=e.getMessage()==null?"":e.getMessage();
+                runOnUiThread(()->new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(L("Printer connection failed","Printer connect नहीं हुआ"))
+                        .setMessage(L(
+                                "Check that the saved 58mm printer is ON and paired. You can change the printer from Thermal Printer Setup.",
+                                "Saved 58mm printer ON और paired है या नहीं जाँचें। Thermal Printer Setup से printer बदल सकते हैं।")
+                                +(msg.isEmpty()?"":"\n\n"+msg))
+                        .setPositiveButton(L("PRINTER SETUP","PRINTER SETUP"),(d,w)->{
+                            pendingThermalPrintText=content;
+                            showThermalPrinterSetup();
+                        })
+                        .setNegativeButton(L("CLOSE","बंद करें"),null)
+                        .show());
+            }finally{
+                if(bitmap!=null) try{bitmap.recycle();}catch(Exception ignored){}
+                if(socket!=null) try{socket.close();}catch(Exception ignored){}
+            }
+        }).start();
+    }
+
     private void print58mmText(String content,String fileName,String jobName,String emptyEn,String emptyHi){
         if(!meaningfulResult(content)){
             Toast.makeText(this,L(emptyEn,emptyHi),Toast.LENGTH_SHORT).show();
             return;
         }
-
-        try{
-            android.print.PrintManager pm=(android.print.PrintManager)getSystemService(Context.PRINT_SERVICE);
-            if(pm==null){
-                Toast.makeText(this,L("Print service is not available","Print service उपलब्ध नहीं है"),Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            final String receipt=content.trim();
-            final String[] receiptLines=receipt.split("\\n",-1);
-            final int pageWidthPt=164;
-            final int lineHeightPt=11;
-
-            int estimatedLines=0;
-            for(String estimateLine:receiptLines){
-                int chars=estimateLine==null?0:estimateLine.length();
-                estimatedLines+=Math.max(1,(chars+23)/24);
-            }
-            final int pageHeightPt=Math.max(240,36+(estimatedLines*lineHeightPt));
-            final int mediaHeightMils=Math.max(3333,Math.round(pageHeightPt*1000f/72f));
-
-            android.print.PrintDocumentAdapter adapter=new android.print.PrintDocumentAdapter(){
-                @Override public void onLayout(android.print.PrintAttributes oldAttributes,
-                                               android.print.PrintAttributes newAttributes,
-                                               android.os.CancellationSignal cancellationSignal,
-                                               LayoutResultCallback callback,
-                                               Bundle extras){
-                    if(cancellationSignal.isCanceled()){
-                        callback.onLayoutCancelled();
-                        return;
-                    }
-                    android.print.PrintDocumentInfo info=new android.print.PrintDocumentInfo.Builder(fileName)
-                            .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
-                            .setPageCount(1)
-                            .build();
-                    callback.onLayoutFinished(info,true);
-                }
-
-                @Override public void onWrite(android.print.PageRange[] pages,
-                                              android.os.ParcelFileDescriptor destination,
-                                              android.os.CancellationSignal cancellationSignal,
-                                              WriteResultCallback callback){
-                    android.graphics.pdf.PdfDocument pdf=new android.graphics.pdf.PdfDocument();
-                    try{
-                        android.graphics.pdf.PdfDocument.PageInfo pageInfo=
-                                new android.graphics.pdf.PdfDocument.PageInfo.Builder(pageWidthPt,pageHeightPt,1).create();
-                        android.graphics.pdf.PdfDocument.Page page=pdf.startPage(pageInfo);
-                        android.graphics.Canvas canvas=page.getCanvas();
-
-                        android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-                        paint.setColor(Color.BLACK);
-                        paint.setTextSize("HINDI".equals(language)?7.2f:7.6f);
-                        paint.setTypeface("HINDI".equals(language)
-                                ?android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)
-                                :android.graphics.Typeface.MONOSPACE);
-
-                        final float left=2.84f;
-                        final float usable=pageWidthPt-5.68f;
-
-                        float size="HINDI".equals(language)?7.5f:7.6f;
-                        paint.setTextSize(size);
-                        float widest=0f;
-                        for(String measureLine:receiptLines){
-                            widest=Math.max(widest,paint.measureText(measureLine));
-                        }
-                        while(widest>usable && size>5.8f){
-                            size-=0.2f;
-                            paint.setTextSize(size);
-                            widest=0f;
-                            for(String measureLine:receiptLines){
-                                widest=Math.max(widest,paint.measureText(measureLine));
-                            }
-                        }
-
-                        float y=14f;
-                        for(String lineText:receiptLines){
-                            if(cancellationSignal.isCanceled()){
-                                pdf.finishPage(page);
-                                callback.onWriteCancelled();
-                                pdf.close();
-                                return;
-                            }
-
-                            String remaining=lineText;
-                            if(remaining.length()==0){
-                                y+=lineHeightPt;
-                                continue;
-                            }
-
-                            while(remaining.length()>0){
-                                int fit=paint.breakText(remaining,true,usable,null);
-                                if(fit<=0) fit=Math.min(1,remaining.length());
-                                String part=remaining.substring(0,fit);
-                                canvas.drawText(part,left,y,paint);
-                                y+=lineHeightPt;
-                                remaining=remaining.substring(fit);
-                            }
-                        }
-
-                        pdf.finishPage(page);
-                        java.io.FileOutputStream out=new java.io.FileOutputStream(destination.getFileDescriptor());
-                        pdf.writeTo(out);
-                        out.close();
-                        callback.onWriteFinished(new android.print.PageRange[]{android.print.PageRange.ALL_PAGES});
-                    }catch(Exception e){
-                        callback.onWriteFailed(e.getMessage());
-                    }finally{
-                        try{pdf.close();}catch(Exception ignored){}
-                    }
-                }
-            };
-
-            android.print.PrintAttributes attrs=new android.print.PrintAttributes.Builder()
-                    .setMediaSize(new android.print.PrintAttributes.MediaSize(
-                            "STS_58MM","58mm Thermal Receipt",2283,mediaHeightMils))
-                    .setMinMargins(android.print.PrintAttributes.Margins.NO_MARGINS)
-                    .setColorMode(android.print.PrintAttributes.COLOR_MODE_MONOCHROME)
-                    .build();
-
-            pm.print(jobName,adapter,attrs);
-        }catch(Exception e){
-            Toast.makeText(this,L("Could not open print screen","Print screen नहीं खुल सकी"),Toast.LENGTH_SHORT).show();
-        }
+        directThermalPrint(content);
     }
 
     private void printQuickBill58mm(String content){
@@ -4886,6 +5158,27 @@ public class MainActivity extends Activity {
                             "Camera permission denied. You can still use GALLERY PICKUP.",
                             "Camera permission नहीं मिली। फिर भी GALLERY PICKUP से photo scan कर सकते हैं।"));
                 }
+            }
+            return;
+        }
+
+        if(requestCode==REQ_THERMAL_BLUETOOTH){
+            if(grantResults.length>0 && grantResults[0]==PackageManager.PERMISSION_GRANTED){
+                if(pendingThermalSetup){
+                    pendingThermalSetup=false;
+                    showThermalPrinterSetup();
+                }else if(pendingThermalPrintText!=null && !pendingThermalPrintText.trim().isEmpty()){
+                    String p=pendingThermalPrintText;
+                    pendingThermalPrintText="";
+                    directThermalPrint(p);
+                }
+            }else{
+                pendingThermalSetup=false;
+                pendingThermalPrintText="";
+                Toast.makeText(this,
+                        L("Nearby devices permission is required for direct thermal printing.",
+                          "Direct thermal printing के लिए Nearby devices permission जरूरी है।"),
+                        Toast.LENGTH_LONG).show();
             }
         }
     }
