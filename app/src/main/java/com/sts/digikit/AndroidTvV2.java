@@ -15,6 +15,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.security.KeyFactory;
 import java.security.KeyPair;
+import java.security.KeyStore;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.Principal;
@@ -54,6 +55,9 @@ public class AndroidTvV2 {
     private static final String ID_PREFS="sts_android_tv_identity_v2";
     private static final String ID_CERT="client_cert_der";
     private static final String ID_KEY="client_key_pkcs8";
+    private static final String ID_MODE="preferred_identity_mode";
+    private static final String MODE_PREFS="PREFS";
+    private static final String MODE_KEYSTORE="KEYSTORE";
     private static final int PAIR_PORT=6467;
     private static final int REMOTE_PORT=6466;
     private static final int REQUESTED_FEATURES=1|2|32|64|512;
@@ -164,19 +168,42 @@ public class AndroidTvV2 {
         return cachedIdentity;
     }
 
-    private SSLContext sslContext() throws Exception{
-        Identity id=identity();
+    private Identity legacyKeyStoreIdentity(){
+        try{
+            KeyStore ks=KeyStore.getInstance("AndroidKeyStore");
+            ks.load(null);
+            if(!ks.containsAlias(KEY_ALIAS)) return null;
+            KeyStore.Entry entry=ks.getEntry(KEY_ALIAS,null);
+            if(!(entry instanceof KeyStore.PrivateKeyEntry)) return null;
+            KeyStore.PrivateKeyEntry pke=(KeyStore.PrivateKeyEntry)entry;
+            if(!(pke.getCertificate() instanceof X509Certificate)) return null;
+            return new Identity(pke.getPrivateKey(),(X509Certificate)pke.getCertificate());
+        }catch(Exception e){
+            Log.w(TAG,"Legacy AndroidKeyStore TV identity unavailable: "+e.getMessage());
+            return null;
+        }
+    }
+
+    private SharedPreferences identityPrefs(){
+        return context.getSharedPreferences(ID_PREFS,Context.MODE_PRIVATE);
+    }
+
+    private void savePreferredIdentityMode(String mode){
+        identityPrefs().edit().putString(ID_MODE,mode).apply();
+    }
+
+    private SSLContext sslContext(Identity id) throws Exception{
         KeyManager km=new SingleKeyManager(KEY_ALIAS,id.key,id.cert);
         SSLContext ctx=SSLContext.getInstance("TLS");
         ctx.init(new KeyManager[]{km},new TrustManager[]{new TrustAll()},new SecureRandom());
         return ctx;
     }
 
-    private SSLSocket openTls(String ip,int port,int timeout) throws Exception{
+    private SSLSocket openTls(String ip,int port,int timeout,Identity id) throws Exception{
         Socket plain=new Socket();
         try{
             plain.connect(new InetSocketAddress(ip,port),timeout);
-            SSLSocketFactory factory=sslContext().getSocketFactory();
+            SSLSocketFactory factory=sslContext(id).getSocketFactory();
             SSLSocket ssl=(SSLSocket)factory.createSocket(plain,ip,port,true);
             ssl.setUseClientMode(true);
             ssl.setSoTimeout(timeout);
@@ -193,6 +220,10 @@ public class AndroidTvV2 {
             try{plain.close();}catch(Exception ignored){}
             throw new java.io.IOException("TLS "+ip+":"+port+" - "+e.getClass().getSimpleName()+": "+e.getMessage(),e);
         }
+    }
+
+    private SSLSocket openTls(String ip,int port,int timeout) throws Exception{
+        return openTls(ip,port,timeout,identity());
     }
 
     private PoloProto.OuterMessage basePolo(){
@@ -334,6 +365,7 @@ public class AndroidTvV2 {
 
         String ip=pairingIp;
         closePairing();
+        savePreferredIdentityMode(MODE_PREFS);
         return connect(ip);
     }
 
@@ -346,9 +378,9 @@ public class AndroidTvV2 {
         pairingIp=null;
     }
 
-    public synchronized boolean connect(String ip) throws Exception{
+    private boolean connectWithIdentity(String ip,Identity id,String mode) throws Exception{
         closeRemote();
-        remoteSocket=openTls(ip,REMOTE_PORT,7000);
+        remoteSocket=openTls(ip,REMOTE_PORT,7000,id);
         remoteSocket.setSoTimeout(0);
         remoteIn=remoteSocket.getInputStream();
         remoteOut=remoteSocket.getOutputStream();
@@ -361,7 +393,56 @@ public class AndroidTvV2 {
         remoteReader.start();
 
         remoteStarted.await(4, TimeUnit.SECONDS);
-        return remoteConnected;
+        boolean ok=remoteConnected;
+        if(ok) savePreferredIdentityMode(mode);
+        else closeRemote();
+        return ok;
+    }
+
+    public synchronized boolean connect(String ip) throws Exception{
+        Identity prefsIdentity=null;
+        Identity legacyIdentity=legacyKeyStoreIdentity();
+        String preferred=identityPrefs().getString(ID_MODE,"");
+        Exception last=null;
+
+        // Old STS DigiKit builds paired Android TV with AndroidKeyStore.
+        // Keep that trusted identity usable forever across normal APK updates.
+        if(MODE_KEYSTORE.equals(preferred) && legacyIdentity!=null){
+            try{
+                if(connectWithIdentity(ip,legacyIdentity,MODE_KEYSTORE)) return true;
+            }catch(Exception e){last=e;}
+        }
+
+        if(!MODE_KEYSTORE.equals(preferred)){
+            // On installations that already contain the legacy alias, try it first
+            // when no explicit preference exists. This restores TVs paired by older builds.
+            if(preferred.isEmpty() && legacyIdentity!=null){
+                try{
+                    if(connectWithIdentity(ip,legacyIdentity,MODE_KEYSTORE)) return true;
+                }catch(Exception e){last=e;}
+            }
+
+            try{
+                prefsIdentity=identity();
+                if(connectWithIdentity(ip,prefsIdentity,MODE_PREFS)) return true;
+            }catch(Exception e){last=e;}
+        }
+
+        if(!MODE_PREFS.equals(preferred)){
+            try{
+                if(prefsIdentity==null) prefsIdentity=identity();
+                if(connectWithIdentity(ip,prefsIdentity,MODE_PREFS)) return true;
+            }catch(Exception e){last=e;}
+        }
+
+        if(legacyIdentity!=null && !MODE_KEYSTORE.equals(preferred)){
+            try{
+                if(connectWithIdentity(ip,legacyIdentity,MODE_KEYSTORE)) return true;
+            }catch(Exception e){last=e;}
+        }
+
+        if(last!=null) throw last;
+        return false;
     }
 
     private void sendRemote(Remotemessage.RemoteMessage msg) throws Exception{
