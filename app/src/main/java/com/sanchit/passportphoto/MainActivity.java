@@ -877,8 +877,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.55\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.55\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.56\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.56\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -908,7 +908,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.55\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.56\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4511,6 +4511,55 @@ public class MainActivity extends Activity {
         out.flush();
     }
 
+    private void sendEscPosBitmapNotepad(java.io.OutputStream out,android.graphics.Bitmap bitmap) throws Exception{
+        final int width=bitmap.getWidth();
+        final int widthBytes=(width+7)/8;
+        // Notepad can be much longer than a bill. Small stripes avoid overflowing
+        // the receive buffer of common 58mm Bluetooth printers.
+        final int stripeHeight=24;
+
+        out.write(new byte[]{0x1B,0x40});
+        out.write(new byte[]{0x1B,0x61,0x00});
+        out.flush();
+        try{Thread.sleep(120);}catch(InterruptedException ignored){}
+
+        for(int startY=0;startY<bitmap.getHeight();startY+=stripeHeight){
+            int h=Math.min(stripeHeight,bitmap.getHeight()-startY);
+            int[] pixels=new int[width*h];
+            bitmap.getPixels(pixels,0,width,0,startY,width,h);
+
+            byte[] data=new byte[widthBytes*h];
+            for(int y=0;y<h;y++){
+                for(int x=0;x<width;x++){
+                    int c=pixels[y*width+x];
+                    int a=Color.alpha(c);
+                    int lum=(Color.red(c)*299+Color.green(c)*587+Color.blue(c)*114)/1000;
+                    if(a>80 && lum<185){
+                        int index=y*widthBytes+(x/8);
+                        data[index]|=(byte)(0x80>>(x&7));
+                    }
+                }
+            }
+
+            byte[] header=new byte[]{
+                    0x1D,0x76,0x30,0x00,
+                    (byte)(widthBytes&0xFF),(byte)((widthBytes>>8)&0xFF),
+                    (byte)(h&0xFF),(byte)((h>>8)&0xFF)
+            };
+
+            byte[] packet=new byte[header.length+data.length];
+            System.arraycopy(header,0,packet,0,header.length);
+            System.arraycopy(data,0,packet,header.length,data.length);
+            out.write(packet);
+            out.flush();
+
+            try{Thread.sleep(95);}catch(InterruptedException ignored){}
+        }
+
+        out.write(new byte[]{0x0A,0x0A,0x0A});
+        out.flush();
+    }
+
     private android.bluetooth.BluetoothSocket openThermalSocket(android.bluetooth.BluetoothDevice device) throws Exception{
         final java.util.UUID spp=java.util.UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
         android.bluetooth.BluetoothSocket socket=null;
@@ -4589,7 +4638,11 @@ public class MainActivity extends Activity {
                 socket=openThermalSocket(device);
                 bitmap=renderThermalBitmap(content);
                 java.io.OutputStream out=socket.getOutputStream();
-                sendEscPosBitmap(out,bitmap);
+                if("NOTEPAD".equals(currentTool)){
+                    sendEscPosBitmapNotepad(out,bitmap);
+                }else{
+                    sendEscPosBitmap(out,bitmap);
+                }
                 try{out.flush();}catch(Exception ignored){}
 
                 runOnUiThread(()->Toast.makeText(
