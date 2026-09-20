@@ -884,8 +884,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.60\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.60\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.61\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.61\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -915,7 +915,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.60\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.61\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -2269,17 +2269,39 @@ public class MainActivity extends Activity {
         Button go=btn(L("GENERATE QR","QR बनाएं"));
         root.addView(go,controlParams(58));
 
-        TextView info=tv(L("Enter text/link and generate QR","Text/Link डालकर QR बनाएं"),15,SOFT);
+        TextView info=tv(L("Enter text/link and generate QR","Text/Link डालकर QR बनाएं"),14,SOFT);
         info.setGravity(Gravity.CENTER);
-        root.addView(info,controlParams(44));
+        info.setBackground(bg(mixColor(SURFACE,PINK,0.025f),10));
+        root.addView(info,controlParams(42));
+
+        FrameLayout qrPreview=new FrameLayout(this);
+        qrPreview.setBackground(contentCardBg());
+
+        TextView previewHint=tv(
+                L("QR PREVIEW","QR PREVIEW"),
+                16,
+                SOFT);
+        previewHint.setGravity(Gravity.CENTER);
+        previewHint.setTypeface(null,1);
+        qrPreview.addView(previewHint,new FrameLayout.LayoutParams(-1,-1));
 
         ImageView img=new ImageView(this);
         img.setAdjustViewBounds(true);
-        img.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        img.setBackground(bg(Color.WHITE,12));
+        img.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        img.setPadding(dp(8),dp(8),dp(8),dp(8));
+        img.setBackground(bg(Color.rgb(244,244,242),10));
+        img.setVisibility(View.GONE);
+
+        int qrCardSize=Math.min(
+                dp(280),
+                getResources().getDisplayMetrics().widthPixels-dp(86));
+        FrameLayout.LayoutParams qrCardParams=
+                new FrameLayout.LayoutParams(qrCardSize,qrCardSize,Gravity.CENTER);
+        qrPreview.addView(img,qrCardParams);
+
         LinearLayout.LayoutParams imageParams=new LinearLayout.LayoutParams(-1,0,1);
         imageParams.setMargins(0,dp(4),0,dp(4));
-        root.addView(img,imageParams);
+        root.addView(qrPreview,imageParams);
 
         LinearLayout actions=new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -2309,8 +2331,11 @@ public class MainActivity extends Activity {
             @Override public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
                 updateMode.run();
                 img.setImageDrawable(null);
+                img.setVisibility(View.GONE);
+                previewHint.setVisibility(View.VISIBLE);
                 shareValue[0]="";
                 historyValue[0]="";
+                lastGeneratedQrBitmap=null;
             }
             @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
         });
@@ -2358,6 +2383,8 @@ public class MainActivity extends Activity {
                 }
                 lastGeneratedQrBitmap=bm;
                 img.setImageBitmap(bm);
+                img.setVisibility(View.VISIBLE);
+                previewHint.setVisibility(View.GONE);
                 shareValue[0]=data;
                 historyValue[0]=hist;
                 savePanelHistory("qr",L("QR GENERATOR","QR जनरेटर"),hist);
