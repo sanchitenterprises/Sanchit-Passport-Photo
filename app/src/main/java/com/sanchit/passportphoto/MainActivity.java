@@ -89,6 +89,16 @@ public class MainActivity extends Activity {
     private final Matrix viewerMatrix=new Matrix();
     private float viewerZoom=1f;
     private float viewerBaseScale=1f;
+    private boolean viewerContinuousMode=false;
+    private FrameLayout viewerViewport;
+    private ListView viewerContinuousList;
+    private TextView viewerModeButton;
+    private android.util.LruCache<Integer,Bitmap> viewerPageCache;
+    private java.util.concurrent.ExecutorService viewerRenderExecutor;
+    private final java.util.Set<Integer> viewerPagesLoading=
+            java.util.Collections.synchronizedSet(new java.util.HashSet<Integer>());
+    private final Object viewerRendererLock=new Object();
+    private int viewerRenderGeneration=0;
     private String pendingViewerExportFormat="PDF";
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private FrameLayout scannerViewport;
@@ -934,8 +944,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.64\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.64\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.65\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.65\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -965,7 +975,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.64\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.65\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3067,13 +3077,31 @@ public class MainActivity extends Activity {
     }
 
     private void closePdfViewerResources(){
-        if(viewerPdfPage!=null){try{viewerPdfPage.close();}catch(Exception ignored){} viewerPdfPage=null;}
-        if(viewerPdfRenderer!=null){try{viewerPdfRenderer.close();}catch(Exception ignored){} viewerPdfRenderer=null;}
-        if(viewerPdfPfd!=null){try{viewerPdfPfd.close();}catch(Exception ignored){} viewerPdfPfd=null;}
+        viewerRenderGeneration++;
+        if(viewerRenderExecutor!=null){
+            try{viewerRenderExecutor.shutdownNow();}catch(Exception ignored){}
+            viewerRenderExecutor=null;
+        }
+        viewerPagesLoading.clear();
+        if(viewerPageCache!=null){
+            try{viewerPageCache.evictAll();}catch(Exception ignored){}
+            viewerPageCache=null;
+        }
+
+        synchronized(viewerRendererLock){
+            if(viewerPdfPage!=null){try{viewerPdfPage.close();}catch(Exception ignored){} viewerPdfPage=null;}
+            if(viewerPdfRenderer!=null){try{viewerPdfRenderer.close();}catch(Exception ignored){} viewerPdfRenderer=null;}
+            if(viewerPdfPfd!=null){try{viewerPdfPfd.close();}catch(Exception ignored){} viewerPdfPfd=null;}
+        }
+
         if(viewerBitmap!=null && !viewerBitmap.isRecycled()){
             try{viewerBitmap.recycle();}catch(Exception ignored){}
         }
         viewerBitmap=null;
+        viewerViewport=null;
+        viewerContinuousList=null;
+        viewerModeButton=null;
+        viewerContinuousMode=false;
     }
 
     private void resetViewerTransform(){
@@ -3149,6 +3177,8 @@ public class MainActivity extends Activity {
         currentTool="PDF_VIEWER";
         viewerPdfUri=uri;
         viewerPageIndex=0;
+        viewerContinuousMode=false;
+        viewerRenderGeneration++;
         try{
             viewerPdfPfd=getContentResolver().openFileDescriptor(uri,"r");
             if(viewerPdfPfd==null) throw new java.io.IOException("PDF unavailable");
@@ -3190,6 +3220,15 @@ public class MainActivity extends Activity {
         titleBox.addView(viewerPageLabel,new LinearLayout.LayoutParams(-1,dp(24)));
         header.addView(titleBox,new LinearLayout.LayoutParams(0,dp(60),1));
 
+        viewerModeButton=tv(L("SCROLL","SCROLL"),12,WHITE);
+        viewerModeButton.setGravity(Gravity.CENTER);
+        viewerModeButton.setTypeface(null,1);
+        viewerModeButton.setPadding(dp(5),0,dp(5),0);
+        viewerModeButton.setBackground(touchBg(mixColor(PANEL2,INDIGO,0.10f),12));
+        LinearLayout.LayoutParams modeParams=new LinearLayout.LayoutParams(dp(72),dp(52));
+        modeParams.setMargins(0,0,dp(6),0);
+        header.addView(viewerModeButton,modeParams);
+
         TextView menu=tv("⋮",32,WHITE);
         menu.setGravity(Gravity.CENTER);
         menu.setPadding(0,0,0,0);
@@ -3197,13 +3236,13 @@ public class MainActivity extends Activity {
         header.addView(menu,new LinearLayout.LayoutParams(dp(52),dp(52)));
         outer.addView(header,new LinearLayout.LayoutParams(-1,dp(80)));
 
-        FrameLayout viewport=new FrameLayout(this);
-        viewport.setBackgroundColor(BG);
+        viewerViewport=new FrameLayout(this);
+        viewerViewport.setBackgroundColor(BG);
         viewerImage=new ImageView(this);
         viewerImage.setScaleType(ImageView.ScaleType.MATRIX);
         viewerImage.setBackgroundColor(BG);
-        viewport.addView(viewerImage,new FrameLayout.LayoutParams(-1,-1));
-        outer.addView(viewport,new LinearLayout.LayoutParams(-1,0,1));
+        viewerViewport.addView(viewerImage,new FrameLayout.LayoutParams(-1,-1));
+        outer.addView(viewerViewport,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(outer);
 
         final float[] downX={0},lastX={0},lastY={0};
@@ -3293,21 +3332,220 @@ public class MainActivity extends Activity {
             return true;
         });
 
+        viewerModeButton.setOnClickListener(v->{
+            haptic();
+            setViewerContinuousMode(!viewerContinuousMode);
+        });
         menu.setOnClickListener(v->showPdfViewerMenu(menu));
         renderViewerPage();
     }
 
-    private void renderViewerPage(){
-        if(viewerPdfRenderer==null || viewerImage==null) return;
-        if(viewerPdfPage!=null){try{viewerPdfPage.close();}catch(Exception ignored){} viewerPdfPage=null;}
-        viewerPdfPage=viewerPdfRenderer.openPage(viewerPageIndex);
 
-        int screen=getResources().getDisplayMetrics().widthPixels;
-        int w=Math.min(1600,Math.max(screen*2,900));
-        int h=Math.max(1,(int)(w*(viewerPdfPage.getHeight()/(double)viewerPdfPage.getWidth())));
-        Bitmap bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
-        Canvas c=new Canvas(bm);c.drawColor(Color.WHITE);
-        viewerPdfPage.render(bm,null,null,android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+    private void setViewerContinuousMode(boolean continuous){
+        if(viewerViewport==null || viewerPdfRenderer==null) return;
+        if(viewerContinuousMode==continuous) return;
+
+        viewerContinuousMode=continuous;
+        viewerRenderGeneration++;
+
+        if(viewerRenderExecutor!=null){
+            try{viewerRenderExecutor.shutdownNow();}catch(Exception ignored){}
+            viewerRenderExecutor=null;
+        }
+        viewerPagesLoading.clear();
+
+        if(continuous){
+            synchronized(viewerRendererLock){
+                if(viewerPdfPage!=null){
+                    try{viewerPdfPage.close();}catch(Exception ignored){}
+                    viewerPdfPage=null;
+                }
+            }
+            if(viewerBitmap!=null && !viewerBitmap.isRecycled()){
+                try{viewerBitmap.recycle();}catch(Exception ignored){}
+            }
+            viewerBitmap=null;
+            viewerImage.setImageDrawable(null);
+            viewerImage.setVisibility(View.GONE);
+
+            showViewerContinuousPages();
+
+            if(viewerModeButton!=null) viewerModeButton.setText(L("PAGE","PAGE"));
+            if(viewerPageLabel!=null){
+                viewerPageLabel.setText(viewerPdfRenderer.getPageCount()+" "
+                        +L("pages • Scroll up/down","pages • ऊपर/नीचे scroll"));
+            }
+        }else{
+            if(viewerContinuousList!=null){
+                viewerViewport.removeView(viewerContinuousList);
+                viewerContinuousList=null;
+            }
+            if(viewerPageCache!=null){
+                viewerPageCache.evictAll();
+                viewerPageCache=null;
+            }
+            viewerImage.setVisibility(View.VISIBLE);
+            if(viewerModeButton!=null) viewerModeButton.setText(L("SCROLL","SCROLL"));
+            renderViewerPage();
+        }
+    }
+
+    private void showViewerContinuousPages(){
+        if(viewerViewport==null || viewerPdfRenderer==null) return;
+
+        if(viewerContinuousList!=null){
+            viewerViewport.removeView(viewerContinuousList);
+        }
+
+        final int generation=viewerRenderGeneration;
+        final int pageCount=viewerPdfRenderer.getPageCount();
+        final int screenWidth=getResources().getDisplayMetrics().widthPixels;
+        final int targetWidth=Math.max(dp(240),screenWidth-dp(16));
+
+        viewerPageCache=new android.util.LruCache<Integer,Bitmap>(24*1024){
+            @Override protected int sizeOf(Integer key,Bitmap value){
+                if(value==null) return 0;
+                return Math.max(1,value.getByteCount()/1024);
+            }
+        };
+        viewerRenderExecutor=java.util.concurrent.Executors.newSingleThreadExecutor();
+
+        viewerContinuousList=new ListView(this);
+        viewerContinuousList.setBackgroundColor(BG);
+        viewerContinuousList.setDividerHeight(dp(8));
+        viewerContinuousList.setDivider(new android.graphics.drawable.ColorDrawable(BG));
+        viewerContinuousList.setPadding(dp(4),dp(4),dp(4),dp(8));
+        viewerContinuousList.setClipToPadding(false);
+        viewerContinuousList.setFastScrollEnabled(pageCount>12);
+        viewerContinuousList.setVerticalScrollBarEnabled(true);
+
+        final BaseAdapter adapter=new BaseAdapter(){
+            @Override public int getCount(){return pageCount;}
+            @Override public Object getItem(int position){return position;}
+            @Override public long getItemId(int position){return position;}
+
+            @Override public View getView(int position,View convertView,ViewGroup parent){
+                LinearLayout card;
+                ImageView image;
+                TextView label;
+
+                if(convertView instanceof LinearLayout){
+                    card=(LinearLayout)convertView;
+                    label=(TextView)card.getChildAt(0);
+                    image=(ImageView)card.getChildAt(1);
+                }else{
+                    card=new LinearLayout(MainActivity.this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(0,0,0,dp(4));
+                    card.setBackgroundColor(BG);
+
+                    label=tv("",12,SOFT);
+                    label.setGravity(Gravity.CENTER);
+                    label.setPadding(dp(8),dp(3),dp(8),dp(3));
+                    card.addView(label,new LinearLayout.LayoutParams(-1,dp(28)));
+
+                    image=new ImageView(MainActivity.this);
+                    image.setAdjustViewBounds(true);
+                    image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    image.setBackgroundColor(Color.WHITE);
+                    card.addView(image,new LinearLayout.LayoutParams(-1,dp(520)));
+                }
+
+                label.setText(L("Page ","पेज ")+(position+1)+" / "+pageCount);
+                image.setTag(position);
+
+                Bitmap cached=viewerPageCache==null?null:viewerPageCache.get(position);
+                if(cached!=null && !cached.isRecycled()){
+                    image.setImageBitmap(cached);
+                    int h=Math.max(dp(180),(int)Math.round(
+                            targetWidth*(cached.getHeight()/(double)cached.getWidth())));
+                    image.setLayoutParams(new LinearLayout.LayoutParams(-1,h));
+                }else{
+                    image.setImageDrawable(null);
+                    image.setLayoutParams(new LinearLayout.LayoutParams(-1,dp(520)));
+                    queueViewerContinuousPage(position,targetWidth,generation,this);
+                }
+                return card;
+            }
+        };
+
+        viewerContinuousList.setAdapter(adapter);
+        viewerViewport.addView(viewerContinuousList,new FrameLayout.LayoutParams(-1,-1));
+    }
+
+    private void queueViewerContinuousPage(
+            final int position,
+            final int targetWidth,
+            final int generation,
+            final BaseAdapter adapter){
+
+        if(viewerRenderExecutor==null
+                || viewerPageCache==null
+                || viewerPageCache.get(position)!=null
+                || !viewerPagesLoading.add(position)) return;
+
+        viewerRenderExecutor.submit(()->{
+            Bitmap rendered=null;
+            try{
+                synchronized(viewerRendererLock){
+                    if(!viewerContinuousMode
+                            || generation!=viewerRenderGeneration
+                            || viewerPdfRenderer==null) return;
+
+                    android.graphics.pdf.PdfRenderer.Page page=viewerPdfRenderer.openPage(position);
+                    try{
+                        int w=Math.min(1000,Math.max(dp(320),targetWidth));
+                        int h=Math.max(1,(int)Math.round(
+                                w*(page.getHeight()/(double)page.getWidth())));
+                        rendered=Bitmap.createBitmap(w,h,Bitmap.Config.RGB_565);
+                        Canvas c=new Canvas(rendered);
+                        c.drawColor(Color.WHITE);
+                        page.render(rendered,null,null,
+                                android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                    }finally{
+                        try{page.close();}catch(Exception ignored){}
+                    }
+                }
+
+                final Bitmap ready=rendered;
+                rendered=null;
+                if(ready!=null){
+                    runOnUiThread(()->{
+                        if(viewerContinuousMode
+                                && generation==viewerRenderGeneration
+                                && viewerPageCache!=null){
+                            viewerPageCache.put(position,ready);
+                            if(adapter!=null) adapter.notifyDataSetChanged();
+                        }else if(!ready.isRecycled()){
+                            ready.recycle();
+                        }
+                    });
+                }
+            }catch(Exception ignored){
+            }finally{
+                viewerPagesLoading.remove(position);
+                if(rendered!=null && !rendered.isRecycled()){
+                    try{rendered.recycle();}catch(Exception ignored){}
+                }
+            }
+        });
+    }
+
+    private void renderViewerPage(){
+        if(viewerContinuousMode || viewerPdfRenderer==null || viewerImage==null) return;
+
+        Bitmap bm;
+        synchronized(viewerRendererLock){
+            if(viewerPdfPage!=null){try{viewerPdfPage.close();}catch(Exception ignored){} viewerPdfPage=null;}
+            viewerPdfPage=viewerPdfRenderer.openPage(viewerPageIndex);
+
+            int screen=getResources().getDisplayMetrics().widthPixels;
+            int w=Math.min(1600,Math.max(screen*2,900));
+            int h=Math.max(1,(int)(w*(viewerPdfPage.getHeight()/(double)viewerPdfPage.getWidth())));
+            bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
+            Canvas c=new Canvas(bm);c.drawColor(Color.WHITE);
+            viewerPdfPage.render(bm,null,null,android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+        }
 
         if(viewerBitmap!=null && viewerBitmap!=bm && !viewerBitmap.isRecycled()){
             try{viewerBitmap.recycle();}catch(Exception ignored){}
