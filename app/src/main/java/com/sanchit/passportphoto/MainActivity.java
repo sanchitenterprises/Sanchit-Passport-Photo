@@ -877,8 +877,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.53\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.53\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.54\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.54\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -908,7 +908,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.53\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.54\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3743,6 +3743,54 @@ public class MainActivity extends Activity {
         });
     }
 
+    private String quickBillInitials(String shopName){
+        String name=shopName==null?"":shopName.trim().toUpperCase(java.util.Locale.US);
+        if(name.isEmpty()) return "ST";
+
+        String cleaned=name.replaceAll("[^A-Z0-9 ]+"," ").replaceAll("\\s+"," ").trim();
+        if(cleaned.isEmpty()) return "ST";
+
+        String[] words=cleaned.split(" ");
+        StringBuilder code=new StringBuilder();
+        if(words.length>1){
+            for(String word:words){
+                if(word.isEmpty()) continue;
+                char c=word.charAt(0);
+                if(Character.isLetterOrDigit(c)) code.append(c);
+                if(code.length()>=4) break;
+            }
+        }else{
+            String word=words[0];
+            for(int i=0;i<word.length() && code.length()<2;i++){
+                char c=word.charAt(i);
+                if(Character.isLetterOrDigit(c)) code.append(c);
+            }
+        }
+        return code.length()==0?"ST":code.toString();
+    }
+
+    private String quickBillCounterKey(String shopName){
+        String normalized=shopName==null?"":shopName.trim().toLowerCase(java.util.Locale.US)
+                .replaceAll("\\s+"," ");
+        if(normalized.isEmpty()) normalized="sts digikit";
+        return "quick_bill_counter_"+Integer.toHexString(normalized.hashCode());
+    }
+
+    private int quickBillNextNumber(String shopName){
+        int last=getSharedPreferences("sts",0).getInt(quickBillCounterKey(shopName),0);
+        return Math.max(1,last+1);
+    }
+
+    private String quickBillNumber(String shopName,int number){
+        return quickBillInitials(shopName)+String.format(java.util.Locale.US,"%02d",Math.max(1,number));
+    }
+
+    private void commitQuickBillNumber(String shopName,int number){
+        getSharedPreferences("sts",0).edit()
+                .putInt(quickBillCounterKey(shopName),Math.max(1,number))
+                .apply();
+    }
+
     private static class QuickBillItem{
         String name;
         double qty;
@@ -4391,9 +4439,9 @@ public class MainActivity extends Activity {
     }
 
     private android.graphics.Bitmap renderThermalBitmap(String content){
-        final int width=384;
-        final int margin=10;
-        final int usable=width-(margin*2);
+        final int width=448; // 56mm printable content at ~203 DPI
+        final int margin=0;
+        final int usable=width;
 
         android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.BLACK);
@@ -4425,6 +4473,8 @@ public class MainActivity extends Activity {
 
         out.write(new byte[]{0x1B,0x40});
         out.write(new byte[]{0x1B,0x61,0x00});
+        // Approx. 1mm left margin at 203 DPI; 448-dot raster = about 56mm.
+        out.write(new byte[]{0x1D,0x4C,0x08,0x00});
 
         for(int startY=0;startY<bitmap.getHeight();startY+=stripeHeight){
             int h=Math.min(stripeHeight,bitmap.getHeight()-startY);
@@ -4601,12 +4651,14 @@ public class MainActivity extends Activity {
         currentTool="BILL";
         shell(L("QUICK BILL","क्विक बिल"));
 
-        final String billNo="QB"+new java.text.SimpleDateFormat("ddHHmmss",java.util.Locale.US).format(new java.util.Date());
         final String billDate=new java.text.SimpleDateFormat("dd/MM/yyyy, hh:mm a",java.util.Locale.getDefault()).format(new java.util.Date());
         final java.util.ArrayList<QuickBillItem> billItems=new java.util.ArrayList<>();
 
         android.content.SharedPreferences qbPrefs=getSharedPreferences("sts",0);
         final String[] shopCompanyName={qbPrefs.getString("quick_bill_default_shop_name","")};
+        final int[] billSequence={quickBillNextNumber(shopCompanyName[0])};
+        final String[] billNo={quickBillNumber(shopCompanyName[0],billSequence[0])};
+        final boolean[] billNumberCommitted={false};
 
         EditText customer=input(L("Customer Name","ग्राहक का नाम"));
         customer.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
@@ -4682,7 +4734,7 @@ public class MainActivity extends Activity {
         root.addView(print,controlParams(60));
 
         Runnable updateBill=()->out.setText(
-                buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo,billDate));
+                buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate));
 
         customerMenu.setOnClickListener(v->{
             android.widget.PopupMenu menu=new android.widget.PopupMenu(this,customerMenu);
@@ -4705,6 +4757,10 @@ public class MainActivity extends Activity {
                             String value=defaultName.getText().toString().trim();
                             qbPrefs.edit().putString("quick_bill_default_shop_name",value).apply();
                             shopCompanyName[0]=value;
+                            if(!billNumberCommitted[0]){
+                                billSequence[0]=quickBillNextNumber(value);
+                                billNo[0]=quickBillNumber(value,billSequence[0]);
+                            }
                             updateBill.run();
                         })
                         .show();
@@ -4743,9 +4799,13 @@ public class MainActivity extends Activity {
         });
 
         print.setOnClickListener(v->{
-            String bill=buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo,billDate);
+            String bill=buildQuickBillPreview(shopCompanyName[0],customer,billItems,name,qty,rate,gst,billNo[0],billDate);
             out.setText(bill);
             if(meaningfulResult(bill)){
+                if(!billNumberCommitted[0]){
+                    commitQuickBillNumber(shopCompanyName[0],billSequence[0]);
+                    billNumberCommitted[0]=true;
+                }
                 savePanelHistory("bill",L("QUICK BILL","क्विक बिल"),bill);
                 printQuickBill58mm(bill);
             }
