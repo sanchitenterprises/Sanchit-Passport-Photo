@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
     private AndroidTvV2 androidTvV2;
     private ScrollView activeInputScroll;
     private String pendingThermalPrintText="";
+    private String pendingThermalPrintMode="GENERIC";
     private boolean pendingThermalSetup=false;
     private FrameLayout globalContentRoot;
     private int safeInsetLeft=0,safeInsetTop=0,safeInsetRight=0,safeInsetBottom=0;
@@ -1112,8 +1113,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.71\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.71\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.72\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.72\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1143,7 +1144,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.71\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.72\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -6297,8 +6298,10 @@ public class MainActivity extends Activity {
                 showThermalPrinterSetup();
             }else if(pendingThermalPrintText!=null && !pendingThermalPrintText.trim().isEmpty()){
                 String p=pendingThermalPrintText;
+                String mode=pendingThermalPrintMode;
                 pendingThermalPrintText="";
-                directThermalPrint(p);
+                pendingThermalPrintMode="GENERIC";
+                directThermalPrint(p,mode);
             }
             return;
         }
@@ -6311,6 +6314,7 @@ public class MainActivity extends Activity {
             }catch(Exception e){
                 pendingThermalSetup=false;
                 pendingThermalPrintText="";
+                pendingThermalPrintMode="GENERIC";
                 Toast.makeText(this,
                         L("Bluetooth permission could not be requested","Bluetooth permission request नहीं हो सकी"),
                         Toast.LENGTH_SHORT).show();
@@ -6431,8 +6435,10 @@ public class MainActivity extends Activity {
 
                 if(pendingThermalPrintText!=null && !pendingThermalPrintText.trim().isEmpty()){
                     String pending=pendingThermalPrintText;
+                    String mode=pendingThermalPrintMode;
                     pendingThermalPrintText="";
-                    directThermalPrint(pending);
+                    pendingThermalPrintMode="GENERIC";
+                    directThermalPrint(pending,mode);
                 }
             });
 
@@ -6453,7 +6459,7 @@ public class MainActivity extends Activity {
                         "English: OK\n"+
                         "हिंदी: प्रिंटर परीक्षण सफल\n"+
                         new java.text.SimpleDateFormat("dd/MM/yyyy hh:mm a",java.util.Locale.getDefault())
-                                .format(new java.util.Date()));
+                                .format(new java.util.Date()),"TEST");
             });
 
             dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->openBluetoothSettings());
@@ -6520,58 +6526,24 @@ public class MainActivity extends Activity {
         return bitmap;
     }
 
-    private void sendEscPosBitmap(java.io.OutputStream out,android.graphics.Bitmap bitmap) throws Exception{
+    private void sendEscPosBitmapSafe(
+            java.io.OutputStream out,
+            android.graphics.Bitmap bitmap,
+            String mode) throws Exception{
+
         final int width=bitmap.getWidth();
         final int widthBytes=(width+7)/8;
-        final int stripeHeight=192;
 
-        out.write(new byte[]{0x1B,0x40});
-        out.write(new byte[]{0x1B,0x61,0x00});
+        // 384-dot raster stays unchanged. Small stripes and paced writes protect
+        // common 58mm Bluetooth printer receive buffers from overflow/corruption.
+        final int stripeHeight=16;
+        final int chunkSize=256;
+        final int stripeDelayMs="NOTEPAD".equals(mode)?105:80;
 
-        for(int startY=0;startY<bitmap.getHeight();startY+=stripeHeight){
-            int h=Math.min(stripeHeight,bitmap.getHeight()-startY);
-            int[] pixels=new int[width*h];
-            bitmap.getPixels(pixels,0,width,0,startY,width,h);
-
-            byte[] data=new byte[widthBytes*h];
-            for(int y=0;y<h;y++){
-                for(int x=0;x<width;x++){
-                    int c=pixels[y*width+x];
-                    int a=Color.alpha(c);
-                    int lum=(Color.red(c)*299+Color.green(c)*587+Color.blue(c)*114)/1000;
-                    if(a>80 && lum<185){
-                        int index=y*widthBytes+(x/8);
-                        data[index]|=(byte)(0x80>>(x&7));
-                    }
-                }
-            }
-
-            byte[] header=new byte[]{
-                    0x1D,0x76,0x30,0x00,
-                    (byte)(widthBytes&0xFF),(byte)((widthBytes>>8)&0xFF),
-                    (byte)(h&0xFF),(byte)((h>>8)&0xFF)
-            };
-            out.write(header);
-            out.write(data);
-            out.flush();
-            try{Thread.sleep(35);}catch(InterruptedException ignored){}
-        }
-
-        out.write(new byte[]{0x0A,0x0A,0x0A});
+        out.write(new byte[]{0x1B,0x40});          // ESC @ reset
+        out.write(new byte[]{0x1B,0x61,0x00});     // left align
         out.flush();
-    }
-
-    private void sendEscPosBitmapNotepad(java.io.OutputStream out,android.graphics.Bitmap bitmap) throws Exception{
-        final int width=bitmap.getWidth();
-        final int widthBytes=(width+7)/8;
-        // Notepad can be much longer than a bill. Small stripes avoid overflowing
-        // the receive buffer of common 58mm Bluetooth printers.
-        final int stripeHeight=24;
-
-        out.write(new byte[]{0x1B,0x40});
-        out.write(new byte[]{0x1B,0x61,0x00});
-        out.flush();
-        try{Thread.sleep(120);}catch(InterruptedException ignored){}
+        try{Thread.sleep(160);}catch(InterruptedException ignored){}
 
         for(int startY=0;startY<bitmap.getHeight();startY+=stripeHeight){
             int h=Math.min(stripeHeight,bitmap.getHeight()-startY);
@@ -6600,14 +6572,22 @@ public class MainActivity extends Activity {
             byte[] packet=new byte[header.length+data.length];
             System.arraycopy(header,0,packet,0,header.length);
             System.arraycopy(data,0,packet,header.length,data.length);
-            out.write(packet);
-            out.flush();
 
-            try{Thread.sleep(95);}catch(InterruptedException ignored){}
+            for(int offset=0;offset<packet.length;offset+=chunkSize){
+                int len=Math.min(chunkSize,packet.length-offset);
+                out.write(packet,offset,len);
+                out.flush();
+                if(offset+len<packet.length){
+                    try{Thread.sleep(8);}catch(InterruptedException ignored){}
+                }
+            }
+
+            try{Thread.sleep(stripeDelayMs);}catch(InterruptedException ignored){}
         }
 
         out.write(new byte[]{0x0A,0x0A,0x0A});
         out.flush();
+        try{Thread.sleep(220);}catch(InterruptedException ignored){}
     }
 
     private android.bluetooth.BluetoothSocket openThermalSocket(android.bluetooth.BluetoothDevice device) throws Exception{
@@ -6632,7 +6612,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void directThermalPrint(String content){
+    private void directThermalPrint(String content,String printMode){
         if(!meaningfulResult(content)){
             Toast.makeText(this,
                     L("Nothing to print yet","अभी print करने के लिए कुछ नहीं है"),
@@ -6642,6 +6622,7 @@ public class MainActivity extends Activity {
 
         if(!hasThermalBluetoothPermission()){
             pendingThermalPrintText=content;
+            pendingThermalPrintMode=printMode;
             pendingThermalSetup=false;
             ensureThermalBluetoothPermission();
             return;
@@ -6656,6 +6637,7 @@ public class MainActivity extends Activity {
         }
         if(!adapter.isEnabled()){
             pendingThermalPrintText=content;
+            pendingThermalPrintMode=printMode;
             new AlertDialog.Builder(this)
                     .setTitle(L("Bluetooth is OFF","Bluetooth बंद है"))
                     .setMessage(L(
@@ -6670,6 +6652,7 @@ public class MainActivity extends Activity {
         final String address=thermalPrinterAddress();
         if(address==null || address.trim().isEmpty()){
             pendingThermalPrintText=content;
+            pendingThermalPrintMode=printMode;
             showThermalPrinterSetup();
             return;
         }
@@ -6688,11 +6671,7 @@ public class MainActivity extends Activity {
                 socket=openThermalSocket(device);
                 bitmap=renderThermalBitmap(content);
                 java.io.OutputStream out=socket.getOutputStream();
-                if("NOTEPAD".equals(currentTool)){
-                    sendEscPosBitmapNotepad(out,bitmap);
-                }else{
-                    sendEscPosBitmap(out,bitmap);
-                }
+                sendEscPosBitmapSafe(out,bitmap,printMode);
                 try{out.flush();}catch(Exception ignored){}
 
                 runOnUiThread(()->Toast.makeText(
@@ -6701,6 +6680,7 @@ public class MainActivity extends Activity {
                         Toast.LENGTH_SHORT).show());
             }catch(SecurityException e){
                 pendingThermalPrintText=content;
+                pendingThermalPrintMode=printMode;
                 runOnUiThread(()->{
                     pendingThermalSetup=false;
                     ensureThermalBluetoothPermission();
@@ -6715,6 +6695,7 @@ public class MainActivity extends Activity {
                                 +(msg.isEmpty()?"":"\n\n"+msg))
                         .setPositiveButton(L("PRINTER SETUP","PRINTER SETUP"),(d,w)->{
                             pendingThermalPrintText=content;
+                            pendingThermalPrintMode=printMode;
                             showThermalPrinterSetup();
                         })
                         .setNegativeButton(L("CLOSE","बंद करें"),null)
@@ -6726,12 +6707,12 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void print58mmText(String content,String fileName,String jobName,String emptyEn,String emptyHi){
+    private void print58mmText(String content,String fileName,String jobName,String emptyEn,String emptyHi,String printMode){
         if(!meaningfulResult(content)){
             Toast.makeText(this,L(emptyEn,emptyHi),Toast.LENGTH_SHORT).show();
             return;
         }
-        directThermalPrint(content);
+        directThermalPrint(content,printMode);
     }
 
     private void printQuickBill58mm(String content){
@@ -6740,7 +6721,8 @@ public class MainActivity extends Activity {
                 "STS-DigiKit-Bill.pdf",
                 L("STS DigiKit Bill","STS DigiKit बिल"),
                 "Nothing to print yet",
-                "अभी print करने के लिए bill नहीं है");
+                "अभी print करने के लिए bill नहीं है",
+                "BILL");
     }
 
     private void printNotepad58mm(String content){
@@ -6749,7 +6731,8 @@ public class MainActivity extends Activity {
                 "STS-DigiKit-Notepad.pdf",
                 L("STS DigiKit Notepad","STS DigiKit नोटपैड"),
                 "Nothing to print yet",
-                "अभी print करने के लिए note नहीं है");
+                "अभी print करने के लिए note नहीं है",
+                "NOTEPAD");
     }
 
     private void printCashSummary58mm(String content){
@@ -6758,7 +6741,8 @@ public class MainActivity extends Activity {
                 "STS-DigiKit-Cash-Counter.pdf",
                 L("STS DigiKit Cash Counter","STS DigiKit कैश काउंटर"),
                 "Nothing to print yet",
-                "अभी print करने के लिए cash summary नहीं है");
+                "अभी print करने के लिए cash summary नहीं है",
+                "CASH");
     }
 
     private void showQuickBill(){
@@ -7419,12 +7403,15 @@ public class MainActivity extends Activity {
                     showThermalPrinterSetup();
                 }else if(pendingThermalPrintText!=null && !pendingThermalPrintText.trim().isEmpty()){
                     String p=pendingThermalPrintText;
+                    String mode=pendingThermalPrintMode;
                     pendingThermalPrintText="";
-                    directThermalPrint(p);
+                    pendingThermalPrintMode="GENERIC";
+                    directThermalPrint(p,mode);
                 }
             }else{
                 pendingThermalSetup=false;
                 pendingThermalPrintText="";
+                pendingThermalPrintMode="GENERIC";
                 Toast.makeText(this,
                         L("Nearby devices permission is required for direct thermal printing.",
                           "Direct thermal printing के लिए Nearby devices permission जरूरी है।"),
