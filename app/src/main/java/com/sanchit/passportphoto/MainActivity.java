@@ -877,8 +877,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.54\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.54\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.55\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.55\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -908,7 +908,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.54\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.55\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -4439,9 +4439,13 @@ public class MainActivity extends Activity {
     }
 
     private android.graphics.Bitmap renderThermalBitmap(String content){
-        final int width=448; // 56mm printable content at ~203 DPI
-        final int margin=0;
-        final int usable=width;
+        // Keep the proven 384-dot raster width used by this 58mm printer.
+        // Only shift the content slightly right to balance the visible paper margins.
+        final int width=384;
+        final int leftPad=18;
+        final int rightPad=2;
+        final int topMargin=10;
+        final int usable=width-leftPad-rightPad;
 
         android.graphics.Paint paint=new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
         paint.setColor(Color.BLACK);
@@ -4451,16 +4455,16 @@ public class MainActivity extends Activity {
         java.util.ArrayList<String> lines=thermalWrapLines(content,paint,usable);
         android.graphics.Paint.FontMetrics fm=paint.getFontMetrics();
         int lineHeight=Math.max(28,(int)Math.ceil(fm.descent-fm.ascent)+4);
-        int height=Math.max(80,margin*2+(lines.size()*lineHeight)+18);
+        int height=Math.max(80,topMargin*2+(lines.size()*lineHeight)+18);
 
         android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(
                 width,height,android.graphics.Bitmap.Config.ARGB_8888);
         android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
         canvas.drawColor(Color.WHITE);
 
-        float y=margin-fm.ascent;
+        float y=topMargin-fm.ascent;
         for(String line:lines){
-            canvas.drawText(line,margin,y,paint);
+            canvas.drawText(line,leftPad,y,paint);
             y+=lineHeight;
         }
         return bitmap;
@@ -4473,8 +4477,6 @@ public class MainActivity extends Activity {
 
         out.write(new byte[]{0x1B,0x40});
         out.write(new byte[]{0x1B,0x61,0x00});
-        // Approx. 1mm left margin at 203 DPI; 448-dot raster = about 56mm.
-        out.write(new byte[]{0x1D,0x4C,0x08,0x00});
 
         for(int startY=0;startY<bitmap.getHeight();startY+=stripeHeight){
             int h=Math.min(stripeHeight,bitmap.getHeight()-startY);
