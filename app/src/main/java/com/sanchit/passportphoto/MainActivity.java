@@ -85,7 +85,10 @@ public class MainActivity extends Activity {
     private int viewerPageIndex=0;
     private ImageView viewerImage;
     private TextView viewerPageLabel;
+    private Bitmap viewerBitmap;
+    private final Matrix viewerMatrix=new Matrix();
     private float viewerZoom=1f;
+    private float viewerBaseScale=1f;
     private String pendingViewerExportFormat="PDF";
     private com.journeyapps.barcodescanner.DecoratedBarcodeView embeddedScanner;
     private FrameLayout scannerViewport;
@@ -931,8 +934,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.63\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.63\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.64\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.64\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -962,7 +965,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.63\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.64\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3067,6 +3070,78 @@ public class MainActivity extends Activity {
         if(viewerPdfPage!=null){try{viewerPdfPage.close();}catch(Exception ignored){} viewerPdfPage=null;}
         if(viewerPdfRenderer!=null){try{viewerPdfRenderer.close();}catch(Exception ignored){} viewerPdfRenderer=null;}
         if(viewerPdfPfd!=null){try{viewerPdfPfd.close();}catch(Exception ignored){} viewerPdfPfd=null;}
+        if(viewerBitmap!=null && !viewerBitmap.isRecycled()){
+            try{viewerBitmap.recycle();}catch(Exception ignored){}
+        }
+        viewerBitmap=null;
+    }
+
+    private void resetViewerTransform(){
+        if(viewerImage==null || viewerBitmap==null || viewerBitmap.isRecycled()) return;
+        viewerImage.post(()->{
+            if(viewerImage==null || viewerBitmap==null || viewerBitmap.isRecycled()) return;
+            int vw=viewerImage.getWidth();
+            int vh=viewerImage.getHeight();
+            if(vw<=0 || vh<=0) return;
+
+            viewerBaseScale=Math.min(
+                    vw/(float)viewerBitmap.getWidth(),
+                    vh/(float)viewerBitmap.getHeight());
+            if(viewerBaseScale<=0f) viewerBaseScale=1f;
+
+            float dw=viewerBitmap.getWidth()*viewerBaseScale;
+            float dh=viewerBitmap.getHeight()*viewerBaseScale;
+            float dx=(vw-dw)/2f;
+            float dy=(vh-dh)/2f;
+
+            viewerMatrix.reset();
+            viewerMatrix.setScale(viewerBaseScale,viewerBaseScale);
+            viewerMatrix.postTranslate(dx,dy);
+            viewerZoom=1f;
+            viewerImage.setImageMatrix(viewerMatrix);
+        });
+    }
+
+    private void constrainViewerMatrix(){
+        if(viewerImage==null || viewerBitmap==null || viewerBitmap.isRecycled()) return;
+        int vw=viewerImage.getWidth();
+        int vh=viewerImage.getHeight();
+        if(vw<=0 || vh<=0) return;
+
+        RectF rect=new RectF(0,0,viewerBitmap.getWidth(),viewerBitmap.getHeight());
+        viewerMatrix.mapRect(rect);
+
+        float dx=0f,dy=0f;
+        if(rect.width()<=vw){
+            dx=vw/2f-rect.centerX();
+        }else{
+            if(rect.left>0) dx=-rect.left;
+            else if(rect.right<vw) dx=vw-rect.right;
+        }
+
+        if(rect.height()<=vh){
+            dy=vh/2f-rect.centerY();
+        }else{
+            if(rect.top>0) dy=-rect.top;
+            else if(rect.bottom<vh) dy=vh-rect.bottom;
+        }
+
+        if(dx!=0f || dy!=0f) viewerMatrix.postTranslate(dx,dy);
+    }
+
+    private void viewerScaleAround(float factor,float focusX,float focusY){
+        if(viewerImage==null || viewerBitmap==null || viewerBitmap.isRecycled()) return;
+        float target=viewerZoom*factor;
+        if(target<1f) factor=1f/viewerZoom;
+        else if(target>5f) factor=5f/viewerZoom;
+
+        if(Math.abs(factor-1f)<0.0001f) return;
+        viewerMatrix.postScale(factor,factor,focusX,focusY);
+        viewerZoom=Math.max(1f,Math.min(5f,viewerZoom*factor));
+        constrainViewerMatrix();
+        viewerImage.setImageMatrix(viewerMatrix);
+
+        if(viewerZoom<=1.01f) resetViewerTransform();
     }
 
     private void showPdfViewer(Uri uri){
@@ -3125,43 +3200,80 @@ public class MainActivity extends Activity {
         FrameLayout viewport=new FrameLayout(this);
         viewport.setBackgroundColor(BG);
         viewerImage=new ImageView(this);
-        viewerImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        viewerImage.setScaleType(ImageView.ScaleType.MATRIX);
         viewerImage.setBackgroundColor(BG);
         viewport.addView(viewerImage,new FrameLayout.LayoutParams(-1,-1));
         outer.addView(viewport,new LinearLayout.LayoutParams(-1,0,1));
         setContentView(outer);
 
         final float[] downX={0},lastX={0},lastY={0};
-        final android.view.ScaleGestureDetector scaleDetector=new android.view.ScaleGestureDetector(
-                this,new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener(){
-                    @Override public boolean onScale(android.view.ScaleGestureDetector detector){
-                        viewerZoom=Math.max(1f,Math.min(4f,viewerZoom*detector.getScaleFactor()));
-                        viewerImage.setScaleX(viewerZoom);
-                        viewerImage.setScaleY(viewerZoom);
-                        if(viewerZoom<=1.02f){
-                            viewerZoom=1f;
-                            viewerImage.setTranslationX(0);
-                            viewerImage.setTranslationY(0);
+        final boolean[] moved={false};
+
+        final android.view.GestureDetector tapDetector=new android.view.GestureDetector(
+                this,new android.view.GestureDetector.SimpleOnGestureListener(){
+                    @Override public boolean onDown(MotionEvent e){return true;}
+
+                    @Override public boolean onDoubleTap(MotionEvent e){
+                        if(viewerZoom<1.75f){
+                            viewerScaleAround(2f/viewerZoom,e.getX(),e.getY());
+                        }else{
+                            resetViewerTransform();
                         }
                         return true;
                     }
                 });
 
+        final android.view.ScaleGestureDetector scaleDetector=new android.view.ScaleGestureDetector(
+                this,new android.view.ScaleGestureDetector.SimpleOnScaleGestureListener(){
+                    @Override public boolean onScaleBegin(android.view.ScaleGestureDetector detector){
+                        return true;
+                    }
+
+                    @Override public boolean onScale(android.view.ScaleGestureDetector detector){
+                        viewerScaleAround(
+                                detector.getScaleFactor(),
+                                detector.getFocusX(),
+                                detector.getFocusY());
+                        return true;
+                    }
+
+                    @Override public void onScaleEnd(android.view.ScaleGestureDetector detector){
+                        constrainViewerMatrix();
+                        if(viewerImage!=null) viewerImage.setImageMatrix(viewerMatrix);
+                    }
+                });
+
         viewerImage.setOnTouchListener((v,event)->{
+            tapDetector.onTouchEvent(event);
             scaleDetector.onTouchEvent(event);
+
             switch(event.getActionMasked()){
                 case MotionEvent.ACTION_DOWN:
-                    downX[0]=event.getX();lastX[0]=event.getX();lastY[0]=event.getY();return true;
+                    downX[0]=event.getX();
+                    lastX[0]=event.getX();
+                    lastY[0]=event.getY();
+                    moved[0]=false;
+                    return true;
+
                 case MotionEvent.ACTION_MOVE:
-                    if(viewerZoom>1.02f && event.getPointerCount()==1){
-                        float dx=event.getX()-lastX[0],dy=event.getY()-lastY[0];
-                        viewerImage.setTranslationX(viewerImage.getTranslationX()+dx);
-                        viewerImage.setTranslationY(viewerImage.getTranslationY()+dy);
-                        lastX[0]=event.getX();lastY[0]=event.getY();
+                    if(!scaleDetector.isInProgress()
+                            && viewerZoom>1.01f
+                            && event.getPointerCount()==1){
+                        float dx=event.getX()-lastX[0];
+                        float dy=event.getY()-lastY[0];
+                        if(Math.abs(dx)>1f || Math.abs(dy)>1f) moved[0]=true;
+
+                        viewerMatrix.postTranslate(dx,dy);
+                        constrainViewerMatrix();
+                        viewerImage.setImageMatrix(viewerMatrix);
+
+                        lastX[0]=event.getX();
+                        lastY[0]=event.getY();
                     }
                     return true;
+
                 case MotionEvent.ACTION_UP:
-                    if(viewerZoom<=1.02f){
+                    if(!scaleDetector.isInProgress() && viewerZoom<=1.01f){
                         float dx=event.getX()-downX[0];
                         if(Math.abs(dx)>dp(80)){
                             if(dx<0 && viewerPageIndex<viewerPdfRenderer.getPageCount()-1){
@@ -3173,6 +3285,9 @@ public class MainActivity extends Activity {
                             }
                         }
                     }
+                    return true;
+
+                case MotionEvent.ACTION_CANCEL:
                     return true;
             }
             return true;
@@ -3193,13 +3308,16 @@ public class MainActivity extends Activity {
         Bitmap bm=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);
         Canvas c=new Canvas(bm);c.drawColor(Color.WHITE);
         viewerPdfPage.render(bm,null,null,android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
-        viewerImage.setImageBitmap(bm);
-        viewerZoom=1f;
-        viewerImage.setScaleX(1f);viewerImage.setScaleY(1f);
-        viewerImage.setTranslationX(0);viewerImage.setTranslationY(0);
+
+        if(viewerBitmap!=null && viewerBitmap!=bm && !viewerBitmap.isRecycled()){
+            try{viewerBitmap.recycle();}catch(Exception ignored){}
+        }
+        viewerBitmap=bm;
+        viewerImage.setImageBitmap(viewerBitmap);
+        resetViewerTransform();
         if(viewerPageLabel!=null){
             viewerPageLabel.setText(L("Page ","पेज ")+(viewerPageIndex+1)+" / "+viewerPdfRenderer.getPageCount()
-                    +"  •  "+L("Swipe pages • Pinch to zoom","Swipe pages • Pinch zoom"));
+                    +"  •  "+L("Swipe • Pinch zoom • Double-tap","Swipe • Pinch zoom • Double-tap"));
         }
     }
 
