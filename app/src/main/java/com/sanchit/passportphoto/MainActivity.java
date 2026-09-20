@@ -3327,6 +3327,9 @@ public class MainActivity extends Activity {
         private float pageBaseScale=1f;
         private float lastX=0f,lastY=0f;
         private float downX=0f,downY=0f;
+        private boolean manualPinchActive=false;
+        private float lastPinchDistance=0f;
+        private float lastPinchFocusX=0f,lastPinchFocusY=0f;
         private boolean horizontalPageSwipeEnabled=false;
         private Runnable previousPageAction;
         private Runnable nextPageAction;
@@ -3383,19 +3386,17 @@ public class MainActivity extends Activity {
             setOnTouchListener((v,event)->{
                 final int action=event.getActionMasked();
 
-                // Lock the entire touch chain to this page as soon as a
-                // second finger lands. This prevents ListView/page parents
-                // from stealing ACTION_MOVE events during pinch zoom.
-                if(action==MotionEvent.ACTION_POINTER_DOWN || event.getPointerCount()>=2){
-                    android.view.ViewParent p=getParent();
-                    while(p!=null){
-                        p.requestDisallowInterceptTouchEvent(true);
-                        p=p.getParent();
-                    }
+                // Keep the gesture inside this page whenever two fingers are present.
+                if(event.getPointerCount()>=2
+                        || action==MotionEvent.ACTION_POINTER_DOWN
+                        || manualPinchActive){
+                    lockAllParents(true);
                 }
 
-                pageTapDetector.onTouchEvent(event);
-                pageScaleDetector.onTouchEvent(event);
+                // Double-tap still uses the same matrix zoom engine.
+                if(event.getPointerCount()==1 && !manualPinchActive){
+                    pageTapDetector.onTouchEvent(event);
+                }
 
                 switch(action){
                     case MotionEvent.ACTION_DOWN:
@@ -3403,26 +3404,49 @@ public class MainActivity extends Activity {
                         downY=event.getY();
                         lastX=event.getX();
                         lastY=event.getY();
-                        if(pageZoom>1.01f){
-                            android.view.ViewParent p=getParent();
-                            while(p!=null){
-                                p.requestDisallowInterceptTouchEvent(true);
-                                p=p.getParent();
-                            }
+                        manualPinchActive=false;
+                        lastPinchDistance=0f;
+                        if(horizontalPageSwipeEnabled || pageZoom>1.01f){
+                            lockAllParents(true);
                         }
                         return true;
 
                     case MotionEvent.ACTION_POINTER_DOWN:
+                        if(event.getPointerCount()>=2){
+                            manualPinchActive=true;
+                            lastPinchDistance=pinchDistance(event);
+                            lastPinchFocusX=pinchFocusX(event);
+                            lastPinchFocusY=pinchFocusY(event);
+                            lockAllParents(true);
+                        }
                         return true;
 
                     case MotionEvent.ACTION_MOVE:
-                        // Never release interception while pinch is active.
-                        if(pageScaleDetector.isInProgress() || event.getPointerCount()>=2){
-                            android.view.ViewParent p=getParent();
-                            while(p!=null){
-                                p.requestDisallowInterceptTouchEvent(true);
-                                p=p.getParent();
+                        if(event.getPointerCount()>=2){
+                            float distance=pinchDistance(event);
+                            float fx=pinchFocusX(event);
+                            float fy=pinchFocusY(event);
+
+                            if(!manualPinchActive){
+                                manualPinchActive=true;
+                                lastPinchDistance=distance;
+                                lastPinchFocusX=fx;
+                                lastPinchFocusY=fy;
+                            }else if(lastPinchDistance>4f && distance>4f){
+                                float factor=distance/lastPinchDistance;
+                                if(factor>0.75f && factor<1.35f){
+                                    scaleAround(factor,fx,fy);
+                                }
+                                lastPinchDistance=distance;
+                                lastPinchFocusX=fx;
+                                lastPinchFocusY=fy;
                             }
+                            lockAllParents(true);
+                            return true;
+                        }
+
+                        if(manualPinchActive){
+                            lockAllParents(true);
                             return true;
                         }
 
@@ -3434,31 +3458,31 @@ public class MainActivity extends Activity {
                             setImageMatrix(pageMatrix);
                             lastX=event.getX();
                             lastY=event.getY();
-
-                            android.view.ViewParent p=getParent();
-                            while(p!=null){
-                                p.requestDisallowInterceptTouchEvent(true);
-                                p=p.getParent();
-                            }
+                            lockAllParents(true);
                             return true;
                         }
 
-                        if(pageZoom<=1.01f){
-                            android.view.ViewParent p=getParent();
-                            if(p!=null) p.requestDisallowInterceptTouchEvent(false);
+                        // Continuous mode needs parent scrolling at base zoom.
+                        if(!horizontalPageSwipeEnabled && pageZoom<=1.01f){
+                            lockAllParents(false);
                         }
                         return true;
 
                     case MotionEvent.ACTION_POINTER_UP:
-                        // Keep gesture locked until the scale detector fully ends.
-                        if(pageScaleDetector.isInProgress()){
-                            android.view.ViewParent p=getParent();
-                            if(p!=null) p.requestDisallowInterceptTouchEvent(true);
+                        if(manualPinchActive){
+                            constrainMatrix();
+                            setImageMatrix(pageMatrix);
+                            // Stay locked until the final finger lifts so no jump occurs.
+                            lockAllParents(true);
                         }
                         return true;
 
                     case MotionEvent.ACTION_UP:
-                        if(!pageScaleDetector.isInProgress()
+                        boolean wasPinching=manualPinchActive;
+                        manualPinchActive=false;
+                        lastPinchDistance=0f;
+
+                        if(!wasPinching
                                 && pageZoom<=1.01f
                                 && horizontalPageSwipeEnabled){
                             float dx=event.getX()-downX;
@@ -3472,17 +3496,41 @@ public class MainActivity extends Activity {
                                 }
                             }
                         }
-                        android.view.ViewParent p=getParent();
-                        if(p!=null) p.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
+
+                        lockAllParents(pageZoom>1.01f);
                         return true;
 
                     case MotionEvent.ACTION_CANCEL:
-                        android.view.ViewParent p2=getParent();
-                        if(p2!=null) p2.requestDisallowInterceptTouchEvent(pageZoom>1.01f);
+                        manualPinchActive=false;
+                        lastPinchDistance=0f;
+                        lockAllParents(pageZoom>1.01f);
                         return true;
                 }
                 return true;
             });
+        }
+
+        private float pinchDistance(MotionEvent e){
+            if(e==null || e.getPointerCount()<2) return 0f;
+            float dx=e.getX(0)-e.getX(1);
+            float dy=e.getY(0)-e.getY(1);
+            return (float)Math.sqrt(dx*dx+dy*dy);
+        }
+
+        private float pinchFocusX(MotionEvent e){
+            return e==null || e.getPointerCount()<2?0f:(e.getX(0)+e.getX(1))/2f;
+        }
+
+        private float pinchFocusY(MotionEvent e){
+            return e==null || e.getPointerCount()<2?0f:(e.getY(0)+e.getY(1))/2f;
+        }
+
+        private void lockAllParents(boolean lock){
+            android.view.ViewParent p=getParent();
+            while(p!=null){
+                p.requestDisallowInterceptTouchEvent(lock);
+                p=p.getParent();
+            }
         }
 
         void setHorizontalPageSwipe(
