@@ -931,8 +931,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.62\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.62\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.63\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.63\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -962,7 +962,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.62\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.63\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -3091,24 +3091,36 @@ public class MainActivity extends Activity {
 
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(12),dp(6),dp(8),dp(6));
+        header.setPadding(dp(14),dp(8),dp(8),dp(8));
         header.setBackground(actionBarBg());
 
         LinearLayout titleBox=new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView name=tv(getDisplayName(uri),16,WHITE);
+        titleBox.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView name=tv(getDisplayName(uri),18,WHITE);
+        name.setTypeface(null,1);
+        name.setGravity(Gravity.CENTER_VERTICAL);
+        name.setPadding(0,0,dp(8),0);
         name.setSingleLine(true);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
         viewerPageLabel=tv("",12,SOFT);
-        titleBox.addView(name,new LinearLayout.LayoutParams(-1,dp(32)));
+        viewerPageLabel.setGravity(Gravity.CENTER_VERTICAL);
+        viewerPageLabel.setPadding(0,0,dp(8),0);
+        viewerPageLabel.setSingleLine(true);
+        viewerPageLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
+        titleBox.addView(name,new LinearLayout.LayoutParams(-1,dp(36)));
         titleBox.addView(viewerPageLabel,new LinearLayout.LayoutParams(-1,dp(24)));
-        header.addView(titleBox,new LinearLayout.LayoutParams(0,dp(56),1));
+        header.addView(titleBox,new LinearLayout.LayoutParams(0,dp(60),1));
 
         TextView menu=tv("⋮",32,WHITE);
         menu.setGravity(Gravity.CENTER);
+        menu.setPadding(0,0,0,0);
         menu.setBackground(touchBg(PANEL,12));
         header.addView(menu,new LinearLayout.LayoutParams(dp(52),dp(52)));
-        outer.addView(header,new LinearLayout.LayoutParams(-1,dp(64)));
+        outer.addView(header,new LinearLayout.LayoutParams(-1,dp(80)));
 
         FrameLayout viewport=new FrameLayout(this);
         viewport.setBackgroundColor(BG);
