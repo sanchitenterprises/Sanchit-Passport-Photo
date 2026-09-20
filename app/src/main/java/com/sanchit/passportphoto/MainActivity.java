@@ -117,12 +117,8 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
-        getWindow().setStatusBarColor(BG);
-        getWindow().setNavigationBarColor(BG);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
-        // Do not force content into system bars. Android 15 may still use
-        // edge-to-edge automatically, so a global inset guard is installed below.
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        configureSystemBars();
         installGlobalSafeArea();
         android.content.SharedPreferences sp=getSharedPreferences("sts",0);
         devMode=sp.getBoolean("devMode",false);
@@ -143,36 +139,101 @@ public class MainActivity extends Activity {
     }
 
 
+    private void configureSystemBars(){
+        Window w=getWindow();
+        if(w==null) return;
+
+        w.setStatusBarColor(BG);
+        w.setNavigationBarColor(BG);
+        w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+        w.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+        w.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
+
+        View decor=w.getDecorView();
+        if(decor!=null){
+            int flags=decor.getSystemUiVisibility();
+            flags&=~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if(Build.VERSION.SDK_INT>=26){
+                flags&=~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
+            flags&=~View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+            flags&=~View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            flags&=~View.SYSTEM_UI_FLAG_FULLSCREEN;
+            flags&=~View.SYSTEM_UI_FLAG_HIDE_NAVIGATION;
+            decor.setSystemUiVisibility(flags);
+            decor.setBackgroundColor(BG);
+        }
+
+        if(Build.VERSION.SDK_INT>=30){
+            try{
+                android.view.WindowInsetsController controller=w.getInsetsController();
+                if(controller!=null){
+                    controller.setSystemBarsAppearance(
+                            0,
+                            android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                                    | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS);
+                }
+            }catch(Throwable ignored){}
+        }
+
+        // Before Android 15, let the framework fit the decor to system bars.
+        // Android 15+ is still covered by the explicit inset guard below.
+        if(Build.VERSION.SDK_INT>=30 && Build.VERSION.SDK_INT<35){
+            try{w.setDecorFitsSystemWindows(true);}catch(Throwable ignored){}
+        }
+    }
+
+    private void refreshSafeAreaNow(){
+        configureSystemBars();
+
+        if(globalContentRoot==null){
+            installGlobalSafeArea();
+        }
+        if(globalContentRoot==null) return;
+
+        globalContentRoot.setBackgroundColor(BG);
+
+        if(Build.VERSION.SDK_INT>=23){
+            try{
+                WindowInsets current=globalContentRoot.getRootWindowInsets();
+                if(current!=null){
+                    captureSafeInsets(current);
+                    applyGlobalSafeAreaPadding();
+                }
+            }catch(Throwable ignored){}
+        }
+
+        if(Build.VERSION.SDK_INT>=20){
+            globalContentRoot.requestApplyInsets();
+        }
+
+        globalContentRoot.postOnAnimation(()->{
+            configureSystemBars();
+            applyGlobalSafeAreaPadding();
+            if(Build.VERSION.SDK_INT>=20) globalContentRoot.requestApplyInsets();
+        });
+    }
+
+    @Override public void setContentView(View view){
+        super.setContentView(view);
+        refreshSafeAreaNow();
+    }
+
+    @Override public void setContentView(View view,ViewGroup.LayoutParams params){
+        super.setContentView(view,params);
+        refreshSafeAreaNow();
+    }
+
     private void installGlobalSafeArea(){
         View content=findViewById(android.R.id.content);
         if(!(content instanceof FrameLayout)) return;
         globalContentRoot=(FrameLayout)content;
         globalContentRoot.setClipToPadding(false);
 
+        globalContentRoot.setBackgroundColor(BG);
         globalContentRoot.setOnApplyWindowInsetsListener((v,insets)->{
-            int left=insets.getSystemWindowInsetLeft();
-            int top=insets.getSystemWindowInsetTop();
-            int right=insets.getSystemWindowInsetRight();
-            int bottom=insets.getSystemWindowInsetBottom();
-
-            if(Build.VERSION.SDK_INT>=28){
-                try{
-                    android.view.DisplayCutout cutout=insets.getDisplayCutout();
-                    if(cutout!=null){
-                        left=Math.max(left,cutout.getSafeInsetLeft());
-                        top=Math.max(top,cutout.getSafeInsetTop());
-                        right=Math.max(right,cutout.getSafeInsetRight());
-                        bottom=Math.max(bottom,cutout.getSafeInsetBottom());
-                    }
-                }catch(Throwable ignored){}
-            }
-
-            safeInsetLeft=Math.max(0,left);
-            safeInsetTop=Math.max(0,top);
-            safeInsetRight=Math.max(0,right);
-            safeInsetBottom=Math.max(0,bottom);
-
-            v.post(this::applyGlobalSafeAreaPadding);
+            captureSafeInsets(insets);
+            applyGlobalSafeAreaPadding();
             return insets;
         });
 
@@ -182,6 +243,32 @@ public class MainActivity extends Activity {
         if(Build.VERSION.SDK_INT>=20){
             globalContentRoot.requestApplyInsets();
         }
+    }
+
+    private void captureSafeInsets(WindowInsets insets){
+        if(insets==null) return;
+
+        int left=insets.getSystemWindowInsetLeft();
+        int top=insets.getSystemWindowInsetTop();
+        int right=insets.getSystemWindowInsetRight();
+        int bottom=insets.getSystemWindowInsetBottom();
+
+        if(Build.VERSION.SDK_INT>=28){
+            try{
+                android.view.DisplayCutout cutout=insets.getDisplayCutout();
+                if(cutout!=null){
+                    left=Math.max(left,cutout.getSafeInsetLeft());
+                    top=Math.max(top,cutout.getSafeInsetTop());
+                    right=Math.max(right,cutout.getSafeInsetRight());
+                    bottom=Math.max(bottom,cutout.getSafeInsetBottom());
+                }
+            }catch(Throwable ignored){}
+        }
+
+        safeInsetLeft=Math.max(0,left);
+        safeInsetTop=Math.max(0,top);
+        safeInsetRight=Math.max(0,right);
+        safeInsetBottom=Math.max(0,bottom);
     }
 
     private void applyGlobalSafeAreaPadding(){
@@ -1025,8 +1112,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.69\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.69\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.70\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.70\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1056,7 +1143,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.69\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.70\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -7155,7 +7242,7 @@ public class MainActivity extends Activity {
         scannerFullScreen=false;
         try{if(embeddedScanner!=null)embeddedScanner.pause();}catch(Throwable ignored){}
         embeddedScanner=null;
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+        configureSystemBars();
 
         LinearLayout outer=new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
