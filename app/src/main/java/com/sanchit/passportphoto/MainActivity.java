@@ -1112,8 +1112,8 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                         .setTitle("STS DigiKit")
                         .setMessage(L(
-                                "Version 1.0.70\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
-                                "संस्करण 1.0.70\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
+                                "Version 1.0.71\nOffline utility toolkit\nChange the dropdown item order from the three-dot menu.",
+                                "संस्करण 1.0.71\nऑफलाइन यूटिलिटी टूलकिट\nThree-dot मेनू से dropdown items का क्रम ऊपर-नीचे बदल सकते हैं।"))
                         .setPositiveButton("OK",null)
                         .show();
                 return true;
@@ -1143,7 +1143,7 @@ public class MainActivity extends Activity {
             logEvent("Dev Mode: "+(on?"ON":"OFF"));
         });
 
-        TextView about=tv("Version 1.0.70\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
+        TextView about=tv("Version 1.0.71\nOffline utility toolkit\nCalculator • QR • Scanner • Finance tools",17,SOFT);
         about.setGravity(Gravity.CENTER); about.setBackground(bg(PANEL,10)); root.addView(about,resultParams(120));
     }
 
@@ -1915,8 +1915,37 @@ public class MainActivity extends Activity {
         return bar;
     }
 
-    private Calendar parseManualAgeDate(String raw) throws Exception{
+    private String normalizeManualAgeDate(String raw) throws Exception{
         String s=raw==null?"":raw.trim();
+        if(s.isEmpty()) throw new java.text.ParseException("Empty date",0);
+
+        // Fast typing: 05051996 -> 05/05/1996, 050596 -> 05/05/96.
+        if(s.matches("\\d{8}")){
+            return s.substring(0,2)+"/"+s.substring(2,4)+"/"+s.substring(4,8);
+        }
+        if(s.matches("\\d{6}")){
+            return s.substring(0,2)+"/"+s.substring(2,4)+"/"+s.substring(4,6);
+        }
+
+        // Accept slash, dash, dot, spaces, or mixed separators.
+        String cleaned=s.replaceAll("[.\\-\\s]+","/");
+        cleaned=cleaned.replaceAll("/+","/");
+        String[] p=cleaned.split("/");
+        if(p.length!=3
+                || !p[0].matches("\\d{1,2}")
+                || !p[1].matches("\\d{1,2}")
+                || !(p[2].matches("\\d{4}") || p[2].matches("\\d{2}"))){
+            throw new java.text.ParseException("Use DD/MM/YYYY",0);
+        }
+
+        int day=Integer.parseInt(p[0]);
+        int month=Integer.parseInt(p[1]);
+        String year=p[2];
+        return String.format(java.util.Locale.US,"%02d/%02d/%s",day,month,year);
+    }
+
+    private Calendar parseManualAgeDate(String raw) throws Exception{
+        String s=normalizeManualAgeDate(raw);
         java.text.SimpleDateFormat sdf;
         if(s.matches("\\d{2}/\\d{2}/\\d{4}")){
             sdf=new java.text.SimpleDateFormat("dd/MM/yyyy",java.util.Locale.US);
@@ -2114,6 +2143,38 @@ public class MainActivity extends Activity {
         dateInput.setElevation(dp(1));
         attachInputBehavior(dateInput);
 
+        final boolean[] ageDateFormatting={false};
+        dateInput.addTextChangedListener(new android.text.TextWatcher(){
+            @Override public void beforeTextChanged(CharSequence text,int start,int count,int after){}
+            @Override public void onTextChanged(CharSequence text,int start,int before,int count){}
+
+            @Override public void afterTextChanged(android.text.Editable editable){
+                if(ageDateFormatting[0]) return;
+                String current=editable==null?"":editable.toString().trim();
+                if(current.isEmpty()) return;
+
+                boolean completeDigits=current.matches("\\d{8}");
+                boolean completeSeparated=current.matches(
+                        "\\d{1,2}[./\\-\\s]+\\d{1,2}[./\\-\\s]+\\d{4}");
+
+                if(!completeDigits && !completeSeparated) return;
+
+                try{
+                    String normalized=normalizeManualAgeDate(current);
+                    // Validate before replacing the user's text.
+                    parseManualAgeDate(normalized);
+                    if(!normalized.equals(current)){
+                        ageDateFormatting[0]=true;
+                        dateInput.setText(normalized);
+                        dateInput.setSelection(normalized.length());
+                        ageDateFormatting[0]=false;
+                    }
+                }catch(Exception ignored){
+                    ageDateFormatting[0]=false;
+                }
+            }
+        });
+
         LinearLayout.LayoutParams dateParams=new LinearLayout.LayoutParams(0,dp(58),1);
         dateParams.setMargins(0,dp(4),dp(4),dp(4));
         dateRow.addView(dateInput,dateParams);
@@ -2128,7 +2189,7 @@ public class MainActivity extends Activity {
         Button go=btn(L("SHOW FULL AGE DETAILS","पूरा आयु विवरण दिखाएं"));
         root.addView(go,controlParams(60));
 
-        TextView out=tv(L("Enter date in DD/MM/YYYY","DD/MM/YYYY में जन्म तिथि लिखें"),17,WHITE);
+        TextView out=tv(L("Type 05051996 or 05/05/1996","05051996 या 05/05/1996 लिखें"),17,WHITE);
         styleResult(out);
         out.setGravity(Gravity.LEFT|Gravity.TOP);
         out.setPadding(dp(18),dp(16),dp(18),dp(16));
@@ -2151,7 +2212,14 @@ public class MainActivity extends Activity {
 
         Runnable calculate=()->{
             try{
-                Calendar birth=parseManualAgeDate(dateInput.getText().toString());
+                String normalized=normalizeManualAgeDate(dateInput.getText().toString());
+                Calendar birth=parseManualAgeDate(normalized);
+                if(!normalized.equals(dateInput.getText().toString().trim())){
+                    ageDateFormatting[0]=true;
+                    dateInput.setText(normalized);
+                    dateInput.setSelection(normalized.length());
+                    ageDateFormatting[0]=false;
+                }
                 String res=buildAdvancedAgeDetails(birth);
                 if(res.equals(L("Invalid date","अमान्य तारीख"))){
                     activeBirth[0]=null;
@@ -2168,8 +2236,8 @@ public class MainActivity extends Activity {
                 activeBirth[0]=null;
                 liveHandler.removeCallbacks(ticker[0]);
                 out.setText(L(
-                        "Enter a valid date in DD/MM/YYYY",
-                        "DD/MM/YYYY में सही जन्म तिथि लिखें"));
+                        "Enter a valid date, e.g. 05051996 or 05/05/1996",
+                        "सही तारीख लिखें, जैसे 05051996 या 05/05/1996"));
             }
         };
 
