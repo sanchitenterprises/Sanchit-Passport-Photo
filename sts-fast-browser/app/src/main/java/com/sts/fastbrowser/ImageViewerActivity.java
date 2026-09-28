@@ -641,6 +641,10 @@ public class ImageViewerActivity extends Activity {
         private float lastX;
         private float lastY;
         private float startAspect = 1f;
+        private float dragStartX;
+        private float dragStartY;
+        private int cornerMoveMode = 0; // 0 undecided, 1 horizontal, 2 vertical, 3 diagonal
+        private final float[][] dragStartHandles = new float[8][2];
         private float zoom = 1f;
         private float panX = 0f;
         private float panY = 0f;
@@ -869,6 +873,13 @@ public class ImageViewerActivity extends Activity {
 
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 dragMode = detectDragMode(x, y);
+                cornerMoveMode = 0;
+                dragStartX = x;
+                dragStartY = y;
+                for (int i = 0; i < 8; i++) {
+                    dragStartHandles[i][0] = handles[i][0];
+                    dragStartHandles[i][1] = handles[i][1];
+                }
                 if (dragMode >= 0 && dragMode <= 7) {
                     int opposite = oppositeCornerForHandle(dragMode);
                     if (opposite >= 0) {
@@ -885,9 +896,26 @@ public class ImageViewerActivity extends Activity {
             }
 
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE && dragMode != -1) {
-                float dx = x - lastX;
-                float dy = y - lastY;
-                moveCrop(dx, dy);
+                if (isCornerHandle(dragMode)) {
+                    float totalDx = x - dragStartX;
+                    float totalDy = y - dragStartY;
+                    if (cornerMoveMode == 0) {
+                        float ax = Math.abs(totalDx);
+                        float ay = Math.abs(totalDy);
+                        if (Math.max(ax, ay) >= dp(5)) {
+                            if (ax >= ay * 1.7f) cornerMoveMode = 1;
+                            else if (ay >= ax * 1.7f) cornerMoveMode = 2;
+                            else cornerMoveMode = 3;
+                        }
+                    }
+                    if (cornerMoveMode != 0) {
+                        applyCornerMoveFromStart(totalDx, totalDy);
+                    }
+                } else {
+                    float dx = x - lastX;
+                    float dy = y - lastY;
+                    moveCrop(dx, dy);
+                }
                 lastX = x;
                 lastY = y;
                 invalidate();
@@ -896,6 +924,7 @@ public class ImageViewerActivity extends Activity {
 
             if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                 dragMode = -1;
+                cornerMoveMode = 0;
                 return true;
             }
             return true;
@@ -936,56 +965,109 @@ public class ImageViewerActivity extends Activity {
             return (float) Math.sqrt(dx * dx + dy * dy);
         }
 
+        private boolean isCornerHandle(int index) {
+            return index == 0 || index == 2 || index == 4 || index == 6;
+        }
+
+        private void restoreDragStartHandles() {
+            for (int i = 0; i < 8; i++) {
+                handles[i][0] = dragStartHandles[i][0];
+                handles[i][1] = dragStartHandles[i][1];
+            }
+        }
+
+        private void applyCornerMoveFromStart(float totalDx, float totalDy) {
+            restoreDragStartHandles();
+
+            if (cornerMoveMode == 1) {
+                // Straight left/right keeps the current linked-edge behavior.
+                applyStraightCornerMove(totalDx, 0f);
+                snapMiddleHandlesToEdges();
+                return;
+            }
+
+            if (cornerMoveMode == 2) {
+                // Straight up/down keeps the current linked-edge behavior.
+                applyStraightCornerMove(0f, totalDy);
+                snapMiddleHandlesToEdges();
+                return;
+            }
+
+            // Diagonal/other direction: move only the grabbed corner.
+            // Only its two adjacent middle handles follow. Other corners/middles stay where they were.
+            applyDiagonalCornerMove(totalDx, totalDy);
+        }
+
+        private void applyStraightCornerMove(float dx, float dy) {
+            if (dragMode == 0) { // top-left
+                float newX = clamp(dragStartHandles[0][0] + dx, imageRect.left, dragStartHandles[4][0] - minCrop);
+                float newY = clamp(dragStartHandles[0][1] + dy, imageRect.top, dragStartHandles[4][1] - minCrop);
+                handles[0][0] = newX; handles[0][1] = newY;
+                handles[2][1] = newY;
+                handles[6][0] = newX;
+            } else if (dragMode == 2) { // top-right
+                float newX = clamp(dragStartHandles[2][0] + dx, dragStartHandles[6][0] + minCrop, imageRect.right);
+                float newY = clamp(dragStartHandles[2][1] + dy, imageRect.top, dragStartHandles[6][1] - minCrop);
+                handles[2][0] = newX; handles[2][1] = newY;
+                handles[0][1] = newY;
+                handles[4][0] = newX;
+            } else if (dragMode == 4) { // bottom-right
+                float newX = clamp(dragStartHandles[4][0] + dx, dragStartHandles[0][0] + minCrop, imageRect.right);
+                float newY = clamp(dragStartHandles[4][1] + dy, dragStartHandles[0][1] + minCrop, imageRect.bottom);
+                handles[4][0] = newX; handles[4][1] = newY;
+                handles[2][0] = newX;
+                handles[6][1] = newY;
+            } else if (dragMode == 6) { // bottom-left
+                float newX = clamp(dragStartHandles[6][0] + dx, imageRect.left, dragStartHandles[2][0] - minCrop);
+                float newY = clamp(dragStartHandles[6][1] + dy, dragStartHandles[2][1] + minCrop, imageRect.bottom);
+                handles[6][0] = newX; handles[6][1] = newY;
+                handles[0][0] = newX;
+                handles[4][1] = newY;
+            }
+        }
+
+        private void applyDiagonalCornerMove(float dx, float dy) {
+            if (dragMode == 0) { // top-left; adjacent middles: top(1), left(7)
+                handles[0][0] = clamp(dragStartHandles[0][0] + dx, imageRect.left, imageRect.right);
+                handles[0][1] = clamp(dragStartHandles[0][1] + dy, imageRect.top, imageRect.bottom);
+                setMidpoint(1, 0, 2);
+                setMidpoint(7, 6, 0);
+            } else if (dragMode == 2) { // top-right; adjacent middles: top(1), right(3)
+                handles[2][0] = clamp(dragStartHandles[2][0] + dx, imageRect.left, imageRect.right);
+                handles[2][1] = clamp(dragStartHandles[2][1] + dy, imageRect.top, imageRect.bottom);
+                setMidpoint(1, 0, 2);
+                setMidpoint(3, 2, 4);
+            } else if (dragMode == 4) { // bottom-right; adjacent middles: right(3), bottom(5)
+                handles[4][0] = clamp(dragStartHandles[4][0] + dx, imageRect.left, imageRect.right);
+                handles[4][1] = clamp(dragStartHandles[4][1] + dy, imageRect.top, imageRect.bottom);
+                setMidpoint(3, 2, 4);
+                setMidpoint(5, 4, 6);
+            } else if (dragMode == 6) { // bottom-left; adjacent middles: bottom(5), left(7)
+                handles[6][0] = clamp(dragStartHandles[6][0] + dx, imageRect.left, imageRect.right);
+                handles[6][1] = clamp(dragStartHandles[6][1] + dy, imageRect.top, imageRect.bottom);
+                setMidpoint(5, 4, 6);
+                setMidpoint(7, 6, 0);
+            }
+        }
+
         private void moveCrop(float dx, float dy) {
             if (dragMode == 8) {
                 moveAllHandles(dx, dy);
                 return;
             }
 
-            // Middle handles (1,3,5,7) are free: only the grabbed middle point moves.
+            // Middle handles remain completely free/independent.
             if (dragMode == 1 || dragMode == 3 || dragMode == 5 || dragMode == 7) {
                 handles[dragMode][0] = clamp(handles[dragMode][0] + dx, imageRect.left, imageRect.right);
                 handles[dragMode][1] = clamp(handles[dragMode][1] + dy, imageRect.top, imageRect.bottom);
-                return;
             }
-
-            // Four corners are linked as one crop rectangle.
-            // Moving one corner also moves the two adjacent corners on the same X/Y edges.
-            if (dragMode == 0) { // top-left; bottom-right stays anchored
-                float newX = clamp(handles[0][0] + dx, imageRect.left, handles[4][0] - minCrop);
-                float newY = clamp(handles[0][1] + dy, imageRect.top, handles[4][1] - minCrop);
-                handles[0][0] = newX; handles[0][1] = newY;
-                handles[2][1] = newY; // top-right follows top edge
-                handles[6][0] = newX; // bottom-left follows left edge
-            } else if (dragMode == 2) { // top-right; bottom-left stays anchored
-                float newX = clamp(handles[2][0] + dx, handles[6][0] + minCrop, imageRect.right);
-                float newY = clamp(handles[2][1] + dy, imageRect.top, handles[6][1] - minCrop);
-                handles[2][0] = newX; handles[2][1] = newY;
-                handles[0][1] = newY; // top-left follows top edge
-                handles[4][0] = newX; // bottom-right follows right edge
-            } else if (dragMode == 4) { // bottom-right; top-left stays anchored
-                float newX = clamp(handles[4][0] + dx, handles[0][0] + minCrop, imageRect.right);
-                float newY = clamp(handles[4][1] + dy, handles[0][1] + minCrop, imageRect.bottom);
-                handles[4][0] = newX; handles[4][1] = newY;
-                handles[2][0] = newX; // top-right follows right edge
-                handles[6][1] = newY; // bottom-left follows bottom edge
-            } else if (dragMode == 6) { // bottom-left; top-right stays anchored
-                float newX = clamp(handles[6][0] + dx, imageRect.left, handles[2][0] - minCrop);
-                float newY = clamp(handles[6][1] + dy, handles[2][1] + minCrop, imageRect.bottom);
-                handles[6][0] = newX; handles[6][1] = newY;
-                handles[0][0] = newX; // top-left follows left edge
-                handles[4][1] = newY; // bottom-right follows bottom edge
-            }
-
-            // After any corner drag, all middle handles sit at the exact middle of their edge.
-            snapMiddleHandlesToEdges();
         }
 
         private void snapMiddleHandlesToEdges() {
-            setMidpoint(1, 0, 2); // top
-            setMidpoint(3, 2, 4); // right
-            setMidpoint(5, 4, 6); // bottom
-            setMidpoint(7, 6, 0); // left
+            setMidpoint(1, 0, 2);
+            setMidpoint(3, 2, 4);
+            setMidpoint(5, 4, 6);
+            setMidpoint(7, 6, 0);
         }
 
         private void setMidpoint(int middle, int cornerA, int cornerB) {
