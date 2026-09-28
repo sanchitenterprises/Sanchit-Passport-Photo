@@ -71,6 +71,7 @@ public class ImageViewerActivity extends Activity {
     private boolean cropMode = false;
     private String pendingSaveAction;
     private int targetKb = 0;
+    private boolean scanBusy = false;
     private OnBackInvokedCallback systemBackCallback;
 
     @Override
@@ -246,6 +247,7 @@ public class ImageViewerActivity extends Activity {
         addEditIcon(R.drawable.ic_crop, "Crop", v -> beginCrop());
         addEditIcon(R.drawable.ic_rotate, "Rotate", v -> rotateImage());
         addEditIcon(R.drawable.ic_resize, "Resize", v -> showResizeDialog());
+        addEditIcon(R.drawable.ic_scan, "Scan", v -> applyScanEffect());
         addEditIcon(R.drawable.ic_done, "Done", v -> {
             cropMode = false;
             imageCanvas.setCropMode(false);
@@ -319,6 +321,101 @@ public class ImageViewerActivity extends Activity {
         m.postRotate(90);
         Bitmap rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), m, true);
         setBitmap(rotated);
+    }
+
+    private void applyScanEffect() {
+        if (bitmap == null || scanBusy) return;
+
+        scanBusy = true;
+        final Bitmap source = bitmap;
+        Toast.makeText(this, "Scan effect apply हो रहा है...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            Bitmap result = null;
+            try {
+                int w = source.getWidth();
+                int h = source.getHeight();
+                if (w < 2 || h < 2) throw new Exception("Image too small");
+
+                result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+
+                int[] prev = new int[w];
+                int[] curr = new int[w];
+                int[] next = new int[w];
+                int[] outRow = new int[w];
+
+                source.getPixels(curr, 0, w, 0, 0, w, 1);
+                source.getPixels(next, 0, w, 0, Math.min(1, h - 1), w, 1);
+                System.arraycopy(curr, 0, prev, 0, w);
+
+                for (int y = 0; y < h; y++) {
+                    if (y > 0) {
+                        int[] temp = prev;
+                        prev = curr;
+                        curr = next;
+                        next = temp;
+
+                        int ny = Math.min(h - 1, y + 1);
+                        source.getPixels(next, 0, w, 0, ny, w, 1);
+                    }
+
+                    for (int x = 0; x < w; x++) {
+                        int xl = Math.max(0, x - 1);
+                        int xr = Math.min(w - 1, x + 1);
+
+                        int center = scanGray(curr[x]);
+                        int left = scanGray(curr[xl]);
+                        int right = scanGray(curr[xr]);
+                        int up = scanGray(prev[x]);
+                        int down = scanGray(next[x]);
+
+                        // Grayscale + local sharpening for printed/document text.
+                        int edge = (4 * center) - left - right - up - down;
+                        int value = center + Math.round(edge * 0.58f);
+
+                        // Stronger document contrast without turning the page into pure B/W.
+                        value = 128 + Math.round((value - 128) * 1.24f);
+
+                        // Clean paper/background and deepen darker text slightly.
+                        if (value > 175) {
+                            value = value + Math.round((255 - value) * 0.32f);
+                        } else if (value < 105) {
+                            value = Math.round(value * 0.88f);
+                        }
+
+                        value = Math.max(0, Math.min(255, value));
+                        outRow[x] = Color.argb(255, value, value, value);
+                    }
+
+                    result.setPixels(outRow, 0, w, 0, y, w, 1);
+                }
+
+                final Bitmap done = result;
+                runOnUiThread(() -> {
+                    scanBusy = false;
+                    setBitmap(done);
+                    Toast.makeText(
+                            this,
+                            "Grayscale + Text Sharp scan effect apply हो गया",
+                            Toast.LENGTH_SHORT
+                    ).show();
+                });
+            } catch (Exception e) {
+                final Bitmap failed = result;
+                runOnUiThread(() -> {
+                    scanBusy = false;
+                    if (failed != null && failed != bitmap && !failed.isRecycled()) failed.recycle();
+                    Toast.makeText(this, "Scan effect apply नहीं हो पाया", Toast.LENGTH_SHORT).show();
+                });
+            }
+        }).start();
+    }
+
+    private int scanGray(int color) {
+        int r = Color.red(color);
+        int g = Color.green(color);
+        int b = Color.blue(color);
+        return (77 * r + 150 * g + 29 * b) >> 8;
     }
 
     private void showResizeDialog() {
