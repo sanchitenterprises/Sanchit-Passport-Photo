@@ -28,6 +28,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.PopupWindow;
@@ -56,8 +57,14 @@ public class MainActivity extends android.app.Activity {
 
     private SharedPreferences prefs;
     private final List<Site> sites = new ArrayList<>();
+    private LinearLayout slot1Container;
+    private LinearLayout slot2Container;
     private TextView slot1Button;
     private TextView slot2Button;
+    private ImageView slot1HomeIcon;
+    private ImageView slot1RefreshIcon;
+    private ImageView slot2HomeIcon;
+    private ImageView slot2RefreshIcon;
     private TextView menuButton;
     private WebView webView;
     private boolean adBlockEnabled = true;
@@ -110,8 +117,25 @@ public class MainActivity extends android.app.Activity {
         top.setBackground(topBg);
         root.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
 
-        slot1Button = makeTopButton("Google ▾", Color.parseColor("#BFE3DF"));
-        slot2Button = makeTopButton("Google ▾", Color.parseColor("#CAD7E7"));
+        slot1Container = makeSlotContainer(Color.parseColor("#BFE3DF"));
+        slot2Container = makeSlotContainer(Color.parseColor("#CAD7E7"));
+
+        slot1HomeIcon = makeIconButton(R.drawable.ic_home);
+        slot1Button = makeSlotLabel("Google ▾");
+        slot1RefreshIcon = makeIconButton(R.drawable.ic_refresh);
+
+        slot2HomeIcon = makeIconButton(R.drawable.ic_home);
+        slot2Button = makeSlotLabel("Google ▾");
+        slot2RefreshIcon = makeIconButton(R.drawable.ic_refresh);
+
+        slot1Container.addView(slot1HomeIcon, new LinearLayout.LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT));
+        slot1Container.addView(slot1Button, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        slot1Container.addView(slot1RefreshIcon, new LinearLayout.LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT));
+
+        slot2Container.addView(slot2HomeIcon, new LinearLayout.LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT));
+        slot2Container.addView(slot2Button, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        slot2Container.addView(slot2RefreshIcon, new LinearLayout.LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT));
+
         menuButton = makeTopButton("⋮", Color.parseColor("#DDD2E8"));
         menuButton.setTextSize(25);
         menuButton.setGravity(Gravity.CENTER);
@@ -120,22 +144,64 @@ public class MainActivity extends android.app.Activity {
         slotLp1.setMargins(0, 0, dp(3), 0);
         LinearLayout.LayoutParams slotLp2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         slotLp2.setMargins(0, 0, dp(3), 0);
-        top.addView(slot1Button, slotLp1);
-        top.addView(slot2Button, slotLp2);
+        top.addView(slot1Container, slotLp1);
+        top.addView(slot2Container, slotLp2);
         top.addView(menuButton, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.WHITE);
         root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        slot1Button.setOnClickListener(v -> showSitePopup(slot1Button, 1));
-        slot2Button.setOnClickListener(v -> showSitePopup(slot2Button, 2));
+        slot1Button.setOnClickListener(v -> showSitePopup(slot1Container, 1));
+        slot2Button.setOnClickListener(v -> showSitePopup(slot2Container, 2));
+        slot1HomeIcon.setOnClickListener(v -> goHome(1));
+        slot2HomeIcon.setOnClickListener(v -> goHome(2));
+        slot1RefreshIcon.setOnClickListener(v -> refreshSlot(1));
+        slot2RefreshIcon.setOnClickListener(v -> refreshSlot(2));
         menuButton.setOnClickListener(this::showMainMenu);
+
         applyPressAnimation(slot1Button);
         applyPressAnimation(slot2Button);
+        applyPressAnimation(slot1HomeIcon);
+        applyPressAnimation(slot2HomeIcon);
+        applyPressAnimation(slot1RefreshIcon);
+        applyPressAnimation(slot2RefreshIcon);
         applyPressAnimation(menuButton);
 
         return root;
+    }
+
+    private LinearLayout makeSlotContainer(int baseColor) {
+        LinearLayout slot = new LinearLayout(this);
+        slot.setOrientation(LinearLayout.HORIZONTAL);
+        slot.setGravity(Gravity.CENTER_VERTICAL);
+        slot.setPadding(dp(1), 0, dp(1), 0);
+        slot.setBackground(makeRipple(baseColor));
+        return slot;
+    }
+
+    private TextView makeSlotLabel(String text) {
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(Color.parseColor("#162326"));
+        tv.setTextSize(13);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setPadding(dp(2), 0, dp(2), 0);
+        tv.setClickable(true);
+        tv.setFocusable(true);
+        return tv;
+    }
+
+    private ImageView makeIconButton(int drawableRes) {
+        ImageView iv = new ImageView(this);
+        iv.setImageResource(drawableRes);
+        iv.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        iv.setPadding(dp(8), dp(8), dp(8), dp(8));
+        iv.setClickable(true);
+        iv.setFocusable(true);
+        iv.setBackgroundColor(Color.TRANSPARENT);
+        return iv;
     }
 
     private TextView makeTopButton(String text, int baseColor) {
@@ -313,6 +379,24 @@ public class MainActivity extends android.app.Activity {
         }).start();
     }
 
+    private void goHome(int slot) {
+        activeSlot = slot;
+        updateSlotLabels();
+        String url = slot == 1 ? slot1Url : slot2Url;
+        webView.loadUrl(url);
+    }
+
+    private void refreshSlot(int slot) {
+        boolean wasActive = activeSlot == slot;
+        activeSlot = slot;
+        updateSlotLabels();
+        if (wasActive) {
+            webView.reload();
+        } else {
+            webView.loadUrl(slot == 1 ? slot1Url : slot2Url);
+        }
+    }
+
     private void showMainMenu(View anchor) {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
         pm.getMenu().add(adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF");
@@ -460,7 +544,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.0\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.1\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -473,8 +557,8 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void updateSlotLabels() {
-        if (slot1Button != null) slot1Button.setText((activeSlot == 1 ? "● " : "") + slot1Name + "  ▾");
-        if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + "  ▾");
+        if (slot1Button != null) slot1Button.setText((activeSlot == 1 ? "● " : "") + slot1Name + " ▾");
+        if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + " ▾");
     }
 
     private void loadSites() {
