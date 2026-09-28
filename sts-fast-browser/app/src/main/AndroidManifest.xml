@@ -6,9 +6,9 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/sts_fast_browser_logo"
+        android:icon="@drawable/sfb_app_icon"
         android:label="STS Fast Browser"
-        android:roundIcon="@drawable/sts_fast_browser_logo"
+        android:roundIcon="@drawable/sfb_app_icon"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
