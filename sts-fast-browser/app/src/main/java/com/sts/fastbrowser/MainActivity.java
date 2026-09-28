@@ -12,6 +12,7 @@ import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
+import android.webkit.URLUtil;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -254,12 +255,26 @@ public class MainActivity extends android.app.Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
         webView.setWebChromeClient(new WebChromeClient());
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
+            if (mt.contains("application/pdf") || isPdfUrl(url)) {
+                openPdfTask(url, guessPdfName(url, contentDisposition));
+            } else {
+                openExternal(url);
+            }
+        });
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-                if ("http".equals(scheme) || "https".equals(scheme)) return false;
+                if ("http".equals(scheme) || "https".equals(scheme)) {
+                    if (isPdfUrl(uri.toString())) {
+                        openPdfTask(uri.toString(), guessPdfName(uri.toString(), null));
+                        return true;
+                    }
+                    return false;
+                }
                 return openExternal(uri.toString());
             }
 
@@ -271,6 +286,39 @@ public class MainActivity extends android.app.Activity {
                 return super.shouldInterceptRequest(view, request);
             }
         });
+    }
+
+    private boolean isPdfUrl(String url) {
+        if (url == null) return false;
+        String lower = url.toLowerCase(Locale.ROOT);
+        int q = lower.indexOf('?');
+        if (q >= 0) lower = lower.substring(0, q);
+        int h = lower.indexOf('#');
+        if (h >= 0) lower = lower.substring(0, h);
+        return lower.endsWith(".pdf") || lower.contains("/pdf/");
+    }
+
+    private String guessPdfName(String url, String contentDisposition) {
+        try {
+            String guessed = URLUtil.guessFileName(url, contentDisposition, "application/pdf");
+            if (guessed != null && !guessed.trim().isEmpty()) return guessed;
+        } catch (Exception ignored) {}
+        return "Document.pdf";
+    }
+
+    private void openPdfTask(String url, String name) {
+        try {
+            Intent intent = new Intent(this, PdfViewerActivity.class);
+            intent.putExtra("pdf_url", url);
+            intent.putExtra("pdf_name", name);
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null) intent.putExtra("pdf_cookie", cookie);
+            intent.putExtra("pdf_user_agent", webView.getSettings().getUserAgentString());
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "PDF open नहीं हो पाया", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private boolean openExternal(String url) {
@@ -544,7 +592,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.1\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.2\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
