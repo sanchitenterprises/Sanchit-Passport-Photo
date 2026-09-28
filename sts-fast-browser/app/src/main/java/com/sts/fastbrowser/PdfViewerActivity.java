@@ -20,6 +20,8 @@ import android.print.PrintDocumentAdapter;
 import android.print.PrintDocumentInfo;
 import android.print.PrintManager;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
+import android.database.Cursor;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -42,6 +44,7 @@ import java.net.URL;
 public class PdfViewerActivity extends Activity {
     private static final int REQ_STORAGE = 701;
     private String sourceUrl;
+    private Uri sourceUri;
     private String fileName;
     private String cookie;
     private String userAgent;
@@ -57,9 +60,14 @@ public class PdfViewerActivity extends Activity {
         getWindow().setNavigationBarColor(Color.parseColor("#F2F5F4"));
 
         sourceUrl = getIntent().getStringExtra("pdf_url");
+        sourceUri = getIntent().getData();
         fileName = getIntent().getStringExtra("pdf_name");
         cookie = getIntent().getStringExtra("pdf_cookie");
         userAgent = getIntent().getStringExtra("pdf_user_agent");
+        if (sourceUri != null) {
+            String externalName = resolveDisplayName(sourceUri);
+            if (!TextUtils.isEmpty(externalName)) fileName = externalName;
+        }
         if (TextUtils.isEmpty(fileName)) fileName = "Document.pdf";
         if (!fileName.toLowerCase().endsWith(".pdf")) fileName += ".pdf";
         setTitle(fileName);
@@ -147,7 +155,11 @@ public class PdfViewerActivity extends Activity {
                 if (!dir.exists()) dir.mkdirs();
                 String safe = sanitize(fileName);
                 pdfFile = new File(dir, System.currentTimeMillis() + "_" + safe);
-                download(sourceUrl, pdfFile);
+                if (sourceUri != null && ("content".equalsIgnoreCase(sourceUri.getScheme()) || "file".equalsIgnoreCase(sourceUri.getScheme()))) {
+                    copyUriToFile(sourceUri, pdfFile);
+                } else {
+                    download(sourceUrl, pdfFile);
+                }
                 if (destroyed) return;
                 render(pdfFile);
             } catch (Exception e) {
@@ -157,6 +169,32 @@ public class PdfViewerActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    private String resolveDisplayName(Uri uri) {
+        if (uri == null) return null;
+        if ("content".equalsIgnoreCase(uri.getScheme())) {
+            try (Cursor c = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (c != null && c.moveToFirst()) {
+                    int i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (i >= 0) return c.getString(i);
+                }
+            } catch (Exception ignored) {}
+        }
+        String last = uri.getLastPathSegment();
+        if (last != null && !last.trim().isEmpty()) return last;
+        return null;
+    }
+
+    private void copyUriToFile(Uri uri, File out) throws Exception {
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             OutputStream os = new FileOutputStream(out)) {
+            if (in == null) throw new Exception("Unable to open PDF");
+            byte[] buf = new byte[32768];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+            os.flush();
+        }
     }
 
     private void download(String urlString, File out) throws Exception {
