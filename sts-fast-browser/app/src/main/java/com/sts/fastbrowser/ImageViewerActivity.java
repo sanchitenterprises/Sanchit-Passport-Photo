@@ -14,6 +14,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.pdf.PdfDocument;
 import android.graphics.drawable.GradientDrawable;
@@ -31,8 +32,10 @@ import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.text.TextUtils;
+import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
@@ -132,7 +135,7 @@ public class ImageViewerActivity extends Activity {
         editBar.setPadding(dp(6), dp(4), dp(6), dp(4));
         editBar.setBackgroundColor(Color.parseColor("#E3EAF4"));
         editBar.setVisibility(View.GONE);
-        root.addView(editBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        root.addView(editBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
 
         return root;
     }
@@ -239,16 +242,33 @@ public class ImageViewerActivity extends Activity {
     }
 
     private void addEditIcon(int resId, String description, View.OnClickListener listener) {
+        LinearLayout holder = new LinearLayout(this);
+        holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setGravity(Gravity.CENTER);
+        holder.setPadding(dp(1), dp(2), dp(1), dp(1));
+
         ImageButton b = new ImageButton(this);
         b.setImageResource(resId);
         b.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
-        b.setPadding(dp(12), dp(8), dp(12), dp(8));
+        b.setPadding(dp(7), dp(5), dp(7), dp(5));
         b.setBackgroundColor(Color.TRANSPARENT);
         b.setContentDescription(description);
         b.setOnClickListener(listener);
+
+        TextView label = new TextView(this);
+        label.setText(description);
+        label.setTextSize(9);
+        label.setTextColor(Color.parseColor("#162326"));
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        label.setOnClickListener(listener);
+
+        holder.addView(b, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        holder.addView(label, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(16)));
+
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         lp.setMargins(dp(2), 0, dp(2), 0);
-        editBar.addView(b, lp);
+        editBar.addView(holder, lp);
     }
 
     private void beginCrop() {
@@ -608,14 +628,22 @@ public class ImageViewerActivity extends Activity {
         private final Paint shadePaint = new Paint();
         private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint handlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-
         private final RectF imageRect = new RectF();
-        private final RectF cropRect = new RectF();
+        private final RectF baseRect = new RectF();
+        private final Path cropPath = new Path();
+        private final float[][] handles = new float[8][2];
+
+        private final ScaleGestureDetector scaleDetector;
+        private final GestureDetector gestureDetector;
+
         private boolean cropEnabled = false;
-        private int dragMode = 0;
+        private int dragMode = -1;
         private float lastX;
         private float lastY;
         private float startAspect = 1f;
+        private float zoom = 1f;
+        private float panX = 0f;
+        private float panY = 0f;
         private final float handleRadius = dp(12);
         private final float minCrop = dp(48);
 
@@ -627,39 +655,156 @@ public class ImageViewerActivity extends Activity {
             borderPaint.setColor(Color.WHITE);
             handlePaint.setColor(Color.WHITE);
             setBackgroundColor(Color.BLACK);
+
+            scaleDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                @Override
+                public boolean onScaleBegin(ScaleGestureDetector detector) {
+                    return !cropEnabled;
+                }
+
+                @Override
+                public boolean onScale(ScaleGestureDetector detector) {
+                    if (cropEnabled || image == null) return false;
+                    float factor = detector.getScaleFactor();
+                    if (Float.isNaN(factor) || Float.isInfinite(factor)) return false;
+
+                    float oldZoom = zoom;
+                    float newZoom = Math.max(1f, Math.min(5f, oldZoom * factor));
+                    if (Math.abs(newZoom - oldZoom) < 0.0001f) return true;
+
+                    float cx = getWidth() * 0.5f;
+                    float cy = getHeight() * 0.5f;
+                    float ratio = newZoom / oldZoom;
+                    panX = detector.getFocusX() - cx - (detector.getFocusX() - cx - panX) * ratio;
+                    panY = detector.getFocusY() - cy - (detector.getFocusY() - cy - panY) * ratio;
+                    zoom = newZoom;
+                    clampPan();
+                    invalidate();
+                    return true;
+                }
+
+                @Override
+                public void onScaleEnd(ScaleGestureDetector detector) {
+                    if (zoom <= 1.02f) resetZoom();
+                    else {
+                        clampPan();
+                        invalidate();
+                    }
+                }
+            });
+
+            gestureDetector = new GestureDetector(context, new GestureDetector.SimpleOnGestureListener() {
+                @Override public boolean onDown(MotionEvent e) { return true; }
+
+                @Override
+                public boolean onDoubleTap(MotionEvent e) {
+                    if (cropEnabled) return false;
+                    if (zoom > 1.05f) {
+                        resetZoom();
+                    } else {
+                        zoom = 2f;
+                        float cx = getWidth() * 0.5f;
+                        float cy = getHeight() * 0.5f;
+                        panX = -(e.getX() - cx);
+                        panY = -(e.getY() - cy);
+                        clampPan();
+                        invalidate();
+                    }
+                    return true;
+                }
+            });
         }
 
         void setBitmap(Bitmap bitmap) {
             this.image = bitmap;
             cropEnabled = false;
-            dragMode = 0;
+            dragMode = -1;
+            resetZoom();
             invalidate();
         }
 
         void setCropMode(boolean enabled) {
             cropEnabled = enabled;
-            dragMode = 0;
-            if (enabled) resetCropRect();
+            dragMode = -1;
+            if (enabled) {
+                resetZoom();
+                resetCropHandles();
+            }
+            invalidate();
+        }
+
+        private void resetZoom() {
+            zoom = 1f;
+            panX = 0f;
+            panY = 0f;
+            updateImageRect();
             invalidate();
         }
 
         private void updateImageRect() {
             imageRect.setEmpty();
+            baseRect.setEmpty();
             if (image == null || getWidth() <= 0 || getHeight() <= 0) return;
-            float scale = Math.min(getWidth() / (float) image.getWidth(), getHeight() / (float) image.getHeight());
-            float w = image.getWidth() * scale;
-            float h = image.getHeight() * scale;
-            float l = (getWidth() - w) * 0.5f;
-            float t = (getHeight() - h) * 0.5f;
-            imageRect.set(l, t, l + w, t + h);
+
+            float fit = Math.min(getWidth() / (float) image.getWidth(), getHeight() / (float) image.getHeight());
+            float bw = image.getWidth() * fit;
+            float bh = image.getHeight() * fit;
+            float cx = getWidth() * 0.5f;
+            float cy = getHeight() * 0.5f;
+            baseRect.set(cx - bw * 0.5f, cy - bh * 0.5f, cx + bw * 0.5f, cy + bh * 0.5f);
+
+            float w = bw * zoom;
+            float h = bh * zoom;
+            imageRect.set(
+                    cx - w * 0.5f + panX,
+                    cy - h * 0.5f + panY,
+                    cx + w * 0.5f + panX,
+                    cy + h * 0.5f + panY
+            );
         }
 
-        private void resetCropRect() {
+        private void clampPan() {
+            if (image == null || getWidth() <= 0 || getHeight() <= 0) return;
+            if (zoom <= 1f) {
+                panX = 0f;
+                panY = 0f;
+                zoom = 1f;
+                return;
+            }
+
+            float fit = Math.min(getWidth() / (float) image.getWidth(), getHeight() / (float) image.getHeight());
+            float scaledW = image.getWidth() * fit * zoom;
+            float scaledH = image.getHeight() * fit * zoom;
+            float maxX = Math.max(0f, (scaledW - getWidth()) * 0.5f);
+            float maxY = Math.max(0f, (scaledH - getHeight()) * 0.5f);
+            panX = Math.max(-maxX, Math.min(maxX, panX));
+            panY = Math.max(-maxY, Math.min(maxY, panY));
+        }
+
+        private void resetCropHandles() {
             updateImageRect();
             if (imageRect.isEmpty()) return;
             float mx = imageRect.width() * 0.08f;
             float my = imageRect.height() * 0.08f;
-            cropRect.set(imageRect.left + mx, imageRect.top + my, imageRect.right - mx, imageRect.bottom - my);
+            float l = imageRect.left + mx;
+            float t = imageRect.top + my;
+            float r = imageRect.right - mx;
+            float b = imageRect.bottom - my;
+            handles[0][0] = l; handles[0][1] = t;
+            handles[1][0] = (l+r)*0.5f; handles[1][1] = t;
+            handles[2][0] = r; handles[2][1] = t;
+            handles[3][0] = r; handles[3][1] = (t+b)*0.5f;
+            handles[4][0] = r; handles[4][1] = b;
+            handles[5][0] = (l+r)*0.5f; handles[5][1] = b;
+            handles[6][0] = l; handles[6][1] = b;
+            handles[7][0] = l; handles[7][1] = (t+b)*0.5f;
+        }
+
+        private void rebuildCropPath() {
+            cropPath.reset();
+            cropPath.moveTo(handles[0][0], handles[0][1]);
+            for (int i = 1; i < 8; i++) cropPath.lineTo(handles[i][0], handles[i][1]);
+            cropPath.close();
         }
 
         @Override
@@ -671,43 +816,75 @@ public class ImageViewerActivity extends Activity {
             canvas.drawBitmap(image, null, imageRect, bitmapPaint);
 
             if (cropEnabled) {
-                if (cropRect.isEmpty()) resetCropRect();
+                rebuildCropPath();
+                canvas.drawRect(imageRect, shadePaint);
 
-                canvas.drawRect(imageRect.left, imageRect.top, imageRect.right, cropRect.top, shadePaint);
-                canvas.drawRect(imageRect.left, cropRect.bottom, imageRect.right, imageRect.bottom, shadePaint);
-                canvas.drawRect(imageRect.left, cropRect.top, cropRect.left, cropRect.bottom, shadePaint);
-                canvas.drawRect(cropRect.right, cropRect.top, imageRect.right, cropRect.bottom, shadePaint);
+                canvas.save();
+                canvas.clipPath(cropPath);
+                canvas.drawBitmap(image, null, imageRect, bitmapPaint);
+                canvas.restore();
 
-                canvas.drawRect(cropRect, borderPaint);
-                float cx = cropRect.centerX();
-                float cy = cropRect.centerY();
+                canvas.drawPath(cropPath, borderPaint);
                 float hr = handleRadius * 0.55f;
-                canvas.drawCircle(cropRect.left, cropRect.top, hr, handlePaint);
-                canvas.drawCircle(cropRect.right, cropRect.top, hr, handlePaint);
-                canvas.drawCircle(cropRect.left, cropRect.bottom, hr, handlePaint);
-                canvas.drawCircle(cropRect.right, cropRect.bottom, hr, handlePaint);
-                canvas.drawCircle(cx, cropRect.top, hr, handlePaint);
-                canvas.drawCircle(cropRect.right, cy, hr, handlePaint);
-                canvas.drawCircle(cx, cropRect.bottom, hr, handlePaint);
-                canvas.drawCircle(cropRect.left, cy, hr, handlePaint);
+                for (int i = 0; i < 8; i++) {
+                    canvas.drawCircle(handles[i][0], handles[i][1], hr, handlePaint);
+                }
             }
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
-            if (!cropEnabled || image == null) return true;
+            if (image == null) return true;
+
+            if (!cropEnabled) {
+                scaleDetector.onTouchEvent(event);
+                gestureDetector.onTouchEvent(event);
+
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        lastX = event.getX();
+                        lastY = event.getY();
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        if (!scaleDetector.isInProgress() && event.getPointerCount() == 1 && zoom > 1.02f) {
+                            panX += event.getX() - lastX;
+                            panY += event.getY() - lastY;
+                            clampPan();
+                            invalidate();
+                        }
+                        lastX = event.getX();
+                        lastY = event.getY();
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        clampPan();
+                        invalidate();
+                        break;
+                }
+                return true;
+            }
+
             float x = event.getX();
             float y = event.getY();
 
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 dragMode = detectDragMode(x, y);
-                startAspect = Math.max(0.01f, cropRect.width() / Math.max(1f, cropRect.height()));
+                if (dragMode >= 0 && dragMode <= 7) {
+                    int opposite = oppositeCornerForHandle(dragMode);
+                    if (opposite >= 0) {
+                        startAspect = Math.max(
+                                0.01f,
+                                Math.abs(handles[dragMode][0] - handles[opposite][0]) /
+                                        Math.max(1f, Math.abs(handles[dragMode][1] - handles[opposite][1]))
+                        );
+                    }
+                }
                 lastX = x;
                 lastY = y;
                 return true;
             }
 
-            if (event.getActionMasked() == MotionEvent.ACTION_MOVE && dragMode != 0) {
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE && dragMode != -1) {
                 float dx = x - lastX;
                 float dy = y - lastY;
                 moveCrop(dx, dy);
@@ -718,24 +895,39 @@ public class ImageViewerActivity extends Activity {
             }
 
             if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-                dragMode = 0;
+                dragMode = -1;
                 return true;
             }
             return true;
         }
 
         private int detectDragMode(float x, float y) {
-            float r = handleRadius * 1.7f;
-            if (distance(x, y, cropRect.left, cropRect.top) <= r) return 2;
-            if (distance(x, y, cropRect.right, cropRect.top) <= r) return 3;
-            if (distance(x, y, cropRect.left, cropRect.bottom) <= r) return 4;
-            if (distance(x, y, cropRect.right, cropRect.bottom) <= r) return 5;
-            if (distance(x, y, cropRect.centerX(), cropRect.top) <= r) return 6;
-            if (distance(x, y, cropRect.right, cropRect.centerY()) <= r) return 7;
-            if (distance(x, y, cropRect.centerX(), cropRect.bottom) <= r) return 8;
-            if (distance(x, y, cropRect.left, cropRect.centerY()) <= r) return 9;
-            if (cropRect.contains(x, y)) return 1;
-            return 0;
+            float r = handleRadius * 1.8f;
+            for (int i = 0; i < 8; i++) {
+                if (distance(x, y, handles[i][0], handles[i][1]) <= r) return i;
+            }
+            if (pointInCropBounds(x, y)) return 8;
+            return -1;
+        }
+
+        private boolean pointInCropBounds(float x, float y) {
+            float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
+            float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+            for (int i = 0; i < 8; i++) {
+                minX = Math.min(minX, handles[i][0]);
+                minY = Math.min(minY, handles[i][1]);
+                maxX = Math.max(maxX, handles[i][0]);
+                maxY = Math.max(maxY, handles[i][1]);
+            }
+            return x >= minX && x <= maxX && y >= minY && y <= maxY;
+        }
+
+        private int oppositeCornerForHandle(int index) {
+            if (index == 0) return 4;
+            if (index == 2) return 6;
+            if (index == 4) return 0;
+            if (index == 6) return 2;
+            return -1;
         }
 
         private float distance(float x1, float y1, float x2, float y2) {
@@ -745,104 +937,132 @@ public class ImageViewerActivity extends Activity {
         }
 
         private void moveCrop(float dx, float dy) {
-            if (dragMode == 1) {
-                float nx = dx;
-                float ny = dy;
-                if (cropRect.left + nx < imageRect.left) nx = imageRect.left - cropRect.left;
-                if (cropRect.right + nx > imageRect.right) nx = imageRect.right - cropRect.right;
-                if (cropRect.top + ny < imageRect.top) ny = imageRect.top - cropRect.top;
-                if (cropRect.bottom + ny > imageRect.bottom) ny = imageRect.bottom - cropRect.bottom;
-                cropRect.offset(nx, ny);
-                return;
-            }
-
-            RectF r = new RectF(cropRect);
-
-            // Middle handles are free/independent.
-            if (dragMode == 6) {
-                r.top = Math.max(imageRect.top, Math.min(r.bottom - minCrop, r.top + dy));
-                cropRect.set(r);
-                return;
-            }
-            if (dragMode == 7) {
-                r.right = Math.min(imageRect.right, Math.max(r.left + minCrop, r.right + dx));
-                cropRect.set(r);
-                return;
-            }
             if (dragMode == 8) {
-                r.bottom = Math.min(imageRect.bottom, Math.max(r.top + minCrop, r.bottom + dy));
-                cropRect.set(r);
-                return;
-            }
-            if (dragMode == 9) {
-                r.left = Math.max(imageRect.left, Math.min(r.right - minCrop, r.left + dx));
-                cropRect.set(r);
+                moveAllHandles(dx, dy);
                 return;
             }
 
-            // Four corners stay linked to the starting crop aspect ratio.
-            float anchorX, anchorY, targetX, targetY, maxW, maxH;
-            boolean leftCorner = dragMode == 2 || dragMode == 4;
-            boolean topCorner = dragMode == 2 || dragMode == 3;
+            // Middle handles (1,3,5,7) are truly free: only the grabbed point moves.
+            if (dragMode == 1 || dragMode == 3 || dragMode == 5 || dragMode == 7) {
+                handles[dragMode][0] = clamp(handles[dragMode][0] + dx, imageRect.left, imageRect.right);
+                handles[dragMode][1] = clamp(handles[dragMode][1] + dy, imageRect.top, imageRect.bottom);
+                return;
+            }
 
-            anchorX = leftCorner ? r.right : r.left;
-            anchorY = topCorner ? r.bottom : r.top;
-            targetX = (leftCorner ? r.left : r.right) + dx;
-            targetY = (topCorner ? r.top : r.bottom) + dy;
+            // Corner handles stay linked/proportional. Adjacent middle handles follow the corner edge.
+            int opposite = oppositeCornerForHandle(dragMode);
+            if (opposite < 0) return;
 
-            maxW = leftCorner ? anchorX - imageRect.left : imageRect.right - anchorX;
-            maxH = topCorner ? anchorY - imageRect.top : imageRect.bottom - anchorY;
+            float oldX = handles[dragMode][0];
+            float oldY = handles[dragMode][1];
+            float anchorX = handles[opposite][0];
+            float anchorY = handles[opposite][1];
 
-            float w = Math.max(minCrop, Math.abs(anchorX - targetX));
-            float h = Math.max(minCrop, Math.abs(anchorY - targetY));
+            float rawX = clamp(oldX + dx, imageRect.left, imageRect.right);
+            float rawY = clamp(oldY + dy, imageRect.top, imageRect.bottom);
+            float sx = rawX >= anchorX ? 1f : -1f;
+            float sy = rawY >= anchorY ? 1f : -1f;
+            float w = Math.max(minCrop, Math.abs(rawX - anchorX));
+            float h = Math.max(minCrop, Math.abs(rawY - anchorY));
 
-            if (w / h > startAspect) w = h * startAspect;
-            else h = w / startAspect;
+            if (w / h > startAspect) h = w / startAspect;
+            else w = h * startAspect;
 
+            float maxW = sx > 0 ? imageRect.right - anchorX : anchorX - imageRect.left;
+            float maxH = sy > 0 ? imageRect.bottom - anchorY : anchorY - imageRect.top;
             if (w > maxW) { w = maxW; h = w / startAspect; }
             if (h > maxH) { h = maxH; w = h * startAspect; }
 
-            w = Math.max(minCrop, w);
-            h = Math.max(minCrop, h);
+            float newX = clamp(anchorX + sx * w, imageRect.left, imageRect.right);
+            float newY = clamp(anchorY + sy * h, imageRect.top, imageRect.bottom);
+            float moveX = newX - oldX;
+            float moveY = newY - oldY;
 
-            if (leftCorner) {
-                r.left = anchorX - w;
-                r.right = anchorX;
-            } else {
-                r.left = anchorX;
-                r.right = anchorX + w;
+            handles[dragMode][0] = newX;
+            handles[dragMode][1] = newY;
+
+            if (dragMode == 0) {
+                handles[1][1] = clamp(handles[1][1] + moveY, imageRect.top, imageRect.bottom);
+                handles[7][0] = clamp(handles[7][0] + moveX, imageRect.left, imageRect.right);
+            } else if (dragMode == 2) {
+                handles[1][1] = clamp(handles[1][1] + moveY, imageRect.top, imageRect.bottom);
+                handles[3][0] = clamp(handles[3][0] + moveX, imageRect.left, imageRect.right);
+            } else if (dragMode == 4) {
+                handles[3][0] = clamp(handles[3][0] + moveX, imageRect.left, imageRect.right);
+                handles[5][1] = clamp(handles[5][1] + moveY, imageRect.top, imageRect.bottom);
+            } else if (dragMode == 6) {
+                handles[5][1] = clamp(handles[5][1] + moveY, imageRect.top, imageRect.bottom);
+                handles[7][0] = clamp(handles[7][0] + moveX, imageRect.left, imageRect.right);
+            }
+        }
+
+        private void moveAllHandles(float dx, float dy) {
+            float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
+            float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+            for (int i = 0; i < 8; i++) {
+                minX = Math.min(minX, handles[i][0]);
+                minY = Math.min(minY, handles[i][1]);
+                maxX = Math.max(maxX, handles[i][0]);
+                maxY = Math.max(maxY, handles[i][1]);
             }
 
-            if (topCorner) {
-                r.top = anchorY - h;
-                r.bottom = anchorY;
-            } else {
-                r.top = anchorY;
-                r.bottom = anchorY + h;
-            }
+            if (minX + dx < imageRect.left) dx = imageRect.left - minX;
+            if (maxX + dx > imageRect.right) dx = imageRect.right - maxX;
+            if (minY + dy < imageRect.top) dy = imageRect.top - minY;
+            if (maxY + dy > imageRect.bottom) dy = imageRect.bottom - maxY;
 
-            r.left = Math.max(imageRect.left, r.left);
-            r.top = Math.max(imageRect.top, r.top);
-            r.right = Math.min(imageRect.right, r.right);
-            r.bottom = Math.min(imageRect.bottom, r.bottom);
-            cropRect.set(r);
+            for (int i = 0; i < 8; i++) {
+                handles[i][0] += dx;
+                handles[i][1] += dy;
+            }
+        }
+
+        private float clamp(float v, float min, float max) {
+            return Math.max(min, Math.min(max, v));
         }
 
         Bitmap createCroppedBitmap() {
-            if (image == null || cropRect.isEmpty() || imageRect.isEmpty()) return null;
+            if (image == null || imageRect.isEmpty()) return null;
 
             float sx = image.getWidth() / imageRect.width();
             float sy = image.getHeight() / imageRect.height();
 
-            int left = Math.max(0, Math.round((cropRect.left - imageRect.left) * sx));
-            int top = Math.max(0, Math.round((cropRect.top - imageRect.top) * sy));
-            int right = Math.min(image.getWidth(), Math.round((cropRect.right - imageRect.left) * sx));
-            int bottom = Math.min(image.getHeight(), Math.round((cropRect.bottom - imageRect.top) * sy));
+            float[] px = new float[8];
+            float[] py = new float[8];
+            float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
+            float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
 
+            for (int i = 0; i < 8; i++) {
+                px[i] = clamp((handles[i][0] - imageRect.left) * sx, 0f, image.getWidth());
+                py[i] = clamp((handles[i][1] - imageRect.top) * sy, 0f, image.getHeight());
+                minX = Math.min(minX, px[i]);
+                minY = Math.min(minY, py[i]);
+                maxX = Math.max(maxX, px[i]);
+                maxY = Math.max(maxY, py[i]);
+            }
+
+            int left = Math.max(0, (int) Math.floor(minX));
+            int top = Math.max(0, (int) Math.floor(minY));
+            int right = Math.min(image.getWidth(), (int) Math.ceil(maxX));
+            int bottom = Math.min(image.getHeight(), (int) Math.ceil(maxY));
             int w = right - left;
             int h = bottom - top;
             if (w <= 1 || h <= 1) return null;
-            return Bitmap.createBitmap(image, left, top, w, h);
+
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(out);
+            canvas.drawColor(Color.TRANSPARENT);
+
+            Path p = new Path();
+            p.moveTo(px[0] - left, py[0] - top);
+            for (int i = 1; i < 8; i++) p.lineTo(px[i] - left, py[i] - top);
+            p.close();
+
+            canvas.save();
+            canvas.clipPath(p);
+            canvas.drawBitmap(image, -left, -top, bitmapPaint);
+            canvas.restore();
+            return out;
         }
     }
 
