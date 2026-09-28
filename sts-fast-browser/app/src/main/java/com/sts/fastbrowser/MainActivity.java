@@ -67,7 +67,7 @@ public class MainActivity extends android.app.Activity {
     private ImageView slot1RefreshIcon;
     private ImageView slot2HomeIcon;
     private ImageView slot2RefreshIcon;
-    private TextView menuButton;
+    private ImageView menuButton;
     private WebView webView;
     private boolean adBlockEnabled = true;
     private int activeSlot = 1;
@@ -138,9 +138,9 @@ public class MainActivity extends android.app.Activity {
         slot2Container.addView(slot2Button, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         slot2Container.addView(slot2RefreshIcon, new LinearLayout.LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT));
 
-        menuButton = makeTopButton("⋮", Color.parseColor("#DDD2E8"));
-        menuButton.setTextSize(25);
-        menuButton.setGravity(Gravity.CENTER);
+        menuButton = makeIconButton(R.drawable.ic_more);
+        menuButton.setBackground(makeRipple(Color.parseColor("#DDD2E8")));
+        menuButton.setContentDescription("Menu");
 
         LinearLayout.LayoutParams slotLp1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         slotLp1.setMargins(0, 0, dp(3), 0);
