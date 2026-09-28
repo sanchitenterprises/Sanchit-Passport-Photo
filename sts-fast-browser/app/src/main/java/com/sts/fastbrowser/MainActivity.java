@@ -386,7 +386,7 @@ public class MainActivity extends android.app.Activity {
                 + "var n=a.getAttribute('download')||a.textContent||'Document.pdf';"
                 + "try{STSPdf.openPdf(h,n);}catch(x){}}"
                 + "},true);"
-                + "var es=document.querySelectorAll('embed[type="application/pdf"],object[type="application/pdf"],iframe[src*=".pdf"]');"
+                + "var es=document.querySelectorAll('embed[type=\\\"application/pdf\\\"],object[type=\\\"application/pdf\\\"],iframe[src*=\\\".pdf\\\"]');"
                 + "for(var i=0;i<es.length;i++){var u=es[i].src||es[i].data||'';if(u.indexOf('http')===0){try{STSPdf.openPdf(u,'Document.pdf');}catch(x){}break;}}"
                 + "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
