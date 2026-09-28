@@ -338,7 +338,7 @@ public class ImageViewerActivity extends Activity {
     private void printImage() {
         if (bitmap == null) return;
         PrintManager pm = (PrintManager) getSystemService(PRINT_SERVICE);
-        pm.print(fileName, new ImagePrintAdapter(bitmap, fileName), new PrintAttributes.Builder().build());
+        pm.print(fileName, new ImagePrintAdapter(this, bitmap, fileName), new PrintAttributes.Builder().build());
     }
 
     private void saveImageToDownloads() {
@@ -645,11 +645,13 @@ public class ImageViewerActivity extends Activity {
     }
 
     private static class ImagePrintAdapter extends PrintDocumentAdapter {
+        private final android.content.Context context;
         private final Bitmap bitmap;
         private final String name;
         private PrintAttributes attributes;
 
-        ImagePrintAdapter(Bitmap bitmap, String name) {
+        ImagePrintAdapter(android.content.Context context, Bitmap bitmap, String name) {
+            this.context = context;
             this.bitmap = bitmap;
             this.name = name;
         }
@@ -675,7 +677,7 @@ public class ImageViewerActivity extends Activity {
                             android.os.CancellationSignal cancellationSignal,
                             WriteResultCallback callback) {
             android.print.pdf.PrintedPdfDocument document =
-                    new android.print.pdf.PrintedPdfDocument(nullSafeContext(), attributes);
+                    new android.print.pdf.PrintedPdfDocument(context, attributes);
             try {
                 PdfDocument.Page page = document.startPage(0);
                 RectF dst = new RectF(page.getInfo().getContentRect());
@@ -698,12 +700,5 @@ public class ImageViewerActivity extends Activity {
             }
         }
 
-        private android.content.Context nullSafeContext() {
-            return STSFastBrowserContextHolder.appContext;
-        }
-    }
-
-    public static class STSFastBrowserContextHolder {
-        static android.content.Context appContext;
     }
 }
