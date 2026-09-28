@@ -720,7 +720,7 @@ public class MainActivity extends android.app.Activity {
             row.setPadding(dp(2), dp(2), dp(2), dp(2));
 
             TextView title = new TextView(this);
-            title.setText(s.name + (s.hasPassword() ? "  🔒" : "") + "\n" + s.url);
+            title.setText(s.name + (s.hasPassword() ? "  🔒" : ""));
             title.setTextColor(Color.parseColor("#172326"));
             title.setTextSize(13);
             title.setPadding(dp(8), dp(4), dp(6), dp(4));
@@ -732,21 +732,31 @@ public class MainActivity extends android.app.Activity {
             more.setBackgroundColor(Color.TRANSPARENT);
             more.setContentDescription("Website options");
 
-            row.addView(title, new LinearLayout.LayoutParams(0, dp(60), 1f));
+            row.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
             row.addView(more, new LinearLayout.LayoutParams(dp(48), dp(48)));
-            more.setOnClickListener(v -> showManagedSiteMenu(v, s, slot));
+            more.setOnClickListener(v -> showManagedSiteMenu(v, s, slot, title));
 
-            list.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
+            list.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
         }
     }
 
-    private void showManagedSiteMenu(View anchor, Site site, int slot) {
+    private void showManagedSiteMenu(View anchor, Site site, int slot, TextView titleView) {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
+        pm.getMenu().add("Edit");
         pm.getMenu().add(site.hasPassword() ? "Change Password" : "Set Password");
         pm.getMenu().add(slot == 1 ? "Move to D2" : "Move to D1");
         pm.getMenu().add("Remove Website");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
+            if (t.equals("Edit")) {
+                Runnable openEditor = () -> showEditWebsiteDialog(site, slot, titleView);
+                if (site.hasPassword()) {
+                    showSitePasswordDialog(site, openEditor);
+                } else {
+                    openEditor.run();
+                }
+                return true;
+            }
             if (t.equals("Set Password") || t.equals("Change Password")) {
                 showSetSitePasswordDialog(site, slot);
                 return true;
@@ -762,6 +772,74 @@ public class MainActivity extends android.app.Activity {
             return false;
         });
         pm.show();
+    }
+
+    private void showEditWebsiteDialog(Site site, int slot, TextView titleView) {
+        if (site == null) return;
+
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(20), dp(8), dp(20), 0);
+
+        EditText name = new EditText(this);
+        name.setHint("Website name");
+        name.setSingleLine(true);
+        name.setText(site.name);
+
+        EditText url = new EditText(this);
+        url.setHint("URL (example.com)");
+        url.setSingleLine(true);
+        url.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        url.setText(site.url);
+
+        body.addView(name, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        body.addView(url, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Edit Website")
+                .setView(body)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", null)
+                .create();
+
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String newName = name.getText().toString().trim();
+            String newUrl = normalizeUrl(url.getText().toString().trim());
+            if (newName.isEmpty() || newUrl == null) {
+                Toast.makeText(this, "Name और सही URL डालें", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            for (Site other : getSites(slot)) {
+                if (other != site && newUrl.equalsIgnoreCase(other.url)) {
+                    Toast.makeText(this, "यह website इस dropdown में पहले से है", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+
+            String oldUrl = site.url;
+            site.name = newName;
+            site.url = newUrl;
+            saveSites(slot);
+
+            if (slot == 1 && oldUrl.equals(slot1Url)) {
+                slot1Name = newName;
+                slot1Url = newUrl;
+            } else if (slot == 2 && oldUrl.equals(slot2Url)) {
+                slot2Name = newName;
+                slot2Url = newUrl;
+            }
+            saveSlots();
+            updateSlotLabels();
+
+            if (titleView != null) {
+                titleView.setText(site.name + (site.hasPassword() ? "  🔒" : ""));
+            }
+
+            dialog.dismiss();
+            Toast.makeText(this, "Website updated", Toast.LENGTH_SHORT).show();
+        }));
+        dialog.show();
     }
 
     private void showSetSitePasswordDialog(Site site, int slot) {
@@ -835,7 +913,7 @@ public class MainActivity extends android.app.Activity {
     private void confirmDeleteSite(Site site, int slot) {
         new AlertDialog.Builder(this)
                 .setTitle("Remove " + site.name + "?")
-                .setMessage(site.url)
+                .setMessage("इस website को list से हटाना है?")
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Remove", (d, w) -> {
                     getSites(slot).remove(site);
@@ -1060,8 +1138,8 @@ public class MainActivity extends android.app.Activity {
     }
 
     private static class Site {
-        final String name;
-        final String url;
+        String name;
+        String url;
         String passwordHash;
 
         Site(String name, String url, String passwordHash) {
