@@ -2,15 +2,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
         android:allowBackup="true"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@drawable/sts_fast_browser_logo"
         android:label="STS Fast Browser"
-        android:roundIcon="@drawable/ic_launcher"
+        android:roundIcon="@drawable/sts_fast_browser_logo"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
+        <activity
+            android:name=".PdfViewerActivity"
+            android:exported="false"
+            android:documentLaunchMode="always"
+            android:launchMode="standard"
+            android:excludeFromRecents="false"
+            android:resizeableActivity="true"
+            android:screenOrientation="unspecified" />
+
+        <provider
+            android:name=".PdfShareProvider"
+            android:authorities="${applicationId}.pdfshare"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
