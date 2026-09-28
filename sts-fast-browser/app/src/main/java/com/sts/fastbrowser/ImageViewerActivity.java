@@ -55,6 +55,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Locale;
 
 public class ImageViewerActivity extends Activity {
@@ -66,12 +67,27 @@ public class ImageViewerActivity extends Activity {
     private File shareFile;
     private Bitmap bitmap;
 
+    private static final int TOP_MODE_NORMAL = 0;
+    private static final int TOP_MODE_CROP = 1;
+    private static final int TOP_MODE_SCAN = 2;
+
     private ImageCanvas imageCanvas;
     private LinearLayout editBar;
+    private LinearLayout topBar;
+    private TextView topTitle;
+    private ImageButton topMenu;
+    private ImageButton topUndoButton;
+    private ImageButton topRedoButton;
+    private ImageButton topOkButton;
+    private int topMode = TOP_MODE_NORMAL;
+
     private boolean cropMode = false;
     private String pendingSaveAction;
     private int targetKb = 0;
     private boolean scanBusy = false;
+    private Bitmap scanUndoBitmap;
+    private Bitmap scanRedoBitmap;
+    private boolean scanShowingEffect = false;
     private OnBackInvokedCallback systemBackCallback;
 
     @Override
@@ -111,35 +127,17 @@ public class ImageViewerActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.BLACK);
 
-        LinearLayout top = new LinearLayout(this);
-        top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(6), dp(3), dp(4), dp(3));
+        topBar = new LinearLayout(this);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(6), dp(3), dp(4), dp(3));
         GradientDrawable bg = new GradientDrawable(
                 GradientDrawable.Orientation.LEFT_RIGHT,
                 new int[]{Color.parseColor("#D9F0EE"), Color.parseColor("#E3EAF4"), Color.parseColor("#EEE8F4")}
         );
-        top.setBackground(bg);
-        root.addView(top, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
-
-        TextView title = new TextView(this);
-        title.setText(fileName);
-        title.setTextColor(Color.parseColor("#162326"));
-        title.setTextSize(14);
-        title.setSingleLine(true);
-        title.setEllipsize(TextUtils.TruncateAt.END);
-        title.setGravity(Gravity.CENTER_VERTICAL);
-        title.setPadding(dp(10), 0, dp(8), 0);
-        top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-
-        ImageButton menu = new ImageButton(this);
-        menu.setImageResource(R.drawable.ic_more);
-        menu.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
-        menu.setPadding(dp(10), dp(10), dp(10), dp(10));
-        menu.setBackgroundColor(Color.TRANSPARENT);
-        menu.setContentDescription("Menu");
-        top.addView(menu, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
-        menu.setOnClickListener(this::showMenu);
+        topBar.setBackground(bg);
+        root.addView(topBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        showNormalTopHeader();
 
         FrameLayout stage = new FrameLayout(this);
         stage.setBackgroundColor(Color.BLACK);
@@ -159,6 +157,134 @@ public class ImageViewerActivity extends Activity {
         root.addView(editBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
 
         return root;
+    }
+
+    private void showNormalTopHeader() {
+        if (topBar == null) return;
+        topMode = TOP_MODE_NORMAL;
+        topBar.removeAllViews();
+
+        topTitle = new TextView(this);
+        topTitle.setText(fileName);
+        topTitle.setTextColor(Color.parseColor("#162326"));
+        topTitle.setTextSize(14);
+        topTitle.setSingleLine(true);
+        topTitle.setEllipsize(TextUtils.TruncateAt.END);
+        topTitle.setGravity(Gravity.CENTER_VERTICAL);
+        topTitle.setPadding(dp(10), 0, dp(8), 0);
+        topBar.addView(topTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+
+        topMenu = new ImageButton(this);
+        topMenu.setImageResource(R.drawable.ic_more);
+        topMenu.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        topMenu.setPadding(dp(10), dp(10), dp(10), dp(10));
+        topMenu.setBackgroundColor(Color.TRANSPARENT);
+        topMenu.setContentDescription("Menu");
+        topMenu.setOnClickListener(this::showMenu);
+        topBar.addView(topMenu, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
+
+        topUndoButton = null;
+        topRedoButton = null;
+        topOkButton = null;
+    }
+
+    private void showActionTopHeader(int mode) {
+        if (topBar == null) return;
+        topMode = mode;
+        topBar.removeAllViews();
+
+        topUndoButton = addTopAction(R.drawable.ic_undo, "Undo", v -> {
+            if (topMode == TOP_MODE_CROP) imageCanvas.undoCrop();
+            else if (topMode == TOP_MODE_SCAN) undoScan();
+        });
+        topRedoButton = addTopAction(R.drawable.ic_redo, "Redo", v -> {
+            if (topMode == TOP_MODE_CROP) imageCanvas.redoCrop();
+            else if (topMode == TOP_MODE_SCAN) redoScan();
+        });
+        topOkButton = addTopAction(R.drawable.ic_done, "OK", v -> {
+            if (topMode == TOP_MODE_CROP) {
+                applyCrop();
+            } else if (topMode == TOP_MODE_SCAN) {
+                clearScanHistory();
+                showNormalTopHeader();
+            }
+        });
+        updateTopActionStates();
+    }
+
+    private ImageButton addTopAction(int icon, String labelText, View.OnClickListener listener) {
+        LinearLayout holder = new LinearLayout(this);
+        holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setGravity(Gravity.CENTER);
+        holder.setPadding(dp(2), 0, dp(2), 0);
+
+        ImageButton button = new ImageButton(this);
+        button.setImageResource(icon);
+        button.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        button.setPadding(dp(6), dp(2), dp(6), dp(1));
+        button.setBackgroundColor(Color.TRANSPARENT);
+        button.setContentDescription(labelText);
+        button.setOnClickListener(listener);
+
+        TextView label = new TextView(this);
+        label.setText(labelText);
+        label.setTextSize(8);
+        label.setTextColor(Color.parseColor("#162326"));
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+        label.setOnClickListener(listener);
+
+        holder.addView(button, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        holder.addView(label, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)));
+        topBar.addView(holder, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        return button;
+    }
+
+    private void updateTopActionStates() {
+        if (topUndoButton == null || topRedoButton == null) return;
+        boolean canUndo = false;
+        boolean canRedo = false;
+
+        if (topMode == TOP_MODE_CROP && imageCanvas != null) {
+            canUndo = imageCanvas.canUndoCrop();
+            canRedo = imageCanvas.canRedoCrop();
+        } else if (topMode == TOP_MODE_SCAN) {
+            canUndo = scanShowingEffect && scanUndoBitmap != null;
+            canRedo = !scanShowingEffect && scanRedoBitmap != null;
+        }
+
+        topUndoButton.setEnabled(canUndo);
+        topUndoButton.setAlpha(canUndo ? 1f : 0.30f);
+        topRedoButton.setEnabled(canRedo);
+        topRedoButton.setAlpha(canRedo ? 1f : 0.30f);
+    }
+
+    private void clearScanHistory() {
+        if (scanUndoBitmap != null && scanUndoBitmap != bitmap && !scanUndoBitmap.isRecycled()) {
+            scanUndoBitmap.recycle();
+        }
+        if (scanRedoBitmap != null && scanRedoBitmap != bitmap && !scanRedoBitmap.isRecycled()) {
+            scanRedoBitmap.recycle();
+        }
+        scanUndoBitmap = null;
+        scanRedoBitmap = null;
+        scanShowingEffect = false;
+    }
+
+    private void undoScan() {
+        if (!scanShowingEffect || scanUndoBitmap == null) return;
+        Bitmap restored = scanUndoBitmap.copy(Bitmap.Config.ARGB_8888, true);
+        setBitmap(restored);
+        scanShowingEffect = false;
+        updateTopActionStates();
+    }
+
+    private void redoScan() {
+        if (scanShowingEffect || scanRedoBitmap == null) return;
+        Bitmap restored = scanRedoBitmap.copy(Bitmap.Config.ARGB_8888, true);
+        setBitmap(restored);
+        scanShowingEffect = true;
+        updateTopActionStates();
     }
 
     private void showMenu(View anchor) {
@@ -251,6 +377,8 @@ public class ImageViewerActivity extends Activity {
         addEditIcon(R.drawable.ic_done, "Done", v -> {
             cropMode = false;
             imageCanvas.setCropMode(false);
+            clearScanHistory();
+            showNormalTopHeader();
             editBar.setVisibility(View.GONE);
         });
     }
@@ -262,6 +390,7 @@ public class ImageViewerActivity extends Activity {
             cropMode = false;
             imageCanvas.setCropMode(false);
             buildMainEditBar();
+            showNormalTopHeader();
         });
     }
 
@@ -297,9 +426,11 @@ public class ImageViewerActivity extends Activity {
 
     private void beginCrop() {
         if (bitmap == null) return;
+        clearScanHistory();
         cropMode = true;
         imageCanvas.setCropMode(true);
         buildCropBar();
+        showActionTopHeader(TOP_MODE_CROP);
     }
 
     private void applyCrop() {
@@ -313,6 +444,7 @@ public class ImageViewerActivity extends Activity {
         imageCanvas.setCropMode(false);
         setBitmap(cropped);
         buildMainEditBar();
+        showNormalTopHeader();
     }
 
     private void rotateImage() {
@@ -326,7 +458,9 @@ public class ImageViewerActivity extends Activity {
     private void applyScanEffect() {
         if (bitmap == null || scanBusy) return;
 
+        clearScanHistory();
         scanBusy = true;
+        scanUndoBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true);
         final Bitmap source = bitmap;
         Toast.makeText(this, "Scan effect apply हो रहा है...", Toast.LENGTH_SHORT).show();
 
@@ -354,7 +488,6 @@ public class ImageViewerActivity extends Activity {
                         prev = curr;
                         curr = next;
                         next = temp;
-
                         int ny = Math.min(h - 1, y + 1);
                         source.getPixels(next, 0, w, 0, ny, w, 1);
                     }
@@ -369,31 +502,38 @@ public class ImageViewerActivity extends Activity {
                         int up = scanGray(prev[x]);
                         int down = scanGray(next[x]);
 
-                        // Grayscale + local sharpening for printed/document text.
-                        int edge = (4 * center) - left - right - up - down;
-                        int value = center + Math.round(edge * 0.58f);
+                        // Anti-halo text sharpening: only dark-detail sharpening is allowed.
+                        // Bright edge overshoot is deliberately avoided so folds/creases do not get white lines.
+                        int local = (center * 4 + left + right + up + down) / 8;
+                        int value = center;
+                        int darkDetail = local - center;
+                        if (darkDetail > 4) {
+                            value = center - Math.round(darkDetail * 0.38f);
+                        }
 
-                        // Stronger document contrast without turning the page into pure B/W.
-                        value = 128 + Math.round((value - 128) * 1.24f);
+                        // Mild document contrast; much softer than the old whitening/sharpening pass.
+                        value = 128 + Math.round((value - 128) * 1.10f);
 
-                        // Clean paper/background and deepen darker text slightly.
-                        if (value > 175) {
-                            value = value + Math.round((255 - value) * 0.32f);
+                        // Gentle paper cleanup without creating bright outlines.
+                        if (value > 215) {
+                            value += Math.round((255 - value) * 0.08f);
                         } else if (value < 105) {
-                            value = Math.round(value * 0.88f);
+                            value = Math.round(value * 0.94f);
                         }
 
                         value = Math.max(0, Math.min(255, value));
                         outRow[x] = Color.argb(255, value, value, value);
                     }
-
                     result.setPixels(outRow, 0, w, 0, y, w, 1);
                 }
 
                 final Bitmap done = result;
                 runOnUiThread(() -> {
                     scanBusy = false;
+                    scanRedoBitmap = done.copy(Bitmap.Config.ARGB_8888, true);
                     setBitmap(done);
+                    scanShowingEffect = true;
+                    showActionTopHeader(TOP_MODE_SCAN);
                     Toast.makeText(
                             this,
                             "Grayscale + Text Sharp scan effect apply हो गया",
@@ -405,6 +545,8 @@ public class ImageViewerActivity extends Activity {
                 runOnUiThread(() -> {
                     scanBusy = false;
                     if (failed != null && failed != bitmap && !failed.isRecycled()) failed.recycle();
+                    clearScanHistory();
+                    showNormalTopHeader();
                     Toast.makeText(this, "Scan effect apply नहीं हो पाया", Toast.LENGTH_SHORT).show();
                 });
             }
@@ -823,6 +965,7 @@ public class ImageViewerActivity extends Activity {
             }
             systemBackCallback = null;
         }
+        clearScanHistory();
         if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
         bitmap = null;
         super.onDestroy();
@@ -838,6 +981,9 @@ public class ImageViewerActivity extends Activity {
         private final RectF baseRect = new RectF();
         private final Path cropPath = new Path();
         private final float[][] handles = new float[8][2];
+        private final ArrayList<float[]> cropUndoHistory = new ArrayList<>();
+        private final ArrayList<float[]> cropRedoHistory = new ArrayList<>();
+        private boolean cropGestureMoved = false;
 
         private final ScaleGestureDetector scaleDetector;
         private final GestureDetector gestureDetector;
@@ -936,11 +1082,62 @@ public class ImageViewerActivity extends Activity {
         void setCropMode(boolean enabled) {
             cropEnabled = enabled;
             dragMode = -1;
+            cropGestureMoved = false;
             if (enabled) {
                 resetZoom();
                 resetCropHandles();
+                cropUndoHistory.clear();
+                cropRedoHistory.clear();
+                cropUndoHistory.add(snapshotHandles());
+            } else {
+                cropUndoHistory.clear();
+                cropRedoHistory.clear();
             }
             invalidate();
+            updateTopActionStates();
+        }
+
+        boolean canUndoCrop() {
+            return cropUndoHistory.size() > 1;
+        }
+
+        boolean canRedoCrop() {
+            return !cropRedoHistory.isEmpty();
+        }
+
+        void undoCrop() {
+            if (!canUndoCrop()) return;
+            float[] current = cropUndoHistory.remove(cropUndoHistory.size() - 1);
+            cropRedoHistory.add(current);
+            restoreHandles(cropUndoHistory.get(cropUndoHistory.size() - 1));
+            invalidate();
+            updateTopActionStates();
+        }
+
+        void redoCrop() {
+            if (!canRedoCrop()) return;
+            float[] state = cropRedoHistory.remove(cropRedoHistory.size() - 1);
+            cropUndoHistory.add(state);
+            restoreHandles(state);
+            invalidate();
+            updateTopActionStates();
+        }
+
+        private float[] snapshotHandles() {
+            float[] state = new float[16];
+            for (int i = 0; i < 8; i++) {
+                state[i * 2] = handles[i][0];
+                state[i * 2 + 1] = handles[i][1];
+            }
+            return state;
+        }
+
+        private void restoreHandles(float[] state) {
+            if (state == null || state.length < 16) return;
+            for (int i = 0; i < 8; i++) {
+                handles[i][0] = state[i * 2];
+                handles[i][1] = state[i * 2 + 1];
+            }
         }
 
         private void resetZoom() {
@@ -1079,6 +1276,7 @@ public class ImageViewerActivity extends Activity {
 
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 dragMode = detectDragMode(x, y);
+                cropGestureMoved = false;
                 cornerMoveMode = 0;
                 dragStartX = x;
                 dragStartY = y;
@@ -1102,6 +1300,7 @@ public class ImageViewerActivity extends Activity {
             }
 
             if (event.getActionMasked() == MotionEvent.ACTION_MOVE && dragMode != -1) {
+                if (Math.abs(x - lastX) > 0.2f || Math.abs(y - lastY) > 0.2f) cropGestureMoved = true;
                 if (isCornerHandle(dragMode)) {
                     float totalDx = x - dragStartX;
                     float totalDy = y - dragStartY;
@@ -1129,8 +1328,14 @@ public class ImageViewerActivity extends Activity {
             }
 
             if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                if (dragMode != -1 && cropGestureMoved) {
+                    cropUndoHistory.add(snapshotHandles());
+                    cropRedoHistory.clear();
+                    updateTopActionStates();
+                }
                 dragMode = -1;
                 cornerMoveMode = 0;
+                cropGestureMoved = false;
                 return true;
             }
             return true;
