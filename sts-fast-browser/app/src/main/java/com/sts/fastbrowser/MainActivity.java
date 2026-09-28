@@ -32,6 +32,7 @@ import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.ImageButton;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.PopupWindow;
@@ -75,6 +76,10 @@ public class MainActivity extends android.app.Activity {
     private ImageView slot2HomeIcon;
     private ImageView slot2RefreshIcon;
     private ImageView menuButton;
+    private FrameLayout webStage;
+    private WebView webView1;
+    private WebView webView2;
+    // Active-slot alias. D1 and D2 themselves stay alive independently.
     private WebView webView;
     private boolean adBlockEnabled = true;
     private int activeSlot = 1;
@@ -104,7 +109,9 @@ public class MainActivity extends android.app.Activity {
         loadSites();
         loadSlots();
         setContentView(buildUi());
-        configureWebView();
+        configureWebView(webView1);
+        configureWebView(webView2);
+        showWebView(1);
         updateSlotLabels();
         loadInitialPage();
     }
@@ -157,9 +164,20 @@ public class MainActivity extends android.app.Activity {
         top.addView(slot2Container, slotLp2);
         top.addView(menuButton, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
 
-        webView = new WebView(this);
-        webView.setBackgroundColor(Color.WHITE);
-        root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        webStage = new FrameLayout(this);
+        webView1 = new WebView(this);
+        webView2 = new WebView(this);
+        webView1.setBackgroundColor(Color.WHITE);
+        webView2.setBackgroundColor(Color.WHITE);
+        webStage.addView(webView1, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        webStage.addView(webView2, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        webView2.setVisibility(View.GONE);
+        webView = webView1;
+        root.addView(webStage, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         slot1Button.setOnClickListener(v -> showSitePopup(slot1Container, 1));
         slot2Button.setOnClickListener(v -> showSitePopup(slot2Container, 2));
@@ -247,8 +265,8 @@ public class MainActivity extends android.app.Activity {
         });
     }
 
-    private void configureWebView() {
-        WebSettings s = webView.getSettings();
+    private void configureWebView(WebView targetWebView) {
+        WebSettings s = targetWebView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
@@ -262,11 +280,11 @@ public class MainActivity extends android.app.Activity {
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(targetWebView, true);
 
-        webView.addJavascriptInterface(new PdfBridge(), "STSPdf");
+        targetWebView.addJavascriptInterface(new PdfBridge(), "STSPdf");
 
-        webView.setWebChromeClient(new WebChromeClient() {
+        targetWebView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
                 WebView child = new WebView(MainActivity.this);
@@ -281,7 +299,7 @@ public class MainActivity extends android.app.Activity {
                     if (mt.contains("application/pdf") || isPdfCandidate(url, null)) {
                         openPdfTask(url, guessPdfName(url, contentDisposition));
                     } else if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
-                        webView.loadUrl(url);
+                        targetWebView.loadUrl(url);
                     }
                     child.destroy();
                 });
@@ -306,7 +324,7 @@ public class MainActivity extends android.app.Activity {
                         if (handle(url)) return true;
                         if (url.startsWith("http://") || url.startsWith("https://")) {
                             handled = true;
-                            webView.loadUrl(url);
+                            targetWebView.loadUrl(url);
                             child.post(child::destroy);
                             return true;
                         }
@@ -325,7 +343,7 @@ public class MainActivity extends android.app.Activity {
                 return true;
             }
         });
-        webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+        targetWebView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
             if (mt.contains("application/pdf") || isPdfCandidate(url, mt)) {
                 openPdfTask(url, guessPdfName(url, contentDisposition));
@@ -333,7 +351,7 @@ public class MainActivity extends android.app.Activity {
                 openExternal(url);
             }
         });
-        webView.setWebViewClient(new WebViewClient() {
+        targetWebView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
@@ -467,7 +485,8 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void showSitePopup(View anchor, int slot) {
-        activeSlot = slot;
+        showWebView(slot);
+        ensureSlotPageLoaded(slot);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(4), dp(5), dp(4), dp(5));
@@ -526,8 +545,39 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private WebView webViewForSlot(int slot) {
+        return slot == 2 ? webView2 : webView1;
+    }
+
+    private void showWebView(int slot) {
+        activeSlot = slot == 2 ? 2 : 1;
+        webView = webViewForSlot(activeSlot);
+        if (webView1 != null) webView1.setVisibility(activeSlot == 1 ? View.VISIBLE : View.GONE);
+        if (webView2 != null) webView2.setVisibility(activeSlot == 2 ? View.VISIBLE : View.GONE);
+        updateSlotLabels();
+    }
+
+    private void ensureSlotPageLoaded(int slot) {
+        WebView target = webViewForSlot(slot);
+        if (target == null || target.getUrl() != null) return;
+
+        String selectedUrl = slot == 2 ? slot2Url : slot1Url;
+        Site selected = findSiteByUrl(slot, selectedUrl);
+        Runnable load = () -> {
+            if (target.getUrl() == null) target.loadUrl(selectedUrl);
+        };
+        if (selected != null && selected.hasPassword()) {
+            showSitePasswordDialog(selected, load);
+        } else {
+            load.run();
+        }
+    }
+
     private void performSelectSite(int slot, Site site) {
-        activeSlot = slot;
+        String previousSelectedUrl = slot == 2 ? slot2Url : slot1Url;
+        boolean sameSelection = previousSelectedUrl != null &&
+                previousSelectedUrl.equalsIgnoreCase(site.url);
+
         if (slot == 1) {
             slot1Name = site.name;
             slot1Url = site.url;
@@ -536,22 +586,24 @@ public class MainActivity extends android.app.Activity {
             slot2Url = site.url;
         }
         saveSlots();
-        updateSlotLabels();
-        webView.animate().alpha(0.82f).setDuration(80).setListener(new AnimatorListenerAdapter() {
-            @Override public void onAnimationEnd(Animator animation) {
-                webView.loadUrl(site.url);
-                webView.animate().alpha(1f).setDuration(160).setListener(null).start();
-            }
-        }).start();
+        showWebView(slot);
+
+        WebView target = webViewForSlot(slot);
+        // Selecting the same dropdown site is only a slot switch: keep its exact live page,
+        // history, forms and scroll state. A different site selection is an explicit navigation.
+        if (!sameSelection || target.getUrl() == null) {
+            target.animate().alpha(0.82f).setDuration(80).setListener(new AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(Animator animation) {
+                    target.loadUrl(site.url);
+                    target.animate().alpha(1f).setDuration(160).setListener(null).start();
+                }
+            }).start();
+        }
     }
 
     private void loadInitialPage() {
-        Site selected = findSiteByUrl(1, slot1Url);
-        if (selected != null && selected.hasPassword()) {
-            showSitePasswordDialog(selected, () -> webView.loadUrl(slot1Url));
-        } else {
-            webView.loadUrl(slot1Url);
-        }
+        showWebView(1);
+        ensureSlotPageLoaded(1);
     }
 
     private void showSitePasswordDialog(Site site, Runnable onSuccess) {
@@ -582,20 +634,19 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void goHome(int slot) {
-        activeSlot = slot;
-        updateSlotLabels();
+        showWebView(slot);
+        WebView target = webViewForSlot(slot);
         String url = slot == 1 ? slot1Url : slot2Url;
-        webView.loadUrl(url);
+        target.loadUrl(url);
     }
 
     private void refreshSlot(int slot) {
-        boolean wasActive = activeSlot == slot;
-        activeSlot = slot;
-        updateSlotLabels();
-        if (wasActive) {
-            webView.reload();
+        showWebView(slot);
+        WebView target = webViewForSlot(slot);
+        if (target.getUrl() == null) {
+            ensureSlotPageLoaded(slot);
         } else {
-            webView.loadUrl(slot == 1 ? slot1Url : slot2Url);
+            target.reload();
         }
     }
 
@@ -1124,16 +1175,22 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private void destroyWebView(WebView target) {
+        if (target == null) return;
+        target.stopLoading();
+        target.loadUrl("about:blank");
+        target.clearHistory();
+        target.removeAllViews();
+        target.destroy();
+    }
+
     @Override
     protected void onDestroy() {
-        if (webView != null) {
-            webView.stopLoading();
-            webView.loadUrl("about:blank");
-            webView.clearHistory();
-            webView.removeAllViews();
-            webView.destroy();
-            webView = null;
-        }
+        destroyWebView(webView1);
+        destroyWebView(webView2);
+        webView1 = null;
+        webView2 = null;
+        webView = null;
         super.onDestroy();
     }
 
