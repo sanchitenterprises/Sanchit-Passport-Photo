@@ -22,6 +22,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -250,14 +251,76 @@ public class MainActivity extends android.app.Activity {
         s.setDisplayZoomControls(false);
         s.setSupportZoom(true);
         s.setMediaPlaybackRequiresUserGesture(false);
+        s.setSupportMultipleWindows(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
 
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.addJavascriptInterface(new PdfBridge(), "STSPdf");
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
+                WebView child = new WebView(MainActivity.this);
+                WebSettings childSettings = child.getSettings();
+                childSettings.setJavaScriptEnabled(true);
+                childSettings.setDomStorageEnabled(true);
+                CookieManager.getInstance().setAcceptCookie(true);
+                CookieManager.getInstance().setAcceptThirdPartyCookies(child, true);
+
+                child.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+                    String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
+                    if (mt.contains("application/pdf") || isPdfCandidate(url, null)) {
+                        openPdfTask(url, guessPdfName(url, contentDisposition));
+                    } else if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+                        webView.loadUrl(url);
+                    }
+                    child.destroy();
+                });
+
+                child.setWebViewClient(new WebViewClient() {
+                    private boolean handled = false;
+
+                    private boolean handle(String url) {
+                        if (handled || url == null) return false;
+                        if (isPdfCandidate(url, null)) {
+                            handled = true;
+                            openPdfTask(url, guessPdfName(url, null));
+                            child.post(child::destroy);
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                        String url = request.getUrl().toString();
+                        if (handle(url)) return true;
+                        if (url.startsWith("http://") || url.startsWith("https://")) {
+                            handled = true;
+                            webView.loadUrl(url);
+                            child.post(child::destroy);
+                            return true;
+                        }
+                        return true;
+                    }
+
+                    @Override
+                    public void onPageStarted(WebView v, String url, android.graphics.Bitmap favicon) {
+                        if (handle(url)) v.stopLoading();
+                    }
+                });
+
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(child);
+                resultMsg.sendToTarget();
+                return true;
+            }
+        });
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
-            if (mt.contains("application/pdf") || isPdfUrl(url)) {
+            if (mt.contains("application/pdf") || isPdfCandidate(url, mt)) {
                 openPdfTask(url, guessPdfName(url, contentDisposition));
             } else {
                 openExternal(url);
@@ -269,13 +332,19 @@ public class MainActivity extends android.app.Activity {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
                 if ("http".equals(scheme) || "https".equals(scheme)) {
-                    if (isPdfUrl(uri.toString())) {
+                    if (isPdfCandidate(uri.toString(), null)) {
                         openPdfTask(uri.toString(), guessPdfName(uri.toString(), null));
                         return true;
                     }
                     return false;
                 }
                 return openExternal(uri.toString());
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                injectPdfHook(view);
             }
 
             @Override
@@ -288,14 +357,47 @@ public class MainActivity extends android.app.Activity {
         });
     }
 
-    private boolean isPdfUrl(String url) {
+    private boolean isPdfCandidate(String url, String typeHint) {
+        if (typeHint != null && typeHint.toLowerCase(Locale.ROOT).contains("application/pdf")) return true;
         if (url == null) return false;
         String lower = url.toLowerCase(Locale.ROOT);
-        int q = lower.indexOf('?');
-        if (q >= 0) lower = lower.substring(0, q);
-        int h = lower.indexOf('#');
-        if (h >= 0) lower = lower.substring(0, h);
-        return lower.endsWith(".pdf") || lower.contains("/pdf/");
+        String clean = lower;
+        int h = clean.indexOf('#');
+        if (h >= 0) clean = clean.substring(0, h);
+        if (clean.endsWith(".pdf") || clean.contains(".pdf?") || clean.contains(".pdf&")) return true;
+        return lower.contains("/pdf/") ||
+                lower.contains("format=pdf") ||
+                lower.contains("type=pdf") ||
+                lower.contains("contenttype=application%2fpdf") ||
+                lower.contains("content-type=application%2fpdf") ||
+                lower.contains("application/pdf");
+    }
+
+    private void injectPdfHook(WebView view) {
+        String js = "(function(){"
+                + "if(window.__stsPdfHook)return;window.__stsPdfHook=1;"
+                + "document.addEventListener('click',function(e){"
+                + "var a=e.target&&e.target.closest?e.target.closest('a'):null;if(!a)return;"
+                + "var h=a.href||'';var t=(a.getAttribute('type')||'').toLowerCase();"
+                + "var d=(a.getAttribute('download')||'').toLowerCase();"
+                + "var hl=h.toLowerCase();"
+                + "var p=t.indexOf('application/pdf')>=0||d.endsWith('.pdf')||/\\.pdf([?#&]|$)/i.test(h)||hl.indexOf('format=pdf')>=0||hl.indexOf('type=pdf')>=0;"
+                + "if(p&&h.indexOf('http')===0){e.preventDefault();e.stopPropagation();"
+                + "var n=a.getAttribute('download')||a.textContent||'Document.pdf';"
+                + "try{STSPdf.openPdf(h,n);}catch(x){}}"
+                + "},true);"
+                + "var es=document.querySelectorAll('embed[type="application/pdf"],object[type="application/pdf"],iframe[src*=".pdf"]');"
+                + "for(var i=0;i<es.length;i++){var u=es[i].src||es[i].data||'';if(u.indexOf('http')===0){try{STSPdf.openPdf(u,'Document.pdf');}catch(x){}break;}}"
+                + "})();";
+        try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    private class PdfBridge {
+        @JavascriptInterface
+        public void openPdf(String url, String name) {
+            if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) return;
+            runOnUiThread(() -> openPdfTask(url, guessPdfName(url, name)));
+        }
     }
 
     private String guessPdfName(String url, String contentDisposition) {
@@ -592,7 +694,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.2\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.3\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
