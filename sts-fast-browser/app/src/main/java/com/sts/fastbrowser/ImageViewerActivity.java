@@ -46,6 +46,8 @@ import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.window.OnBackInvokedCallback;
+import android.window.OnBackInvokedDispatcher;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -69,6 +71,7 @@ public class ImageViewerActivity extends Activity {
     private boolean cropMode = false;
     private String pendingSaveAction;
     private int targetKb = 0;
+    private OnBackInvokedCallback systemBackCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -82,7 +85,24 @@ public class ImageViewerActivity extends Activity {
 
         setTitle(fileName);
         setContentView(buildUi());
+        registerSystemBackHandler();
         loadImage();
+    }
+
+    private void registerSystemBackHandler() {
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            systemBackCallback = () -> {
+                if (cropMode) {
+                    // Crop mode intentionally consumes both gesture-back and button-back.
+                    return;
+                }
+                finish();
+            };
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    systemBackCallback
+            );
+        }
     }
 
     private View buildUi() {
@@ -677,14 +697,35 @@ public class ImageViewerActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // Crop mode is intentionally locked against the phone/system Back action.
-        // Only Apply Crop or Cancel Crop can leave crop mode.
         if (cropMode) return;
         super.onBackPressed();
     }
 
     @Override
+    public boolean onKeyDown(int keyCode, android.view.KeyEvent event) {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK && cropMode) {
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, android.view.KeyEvent event) {
+        if (keyCode == android.view.KeyEvent.KEYCODE_BACK && cropMode) {
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    @Override
     protected void onDestroy() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 && systemBackCallback != null) {
+            try {
+                getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(systemBackCallback);
+            } catch (Exception ignored) {
+            }
+            systemBackCallback = null;
+        }
         if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
         bitmap = null;
         super.onDestroy();
