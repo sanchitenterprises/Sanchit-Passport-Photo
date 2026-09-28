@@ -144,6 +144,7 @@ public class ImageViewerActivity extends Activity {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
         pm.getMenu().add("Share");
         pm.getMenu().add("Print");
+        pm.getMenu().add("Replace Original");
         pm.getMenu().add("Save");
         pm.getMenu().add("Edit");
         pm.setOnMenuItemClickListener(item -> {
@@ -154,6 +155,7 @@ public class ImageViewerActivity extends Activity {
             String t = String.valueOf(item.getTitle());
             if ("Share".equals(t)) shareImage();
             else if ("Print".equals(t)) printImage();
+            else if ("Replace Original".equals(t)) replaceOriginalImage();
             else if ("Save".equals(t)) showSaveFormats();
             else if ("Edit".equals(t)) enterEditMode();
             return true;
@@ -389,6 +391,64 @@ public class ImageViewerActivity extends Activity {
                 .show();
     }
 
+    private void replaceOriginalImage() {
+        if (bitmap == null || sourceUri == null) {
+            Toast.makeText(this, "Original image उपलब्ध नहीं है", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String lower = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+                Bitmap.CompressFormat format = Bitmap.CompressFormat.JPEG;
+                int quality = 95;
+                if (lower.endsWith(".png")) {
+                    format = Bitmap.CompressFormat.PNG;
+                    quality = 100;
+                } else if (lower.endsWith(".webp")) {
+                    format = Bitmap.CompressFormat.WEBP;
+                    quality = 95;
+                }
+
+                OutputStream out;
+                if ("file".equalsIgnoreCase(sourceUri.getScheme())) {
+                    String path = sourceUri.getPath();
+                    if (TextUtils.isEmpty(path)) throw new Exception("Missing source path");
+                    out = new FileOutputStream(new File(path), false);
+                } else {
+                    out = getContentResolver().openOutputStream(sourceUri, "wt");
+                    if (out == null) out = getContentResolver().openOutputStream(sourceUri, "w");
+                }
+
+                if (out == null) throw new Exception("Unable to open original image for writing");
+                try (OutputStream os = out) {
+                    if (!bitmap.compress(format, quality, os)) {
+                        throw new Exception("Unable to encode edited image");
+                    }
+                    os.flush();
+                }
+
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Original image replace हो गई",
+                        Toast.LENGTH_LONG
+                ).show());
+            } catch (SecurityException e) {
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Original file पर write permission नहीं है",
+                        Toast.LENGTH_LONG
+                ).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Original image replace नहीं हो पाई",
+                        Toast.LENGTH_LONG
+                ).show());
+            }
+        }).start();
+    }
+
     private void saveCurrentAs(String format) {
         if (android.os.Build.VERSION.SDK_INT < 29 &&
                 checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
@@ -613,6 +673,14 @@ public class ImageViewerActivity extends Activity {
                 saveCurrentAs(action.substring(5));
             }
         }
+    }
+
+    @Override
+    public void onBackPressed() {
+        // Crop mode is intentionally locked against the phone/system Back action.
+        // Only Apply Crop or Cancel Crop can leave crop mode.
+        if (cropMode) return;
+        super.onBackPressed();
     }
 
     @Override
