@@ -75,6 +75,7 @@ public class PdfViewerActivity extends Activity {
     private TextView status;
     private boolean destroyed = false;
     private int pendingImagePage = -1;
+    private String pendingPageFormat = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -316,9 +317,20 @@ public class PdfViewerActivity extends Activity {
         if (isFinishing() || destroyed) return;
         new AlertDialog.Builder(this)
                 .setTitle("Page " + (pageIndex + 1))
-                .setItems(new String[]{"Save Image (JPG)", "Copy Text"}, (d, which) -> {
-                    if (which == 0) savePageAsJpg(pageIndex);
+                .setItems(new String[]{"Save Page", "Copy Text"}, (d, which) -> {
+                    if (which == 0) showSavePageFormats(pageIndex);
                     else showPageText(pageIndex);
+                })
+                .show();
+    }
+
+    private void showSavePageFormats(int pageIndex) {
+        new AlertDialog.Builder(this)
+                .setTitle("Save Page " + (pageIndex + 1))
+                .setItems(new String[]{"JPG", "PNG", "PDF"}, (d, which) -> {
+                    if (which == 0) savePageAsImage(pageIndex, "jpg");
+                    else if (which == 1) savePageAsImage(pageIndex, "png");
+                    else savePageAsPdf(pageIndex);
                 })
                 .show();
     }
@@ -373,10 +385,11 @@ public class PdfViewerActivity extends Activity {
         }).start();
     }
 
-    private void savePageAsJpg(int pageIndex) {
+    private void savePageAsImage(int pageIndex, String format) {
         if (android.os.Build.VERSION.SDK_INT < 29 &&
                 checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             pendingImagePage = pageIndex;
+            pendingPageFormat = format;
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
             return;
         }
@@ -389,40 +402,110 @@ public class PdfViewerActivity extends Activity {
                 String base = fileName.toLowerCase(Locale.ROOT).endsWith(".pdf")
                         ? fileName.substring(0, fileName.length() - 4)
                         : fileName;
-                String jpgName = sanitize(base) + "_Page_" + (pageIndex + 1) + ".jpg";
+
+                boolean png = "png".equalsIgnoreCase(format);
+                String ext = png ? ".png" : ".jpg";
+                String mime = png ? "image/png" : "image/jpeg";
+                String outName = sanitize(base) + "_Page_" + (pageIndex + 1) + ext;
+                Bitmap.CompressFormat compressFormat = png ? Bitmap.CompressFormat.PNG : Bitmap.CompressFormat.JPEG;
+                int quality = png ? 100 : 95;
 
                 if (android.os.Build.VERSION.SDK_INT >= 29) {
                     ContentValues v = new ContentValues();
-                    v.put(MediaStore.Images.Media.DISPLAY_NAME, jpgName);
-                    v.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                    v.put(MediaStore.Images.Media.DISPLAY_NAME, outName);
+                    v.put(MediaStore.Images.Media.MIME_TYPE, mime);
                     v.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/STS Fast Browser");
                     Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
                     if (uri == null) throw new Exception("Unable to create image");
                     try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                        if (out == null || !bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)) {
+                        if (out == null || !bmp.compress(compressFormat, quality, out)) {
                             throw new Exception("Unable to save image");
                         }
                     }
                 } else {
                     File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "STS Fast Browser");
                     if (!dir.exists()) dir.mkdirs();
-                    File outFile = uniqueFile(dir, jpgName, ".jpg");
+                    File outFile = uniqueFile(dir, outName, ext);
                     try (OutputStream out = new FileOutputStream(outFile)) {
-                        if (!bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)) {
+                        if (!bmp.compress(compressFormat, quality, out)) {
                             throw new Exception("Unable to save image");
                         }
                     }
                 }
 
+                final String label = png ? "PNG" : "JPG";
                 runOnUiThread(() -> Toast.makeText(
                         this,
-                        "Page " + (pageIndex + 1) + " JPG में save हो गया",
+                        "Page " + (pageIndex + 1) + " " + label + " में save हो गया",
                         Toast.LENGTH_LONG
                 ).show());
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(this, "Page image save नहीं हो पाया", Toast.LENGTH_SHORT).show());
             } finally {
                 if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+            }
+        }).start();
+    }
+
+    private void savePageAsPdf(int pageIndex) {
+        if (android.os.Build.VERSION.SDK_INT < 29 &&
+                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            pendingImagePage = pageIndex;
+            pendingPageFormat = "pdf";
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+            return;
+        }
+
+        new Thread(() -> {
+            File tmp = null;
+            try {
+                String base = fileName.toLowerCase(Locale.ROOT).endsWith(".pdf")
+                        ? fileName.substring(0, fileName.length() - 4)
+                        : fileName;
+                String outName = sanitize(base) + "_Page_" + (pageIndex + 1) + ".pdf";
+
+                tmp = new File(getCacheDir(), "single_page_" + System.currentTimeMillis() + ".pdf");
+                synchronized (this) {
+                    if (textDocument == null) throw new IllegalStateException("PDF unavailable");
+                    PDDocument single = new PDDocument();
+                    try {
+                        single.importPage(textDocument.getPage(pageIndex));
+                        single.save(tmp);
+                    } finally {
+                        single.close();
+                    }
+                }
+
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    ContentValues v = new ContentValues();
+                    v.put(MediaStore.Downloads.DISPLAY_NAME, outName);
+                    v.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+                    v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/STS Fast Browser");
+                    Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+                    if (uri == null) throw new Exception("Unable to create PDF");
+                    try (InputStream in = new FileInputStream(tmp);
+                         OutputStream out = getContentResolver().openOutputStream(uri)) {
+                        copy(in, out);
+                    }
+                } else {
+                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "STS Fast Browser");
+                    if (!dir.exists()) dir.mkdirs();
+                    File outFile = uniqueFile(dir, outName, ".pdf");
+                    try (InputStream in = new FileInputStream(tmp);
+                         OutputStream out = new FileOutputStream(outFile)) {
+                        copy(in, out);
+                    }
+                }
+
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Page " + (pageIndex + 1) + " PDF में save हो गया",
+                        Toast.LENGTH_LONG
+                ).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(this, "Page PDF save नहीं हो पाया", Toast.LENGTH_SHORT).show());
+            } finally {
+                if (tmp != null) tmp.delete();
             }
         }).start();
     }
@@ -486,6 +569,7 @@ public class PdfViewerActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT < 29 &&
                 checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             pendingImagePage = -2;
+            pendingPageFormat = null;
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
             return;
         }
@@ -560,9 +644,15 @@ public class PdfViewerActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_STORAGE && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             int pending = pendingImagePage;
+            String format = pendingPageFormat;
             pendingImagePage = -1;
-            if (pending >= 0) savePageAsJpg(pending);
-            else if (pending == -2) saveToDownloads();
+            pendingPageFormat = null;
+            if (pending >= 0) {
+                if ("pdf".equalsIgnoreCase(format)) savePageAsPdf(pending);
+                else savePageAsImage(pending, "png".equalsIgnoreCase(format) ? "png" : "jpg");
+            } else if (pending == -2) {
+                saveToDownloads();
+            }
         }
     }
 
@@ -592,7 +682,10 @@ public class PdfViewerActivity extends Activity {
         private final Matrix drawMatrix = new Matrix();
         private final ScaleGestureDetector scaleDetector;
         private final GestureDetector gestureDetector;
+        private final float[] matrixValues = new float[9];
+
         private float currentScale = 1f;
+        private float baseScale = 1f;
         private float lastX;
         private float lastY;
         private final int pageIndex;
@@ -614,17 +707,26 @@ public class PdfViewerActivity extends Activity {
                 @Override
                 public boolean onScale(ScaleGestureDetector detector) {
                     float factor = detector.getScaleFactor();
+                    if (Float.isNaN(factor) || Float.isInfinite(factor)) return false;
+
                     float next = Math.max(1f, Math.min(5f, currentScale * factor));
                     float applied = next / currentScale;
                     currentScale = next;
+
                     drawMatrix.postScale(applied, applied, detector.getFocusX(), detector.getFocusY());
+                    clampMatrix();
                     setImageMatrix(drawMatrix);
                     return true;
                 }
 
                 @Override
                 public void onScaleEnd(ScaleGestureDetector detector) {
-                    if (currentScale <= 1.02f) resetMatrix();
+                    if (currentScale <= 1.02f) {
+                        resetMatrix();
+                    } else {
+                        clampMatrix();
+                        setImageMatrix(drawMatrix);
+                    }
                 }
             });
 
@@ -644,6 +746,7 @@ public class PdfViewerActivity extends Activity {
                     } else {
                         currentScale = 2f;
                         drawMatrix.postScale(2f, 2f, e.getX(), e.getY());
+                        clampMatrix();
                         setImageMatrix(drawMatrix);
                     }
                     return true;
@@ -659,19 +762,52 @@ public class PdfViewerActivity extends Activity {
 
         private void resetMatrix() {
             if (getDrawable() == null || getWidth() <= 0 || getHeight() <= 0) return;
+
             float dw = getDrawable().getIntrinsicWidth();
             float dh = getDrawable().getIntrinsicHeight();
             if (dw <= 0 || dh <= 0) return;
 
-            float base = Math.min(getWidth() / dw, getHeight() / dh);
-            float dx = (getWidth() - dw * base) * 0.5f;
-            float dy = (getHeight() - dh * base) * 0.5f;
+            baseScale = Math.min(getWidth() / dw, getHeight() / dh);
+            float dx = (getWidth() - dw * baseScale) * 0.5f;
+            float dy = (getHeight() - dh * baseScale) * 0.5f;
+
             drawMatrix.reset();
-            drawMatrix.postScale(base, base);
+            drawMatrix.postScale(baseScale, baseScale);
             drawMatrix.postTranslate(dx, dy);
             currentScale = 1f;
             setImageMatrix(drawMatrix);
             getParent().requestDisallowInterceptTouchEvent(false);
+        }
+
+        private void clampMatrix() {
+            if (getDrawable() == null || getWidth() <= 0 || getHeight() <= 0) return;
+
+            drawMatrix.getValues(matrixValues);
+            float scaleX = matrixValues[Matrix.MSCALE_X];
+            float scaleY = matrixValues[Matrix.MSCALE_Y];
+            float transX = matrixValues[Matrix.MTRANS_X];
+            float transY = matrixValues[Matrix.MTRANS_Y];
+
+            float contentW = getDrawable().getIntrinsicWidth() * scaleX;
+            float contentH = getDrawable().getIntrinsicHeight() * scaleY;
+
+            float targetX;
+            if (contentW <= getWidth()) {
+                targetX = (getWidth() - contentW) * 0.5f;
+            } else {
+                float minX = getWidth() - contentW;
+                targetX = Math.max(minX, Math.min(0f, transX));
+            }
+
+            float targetY;
+            if (contentH <= getHeight()) {
+                targetY = (getHeight() - contentH) * 0.5f;
+            } else {
+                float minY = getHeight() - contentH;
+                targetY = Math.max(minY, Math.min(0f, transY));
+            }
+
+            drawMatrix.postTranslate(targetX - transX, targetY - transY);
         }
 
         @Override
@@ -683,7 +819,9 @@ public class PdfViewerActivity extends Activity {
                 case MotionEvent.ACTION_DOWN:
                     lastX = event.getX();
                     lastY = event.getY();
-                    if (currentScale > 1.02f) getParent().requestDisallowInterceptTouchEvent(true);
+                    if (currentScale > 1.02f) {
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    }
                     break;
 
                 case MotionEvent.ACTION_MOVE:
@@ -691,6 +829,7 @@ public class PdfViewerActivity extends Activity {
                         float dx = event.getX() - lastX;
                         float dy = event.getY() - lastY;
                         drawMatrix.postTranslate(dx, dy);
+                        clampMatrix();
                         setImageMatrix(drawMatrix);
                         getParent().requestDisallowInterceptTouchEvent(true);
                     }
@@ -698,9 +837,19 @@ public class PdfViewerActivity extends Activity {
                     lastY = event.getY();
                     break;
 
+                case MotionEvent.ACTION_POINTER_UP:
+                    clampMatrix();
+                    setImageMatrix(drawMatrix);
+                    break;
+
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
-                    if (currentScale <= 1.02f) getParent().requestDisallowInterceptTouchEvent(false);
+                    if (currentScale <= 1.02f) {
+                        resetMatrix();
+                    } else {
+                        clampMatrix();
+                        setImageMatrix(drawMatrix);
+                    }
                     break;
             }
             return true;
