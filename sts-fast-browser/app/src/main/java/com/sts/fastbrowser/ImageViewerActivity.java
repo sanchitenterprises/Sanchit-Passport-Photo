@@ -36,6 +36,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -43,6 +44,7 @@ import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -63,6 +65,7 @@ public class ImageViewerActivity extends Activity {
     private LinearLayout editBar;
     private boolean cropMode = false;
     private String pendingSaveAction;
+    private int targetKb = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -105,12 +108,12 @@ public class ImageViewerActivity extends Activity {
         title.setPadding(dp(10), 0, dp(8), 0);
         top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
-        TextView menu = new TextView(this);
-        menu.setText("⋮");
-        menu.setTextSize(25);
-        menu.setTextColor(Color.parseColor("#162326"));
-        menu.setGravity(Gravity.CENTER);
-        menu.setClickable(true);
+        ImageButton menu = new ImageButton(this);
+        menu.setImageResource(R.drawable.ic_more);
+        menu.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        menu.setPadding(dp(10), dp(10), dp(10), dp(10));
+        menu.setBackgroundColor(Color.TRANSPARENT);
+        menu.setContentDescription("Menu");
         top.addView(menu, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
         menu.setOnClickListener(this::showMenu);
 
@@ -138,7 +141,7 @@ public class ImageViewerActivity extends Activity {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
         pm.getMenu().add("Share");
         pm.getMenu().add("Print");
-        pm.getMenu().add("Download");
+        pm.getMenu().add("Save");
         pm.getMenu().add("Edit");
         pm.setOnMenuItemClickListener(item -> {
             if (bitmap == null) {
@@ -148,7 +151,7 @@ public class ImageViewerActivity extends Activity {
             String t = String.valueOf(item.getTitle());
             if ("Share".equals(t)) shareImage();
             else if ("Print".equals(t)) printImage();
-            else if ("Download".equals(t)) saveImageToDownloads();
+            else if ("Save".equals(t)) showSaveFormats();
             else if ("Edit".equals(t)) enterEditMode();
             return true;
         });
@@ -215,10 +218,10 @@ public class ImageViewerActivity extends Activity {
 
     private void buildMainEditBar() {
         editBar.removeAllViews();
-        addEditButton("Crop", v -> beginCrop());
-        addEditButton("Rotate", v -> rotateImage());
-        addEditButton("Resize", v -> showResizeDialog());
-        addEditButton("Done", v -> {
+        addEditIcon(R.drawable.ic_crop, "Crop", v -> beginCrop());
+        addEditIcon(R.drawable.ic_rotate, "Rotate", v -> rotateImage());
+        addEditIcon(R.drawable.ic_resize, "Resize", v -> showResizeDialog());
+        addEditIcon(R.drawable.ic_done, "Done", v -> {
             cropMode = false;
             imageCanvas.setCropMode(false);
             editBar.setVisibility(View.GONE);
@@ -227,20 +230,21 @@ public class ImageViewerActivity extends Activity {
 
     private void buildCropBar() {
         editBar.removeAllViews();
-        addEditButton("Apply Crop", v -> applyCrop());
-        addEditButton("Cancel Crop", v -> {
+        addEditIcon(R.drawable.ic_done, "Apply Crop", v -> applyCrop());
+        addEditIcon(R.drawable.ic_cancel, "Cancel Crop", v -> {
             cropMode = false;
             imageCanvas.setCropMode(false);
             buildMainEditBar();
         });
     }
 
-    private void addEditButton(String text, View.OnClickListener listener) {
-        Button b = new Button(this);
-        b.setText(text);
-        b.setTextSize(13);
-        b.setTextColor(Color.parseColor("#162326"));
-        b.setAllCaps(false);
+    private void addEditIcon(int resId, String description, View.OnClickListener listener) {
+        ImageButton b = new ImageButton(this);
+        b.setImageResource(resId);
+        b.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        b.setPadding(dp(12), dp(8), dp(12), dp(8));
+        b.setBackgroundColor(Color.TRANSPARENT);
+        b.setContentDescription(description);
         b.setOnClickListener(listener);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
         lp.setMargins(dp(2), 0, dp(2), 0);
@@ -292,12 +296,18 @@ public class ImageViewerActivity extends Activity {
         height.setText(String.valueOf(bitmap.getHeight()));
         height.setInputType(InputType.TYPE_CLASS_NUMBER);
 
+        EditText kb = new EditText(this);
+        kb.setHint("Target Size KB (optional)");
+        if (targetKb > 0) kb.setText(String.valueOf(targetKb));
+        kb.setInputType(InputType.TYPE_CLASS_NUMBER);
+
         body.addView(width, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
         body.addView(height, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        body.addView(kb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Resize Image")
-                .setMessage("Width और Height pixel में डालें")
+                .setMessage("Width, Height pixel में और जरूरत हो तो target KB डालें")
                 .setView(body)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Resize", null)
@@ -311,6 +321,13 @@ public class ImageViewerActivity extends Activity {
                     Toast.makeText(this, "Size 32 से 12000 px के बीच रखें", Toast.LENGTH_SHORT).show();
                     return;
                 }
+                String kbText = kb.getText().toString().trim();
+                int requestedKb = kbText.isEmpty() ? 0 : Integer.parseInt(kbText);
+                if (requestedKb < 0 || requestedKb > 50000) {
+                    Toast.makeText(this, "KB 1 से 50000 के बीच रखें या खाली छोड़ें", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                targetKb = requestedKb;
                 Bitmap resized = Bitmap.createScaledBitmap(bitmap, w, h, true);
                 setBitmap(resized);
                 dialog.dismiss();
@@ -341,48 +358,158 @@ public class ImageViewerActivity extends Activity {
         pm.print(fileName, new ImagePrintAdapter(this, bitmap, fileName), new PrintAttributes.Builder().build());
     }
 
-    private void saveImageToDownloads() {
+    private void showSaveFormats() {
+        new AlertDialog.Builder(this)
+                .setTitle("Save Image")
+                .setItems(new String[]{"JPG", "PNG", "PDF"}, (d, which) -> {
+                    if (which == 0) saveCurrentAs("jpg");
+                    else if (which == 1) saveCurrentAs("png");
+                    else saveCurrentAs("pdf");
+                })
+                .show();
+    }
+
+    private void saveCurrentAs(String format) {
         if (android.os.Build.VERSION.SDK_INT < 29 &&
                 checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            pendingSaveAction = "download";
+            pendingSaveAction = "save:" + format;
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
             return;
         }
 
         new Thread(() -> {
             try {
-                boolean png = fileName.toLowerCase(Locale.ROOT).endsWith(".png");
-                String ext = png ? ".png" : ".jpg";
-                String mime = png ? "image/png" : "image/jpeg";
-                String outName = baseName(fileName) + "_edited" + ext;
-                Bitmap.CompressFormat format = png ? Bitmap.CompressFormat.PNG : Bitmap.CompressFormat.JPEG;
-
-                if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    ContentValues v = new ContentValues();
-                    v.put(MediaStore.Downloads.DISPLAY_NAME, outName);
-                    v.put(MediaStore.Downloads.MIME_TYPE, mime);
-                    v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/STS Fast Browser");
-                    Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
-                    if (uri == null) throw new Exception("Unable to create file");
-                    try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                        if (out == null || !bitmap.compress(format, png ? 100 : 95, out)) {
-                            throw new Exception("Unable to write image");
-                        }
-                    }
+                if ("pdf".equals(format)) {
+                    saveAsPdf();
                 } else {
-                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "STS Fast Browser");
-                    if (!dir.exists()) dir.mkdirs();
-                    File out = uniqueFile(dir, outName, ext);
-                    try (OutputStream os = new FileOutputStream(out)) {
-                        if (!bitmap.compress(format, png ? 100 : 95, os)) throw new Exception("Unable to write image");
-                    }
+                    saveAsImage(format);
                 }
-
-                runOnUiThread(() -> Toast.makeText(this, "Image Downloads में save हो गई", Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Image " + format.toUpperCase(Locale.ROOT) + " में save हो गई",
+                        Toast.LENGTH_LONG
+                ).show());
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "Download नहीं हो पाया", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(this, "Save नहीं हो पाया", Toast.LENGTH_SHORT).show());
             }
         }).start();
+    }
+
+    private void saveAsImage(String format) throws Exception {
+        boolean png = "png".equals(format);
+        String ext = png ? ".png" : ".jpg";
+        String mime = png ? "image/png" : "image/jpeg";
+        String outName = baseName(fileName) + "_edited" + ext;
+        byte[] data = encodeForSave(bitmap, png, targetKb);
+
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Images.Media.DISPLAY_NAME, outName);
+            v.put(MediaStore.Images.Media.MIME_TYPE, mime);
+            v.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/STS Fast Browser");
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new Exception("Unable to create file");
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new Exception("Unable to write image");
+                out.write(data);
+                out.flush();
+            }
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "STS Fast Browser");
+            if (!dir.exists()) dir.mkdirs();
+            File out = uniqueFile(dir, outName, ext);
+            try (OutputStream os = new FileOutputStream(out)) {
+                os.write(data);
+                os.flush();
+            }
+        }
+    }
+
+    private void saveAsPdf() throws Exception {
+        String outName = baseName(fileName) + "_edited.pdf";
+        File tmp = new File(getCacheDir(), "image_pdf_" + System.currentTimeMillis() + ".pdf");
+        PdfDocument document = new PdfDocument();
+        try {
+            int pageW = Math.max(1, bitmap.getWidth());
+            int pageH = Math.max(1, bitmap.getHeight());
+            PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(pageW, pageH, 1).create();
+            PdfDocument.Page page = document.startPage(info);
+            page.getCanvas().drawBitmap(bitmap, 0, 0, null);
+            document.finishPage(page);
+            try (OutputStream out = new FileOutputStream(tmp)) {
+                document.writeTo(out);
+            }
+        } finally {
+            document.close();
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Downloads.DISPLAY_NAME, outName);
+            v.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+            v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/STS Fast Browser");
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new Exception("Unable to create PDF");
+            try (InputStream in = new FileInputStream(tmp);
+                 OutputStream out = getContentResolver().openOutputStream(uri)) {
+                copy(in, out);
+            }
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "STS Fast Browser");
+            if (!dir.exists()) dir.mkdirs();
+            File out = uniqueFile(dir, outName, ".pdf");
+            try (InputStream in = new FileInputStream(tmp);
+                 OutputStream os = new FileOutputStream(out)) {
+                copy(in, os);
+            }
+        }
+        tmp.delete();
+    }
+
+    private byte[] encodeForSave(Bitmap source, boolean png, int targetKb) throws Exception {
+        if (png) {
+            Bitmap working = source;
+            boolean owns = false;
+            byte[] data;
+            while (true) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                if (!working.compress(Bitmap.CompressFormat.PNG, 100, baos)) throw new Exception("PNG encode failed");
+                data = baos.toByteArray();
+                if (targetKb <= 0 || data.length <= targetKb * 1024L || working.getWidth() < 160 || working.getHeight() < 160) break;
+                Bitmap smaller = Bitmap.createScaledBitmap(
+                        working,
+                        Math.max(1, Math.round(working.getWidth() * 0.90f)),
+                        Math.max(1, Math.round(working.getHeight() * 0.90f)),
+                        true
+                );
+                if (owns && working != source) working.recycle();
+                working = smaller;
+                owns = true;
+            }
+            if (owns && working != source) working.recycle();
+            return data;
+        }
+
+        int lo = 18, hi = 95, bestQ = 18;
+        byte[] best = null;
+        while (lo <= hi) {
+            int q = (lo + hi) / 2;
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            if (!source.compress(Bitmap.CompressFormat.JPEG, q, baos)) throw new Exception("JPG encode failed");
+            byte[] data = baos.toByteArray();
+            if (targetKb <= 0) return data;
+            if (data.length <= targetKb * 1024L) {
+                best = data;
+                bestQ = q;
+                lo = q + 1;
+            } else {
+                hi = q - 1;
+            }
+        }
+        if (best != null) return best;
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        source.compress(Bitmap.CompressFormat.JPEG, bestQ, baos);
+        return baos.toByteArray();
     }
 
     private File writeCurrentBitmapToCache() throws Exception {
@@ -460,8 +587,11 @@ public class ImageViewerActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_STORAGE && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            if ("download".equals(pendingSaveAction)) saveImageToDownloads();
+            String action = pendingSaveAction;
             pendingSaveAction = null;
+            if (action != null && action.startsWith("save:")) {
+                saveCurrentAs(action.substring(5));
+            }
         }
     }
 
@@ -485,6 +615,7 @@ public class ImageViewerActivity extends Activity {
         private int dragMode = 0;
         private float lastX;
         private float lastY;
+        private float startAspect = 1f;
         private final float handleRadius = dp(12);
         private final float minCrop = dp(48);
 
@@ -548,10 +679,17 @@ public class ImageViewerActivity extends Activity {
                 canvas.drawRect(cropRect.right, cropRect.top, imageRect.right, cropRect.bottom, shadePaint);
 
                 canvas.drawRect(cropRect, borderPaint);
-                canvas.drawCircle(cropRect.left, cropRect.top, handleRadius * 0.55f, handlePaint);
-                canvas.drawCircle(cropRect.right, cropRect.top, handleRadius * 0.55f, handlePaint);
-                canvas.drawCircle(cropRect.left, cropRect.bottom, handleRadius * 0.55f, handlePaint);
-                canvas.drawCircle(cropRect.right, cropRect.bottom, handleRadius * 0.55f, handlePaint);
+                float cx = cropRect.centerX();
+                float cy = cropRect.centerY();
+                float hr = handleRadius * 0.55f;
+                canvas.drawCircle(cropRect.left, cropRect.top, hr, handlePaint);
+                canvas.drawCircle(cropRect.right, cropRect.top, hr, handlePaint);
+                canvas.drawCircle(cropRect.left, cropRect.bottom, hr, handlePaint);
+                canvas.drawCircle(cropRect.right, cropRect.bottom, hr, handlePaint);
+                canvas.drawCircle(cx, cropRect.top, hr, handlePaint);
+                canvas.drawCircle(cropRect.right, cy, hr, handlePaint);
+                canvas.drawCircle(cx, cropRect.bottom, hr, handlePaint);
+                canvas.drawCircle(cropRect.left, cy, hr, handlePaint);
             }
         }
 
@@ -563,6 +701,7 @@ public class ImageViewerActivity extends Activity {
 
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 dragMode = detectDragMode(x, y);
+                startAspect = Math.max(0.01f, cropRect.width() / Math.max(1f, cropRect.height()));
                 lastX = x;
                 lastY = y;
                 return true;
@@ -591,6 +730,10 @@ public class ImageViewerActivity extends Activity {
             if (distance(x, y, cropRect.right, cropRect.top) <= r) return 3;
             if (distance(x, y, cropRect.left, cropRect.bottom) <= r) return 4;
             if (distance(x, y, cropRect.right, cropRect.bottom) <= r) return 5;
+            if (distance(x, y, cropRect.centerX(), cropRect.top) <= r) return 6;
+            if (distance(x, y, cropRect.right, cropRect.centerY()) <= r) return 7;
+            if (distance(x, y, cropRect.centerX(), cropRect.bottom) <= r) return 8;
+            if (distance(x, y, cropRect.left, cropRect.centerY()) <= r) return 9;
             if (cropRect.contains(x, y)) return 1;
             return 0;
         }
@@ -614,15 +757,74 @@ public class ImageViewerActivity extends Activity {
             }
 
             RectF r = new RectF(cropRect);
-            if (dragMode == 2 || dragMode == 4) r.left += dx;
-            if (dragMode == 3 || dragMode == 5) r.right += dx;
-            if (dragMode == 2 || dragMode == 3) r.top += dy;
-            if (dragMode == 4 || dragMode == 5) r.bottom += dy;
 
-            r.left = Math.max(imageRect.left, Math.min(r.left, r.right - minCrop));
-            r.right = Math.min(imageRect.right, Math.max(r.right, r.left + minCrop));
-            r.top = Math.max(imageRect.top, Math.min(r.top, r.bottom - minCrop));
-            r.bottom = Math.min(imageRect.bottom, Math.max(r.bottom, r.top + minCrop));
+            // Middle handles are free/independent.
+            if (dragMode == 6) {
+                r.top = Math.max(imageRect.top, Math.min(r.bottom - minCrop, r.top + dy));
+                cropRect.set(r);
+                return;
+            }
+            if (dragMode == 7) {
+                r.right = Math.min(imageRect.right, Math.max(r.left + minCrop, r.right + dx));
+                cropRect.set(r);
+                return;
+            }
+            if (dragMode == 8) {
+                r.bottom = Math.min(imageRect.bottom, Math.max(r.top + minCrop, r.bottom + dy));
+                cropRect.set(r);
+                return;
+            }
+            if (dragMode == 9) {
+                r.left = Math.max(imageRect.left, Math.min(r.right - minCrop, r.left + dx));
+                cropRect.set(r);
+                return;
+            }
+
+            // Four corners stay linked to the starting crop aspect ratio.
+            float anchorX, anchorY, targetX, targetY, maxW, maxH;
+            boolean leftCorner = dragMode == 2 || dragMode == 4;
+            boolean topCorner = dragMode == 2 || dragMode == 3;
+
+            anchorX = leftCorner ? r.right : r.left;
+            anchorY = topCorner ? r.bottom : r.top;
+            targetX = (leftCorner ? r.left : r.right) + dx;
+            targetY = (topCorner ? r.top : r.bottom) + dy;
+
+            maxW = leftCorner ? anchorX - imageRect.left : imageRect.right - anchorX;
+            maxH = topCorner ? anchorY - imageRect.top : imageRect.bottom - anchorY;
+
+            float w = Math.max(minCrop, Math.abs(anchorX - targetX));
+            float h = Math.max(minCrop, Math.abs(anchorY - targetY));
+
+            if (w / h > startAspect) w = h * startAspect;
+            else h = w / startAspect;
+
+            if (w > maxW) { w = maxW; h = w / startAspect; }
+            if (h > maxH) { h = maxH; w = h * startAspect; }
+
+            w = Math.max(minCrop, w);
+            h = Math.max(minCrop, h);
+
+            if (leftCorner) {
+                r.left = anchorX - w;
+                r.right = anchorX;
+            } else {
+                r.left = anchorX;
+                r.right = anchorX + w;
+            }
+
+            if (topCorner) {
+                r.top = anchorY - h;
+                r.bottom = anchorY;
+            } else {
+                r.top = anchorY;
+                r.bottom = anchorY + h;
+            }
+
+            r.left = Math.max(imageRect.left, r.left);
+            r.top = Math.max(imageRect.top, r.top);
+            r.right = Math.min(imageRect.right, r.right);
+            r.bottom = Math.min(imageRect.bottom, r.bottom);
             cropRect.set(r);
         }
 
