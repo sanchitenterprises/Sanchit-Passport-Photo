@@ -13,6 +13,22 @@
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
         <activity
+            android:name=".ImageViewerActivity"
+            android:exported="true"
+            android:documentLaunchMode="always"
+            android:taskAffinity="${applicationId}.image"
+            android:launchMode="standard"
+            android:excludeFromRecents="false"
+            android:resizeableActivity="true"
+            android:screenOrientation="unspecified">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".PdfViewerActivity"
             android:exported="true"
             android:documentLaunchMode="always"
