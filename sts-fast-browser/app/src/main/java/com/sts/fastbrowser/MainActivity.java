@@ -31,6 +31,7 @@ import android.webkit.WebViewClient;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.PopupWindow;
@@ -45,10 +46,15 @@ import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 public class MainActivity extends android.app.Activity {
     private static final String PREFS = "sts_fast_browser_prefs";
     private static final String KEY_SITES = "sites_json";
+    private static final String KEY_SITES_D1 = "sites_d1_json";
+    private static final String KEY_SITES_D2 = "sites_d2_json";
+    private static final String KEY_SITES_MIGRATED = "sites_split_migrated";
     private static final String KEY_ADBLOCK = "adblock";
     private static final String KEY_SLOT1_NAME = "slot1_name";
     private static final String KEY_SLOT1_URL = "slot1_url";
@@ -58,7 +64,8 @@ public class MainActivity extends android.app.Activity {
     private static final String GOOGLE_URL = "https://www.google.com/";
 
     private SharedPreferences prefs;
-    private final List<Site> sites = new ArrayList<>();
+    private final List<Site> sitesD1 = new ArrayList<>();
+    private final List<Site> sitesD2 = new ArrayList<>();
     private LinearLayout slot1Container;
     private LinearLayout slot2Container;
     private TextView slot1Button;
@@ -99,7 +106,7 @@ public class MainActivity extends android.app.Activity {
         setContentView(buildUi());
         configureWebView();
         updateSlotLabels();
-        webView.loadUrl(slot1Url);
+        loadInitialPage();
     }
 
     private View buildUi() {
@@ -476,7 +483,7 @@ public class MainActivity extends android.app.Activity {
         popup.setElevation(dp(12));
         popup.setAnimationStyle(android.R.style.Animation_Dialog);
 
-        for (Site site : sites) {
+        for (Site site : getSites(slot)) {
             TextView item = makePopupItem(site.name);
             item.setOnClickListener(v -> {
                 popup.dismiss();
@@ -511,6 +518,15 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void selectSite(int slot, Site site) {
+        if (site == null) return;
+        if (site.hasPassword()) {
+            showSitePasswordDialog(site, () -> performSelectSite(slot, site));
+        } else {
+            performSelectSite(slot, site);
+        }
+    }
+
+    private void performSelectSite(int slot, Site site) {
         activeSlot = slot;
         if (slot == 1) {
             slot1Name = site.name;
@@ -527,6 +543,42 @@ public class MainActivity extends android.app.Activity {
                 webView.animate().alpha(1f).setDuration(160).setListener(null).start();
             }
         }).start();
+    }
+
+    private void loadInitialPage() {
+        Site selected = findSiteByUrl(1, slot1Url);
+        if (selected != null && selected.hasPassword()) {
+            showSitePasswordDialog(selected, () -> webView.loadUrl(slot1Url));
+        } else {
+            webView.loadUrl(slot1Url);
+        }
+    }
+
+    private void showSitePasswordDialog(Site site, Runnable onSuccess) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Password");
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setPadding(dp(18), dp(4), dp(18), dp(4));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(site.name)
+                .setMessage("Website password डालें")
+                .setView(input)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Open", null)
+                .create();
+
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String entered = input.getText().toString();
+            if (site.passwordHash.equals(hashPassword(entered))) {
+                dialog.dismiss();
+                if (onSuccess != null) onSuccess.run();
+            } else {
+                input.setError("Wrong password");
+            }
+        }));
+        dialog.show();
     }
 
     private void goHome(int slot) {
@@ -609,9 +661,14 @@ public class MainActivity extends android.app.Activity {
                 Toast.makeText(this, "Name और सही URL डालें", Toast.LENGTH_SHORT).show();
                 return;
             }
-            Site s = new Site(n, u);
-            sites.add(s);
-            saveSites();
+            Site s = new Site(n, u, "");
+            List<Site> target = getSites(slot);
+            if (containsUrl(target, u)) {
+                Toast.makeText(this, "यह website इस dropdown में पहले से है", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            target.add(s);
+            saveSites(slot);
             dialog.dismiss();
             selectSite(slot, s);
         }));
@@ -621,30 +678,10 @@ public class MainActivity extends android.app.Activity {
     private void showManageSitesDialog() {
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(dp(12), dp(8), dp(12), dp(8));
+        list.setPadding(dp(10), dp(8), dp(10), dp(8));
 
-        if (sites.size() <= 1) {
-            TextView none = makePopupItem("Custom website अभी add नहीं है");
-            list.addView(none, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
-        } else {
-            for (int i = 1; i < sites.size(); i++) {
-                Site s = sites.get(i);
-                LinearLayout row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                TextView title = new TextView(this);
-                title.setText(s.name + "\n" + s.url);
-                title.setTextColor(Color.parseColor("#172326"));
-                title.setTextSize(14);
-                title.setPadding(dp(10), dp(6), dp(10), dp(6));
-                TextView del = makePopupItem("REMOVE");
-                del.setTextColor(Color.parseColor("#8C3030"));
-                row.addView(title, new LinearLayout.LayoutParams(0, dp(58), 1f));
-                row.addView(del, new LinearLayout.LayoutParams(dp(92), dp(44)));
-                del.setOnClickListener(v -> confirmDeleteSite(s));
-                list.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62)));
-            }
-        }
+        addManageSection(list, "D1 Websites", 1);
+        addManageSection(list, "D2 Websites", 2);
 
         ScrollView sc = new ScrollView(this);
         sc.addView(list);
@@ -655,16 +692,162 @@ public class MainActivity extends android.app.Activity {
                 .show();
     }
 
-    private void confirmDeleteSite(Site site) {
+    private void addManageSection(LinearLayout list, String heading, int slot) {
+        TextView h = new TextView(this);
+        h.setText(heading);
+        h.setTextColor(Color.parseColor("#172326"));
+        h.setTextSize(15);
+        h.setTypeface(null, android.graphics.Typeface.BOLD);
+        h.setPadding(dp(8), dp(10), dp(8), dp(5));
+        list.addView(h, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
+
+        List<Site> source = getSites(slot);
+        if (source.size() <= 1) {
+            TextView none = new TextView(this);
+            none.setText("Custom website अभी add नहीं है");
+            none.setTextColor(Color.DKGRAY);
+            none.setTextSize(13);
+            none.setPadding(dp(12), dp(6), dp(8), dp(10));
+            list.addView(none, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
+            return;
+        }
+
+        for (int i = 1; i < source.size(); i++) {
+            Site s = source.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(2), dp(2), dp(2), dp(2));
+
+            TextView title = new TextView(this);
+            title.setText(s.name + (s.hasPassword() ? "  🔒" : "") + "\n" + s.url);
+            title.setTextColor(Color.parseColor("#172326"));
+            title.setTextSize(13);
+            title.setPadding(dp(8), dp(4), dp(6), dp(4));
+
+            ImageButton more = new ImageButton(this);
+            more.setImageResource(R.drawable.ic_more);
+            more.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+            more.setPadding(dp(10), dp(10), dp(10), dp(10));
+            more.setBackgroundColor(Color.TRANSPARENT);
+            more.setContentDescription("Website options");
+
+            row.addView(title, new LinearLayout.LayoutParams(0, dp(60), 1f));
+            row.addView(more, new LinearLayout.LayoutParams(dp(48), dp(48)));
+            more.setOnClickListener(v -> showManagedSiteMenu(v, s, slot));
+
+            list.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
+        }
+    }
+
+    private void showManagedSiteMenu(View anchor, Site site, int slot) {
+        PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
+        pm.getMenu().add(site.hasPassword() ? "Change Password" : "Set Password");
+        pm.getMenu().add(slot == 1 ? "Move to D2" : "Move to D1");
+        pm.getMenu().add("Remove Website");
+        pm.setOnMenuItemClickListener(item -> {
+            String t = String.valueOf(item.getTitle());
+            if (t.equals("Set Password") || t.equals("Change Password")) {
+                showSetSitePasswordDialog(site, slot);
+                return true;
+            }
+            if (t.startsWith("Move to D")) {
+                moveSite(site, slot);
+                return true;
+            }
+            if (t.equals("Remove Website")) {
+                confirmDeleteSite(site, slot);
+                return true;
+            }
+            return false;
+        });
+        pm.show();
+    }
+
+    private void showSetSitePasswordDialog(Site site, int slot) {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(18), dp(4), dp(18), 0);
+
+        EditText pass1 = new EditText(this);
+        pass1.setHint("New password");
+        pass1.setSingleLine(true);
+        pass1.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        EditText pass2 = new EditText(this);
+        pass2.setHint("Confirm password");
+        pass2.setSingleLine(true);
+        pass2.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        body.addView(pass1, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        body.addView(pass2, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(site.hasPassword() ? "Change Password" : "Set Password")
+                .setView(body)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", null)
+                .create();
+
+        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String p1 = pass1.getText().toString();
+            String p2 = pass2.getText().toString();
+            if (p1.length() < 4) {
+                pass1.setError("कम से कम 4 अक्षर");
+                return;
+            }
+            if (!p1.equals(p2)) {
+                pass2.setError("Password match नहीं है");
+                return;
+            }
+            site.passwordHash = hashPassword(p1);
+            saveSites(slot);
+            dialog.dismiss();
+            Toast.makeText(this, "Password saved", Toast.LENGTH_SHORT).show();
+        }));
+        dialog.show();
+    }
+
+    private void moveSite(Site site, int fromSlot) {
+        int toSlot = fromSlot == 1 ? 2 : 1;
+        List<Site> from = getSites(fromSlot);
+        List<Site> to = getSites(toSlot);
+
+        if (containsUrl(to, site.url)) {
+            Toast.makeText(this, "Website D" + toSlot + " में पहले से है", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        from.remove(site);
+        to.add(site);
+        if (fromSlot == 1 && slot1Url.equals(site.url)) {
+            slot1Name = GOOGLE_NAME;
+            slot1Url = GOOGLE_URL;
+        } else if (fromSlot == 2 && slot2Url.equals(site.url)) {
+            slot2Name = GOOGLE_NAME;
+            slot2Url = GOOGLE_URL;
+        }
+        saveSites(fromSlot);
+        saveSites(toSlot);
+        saveSlots();
+        updateSlotLabels();
+        Toast.makeText(this, "Website D" + toSlot + " में move हो गई", Toast.LENGTH_SHORT).show();
+    }
+
+    private void confirmDeleteSite(Site site, int slot) {
         new AlertDialog.Builder(this)
                 .setTitle("Remove " + site.name + "?")
                 .setMessage(site.url)
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("Remove", (d, w) -> {
-                    sites.remove(site);
-                    if (slot1Url.equals(site.url)) { slot1Name = GOOGLE_NAME; slot1Url = GOOGLE_URL; }
-                    if (slot2Url.equals(site.url)) { slot2Name = GOOGLE_NAME; slot2Url = GOOGLE_URL; }
-                    saveSites();
+                    getSites(slot).remove(site);
+                    if (slot == 1 && slot1Url.equals(site.url)) {
+                        slot1Name = GOOGLE_NAME;
+                        slot1Url = GOOGLE_URL;
+                    }
+                    if (slot == 2 && slot2Url.equals(site.url)) {
+                        slot2Name = GOOGLE_NAME;
+                        slot2Url = GOOGLE_URL;
+                    }
+                    saveSites(slot);
                     saveSlots();
                     updateSlotLabels();
                     Toast.makeText(this, "Website removed", Toast.LENGTH_SHORT).show();
@@ -694,7 +877,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.8\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.9\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -711,10 +894,60 @@ public class MainActivity extends android.app.Activity {
         if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + " ▾");
     }
 
+    private List<Site> getSites(int slot) {
+        return slot == 2 ? sitesD2 : sitesD1;
+    }
+
+    private boolean containsUrl(List<Site> list, String url) {
+        for (Site s : list) {
+            if (s.url.equalsIgnoreCase(url)) return true;
+        }
+        return false;
+    }
+
+    private Site findSiteByUrl(int slot, String url) {
+        if (url == null) return null;
+        for (Site s : getSites(slot)) {
+            if (s.url.equalsIgnoreCase(url)) return s;
+        }
+        return null;
+    }
+
     private void loadSites() {
-        sites.clear();
-        sites.add(new Site(GOOGLE_NAME, GOOGLE_URL));
-        String json = prefs.getString(KEY_SITES, "[]");
+        sitesD1.clear();
+        sitesD2.clear();
+        sitesD1.add(new Site(GOOGLE_NAME, GOOGLE_URL, ""));
+        sitesD2.add(new Site(GOOGLE_NAME, GOOGLE_URL, ""));
+
+        boolean splitExists = prefs.contains(KEY_SITES_D1) || prefs.contains(KEY_SITES_D2);
+        if (splitExists) {
+            loadSiteList(KEY_SITES_D1, sitesD1);
+            loadSiteList(KEY_SITES_D2, sitesD2);
+            return;
+        }
+
+        // One-time migration from the old shared website list.
+        String legacy = prefs.getString(KEY_SITES, "[]");
+        try {
+            JSONArray arr = new JSONArray(legacy);
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                String n = o.optString("name", "").trim();
+                String u = normalizeUrl(o.optString("url", "").trim());
+                if (!n.isEmpty() && u != null && !GOOGLE_URL.equalsIgnoreCase(u)) {
+                    sitesD1.add(new Site(n, u, ""));
+                    sitesD2.add(new Site(n, u, ""));
+                }
+            }
+        } catch (Exception ignored) {}
+        saveSites(1);
+        saveSites(2);
+        prefs.edit().putBoolean(KEY_SITES_MIGRATED, true).apply();
+    }
+
+    private void loadSiteList(String key, List<Site> target) {
+        String json = prefs.getString(key, "[]");
         try {
             JSONArray arr = new JSONArray(json);
             for (int i = 0; i < arr.length(); i++) {
@@ -722,22 +955,40 @@ public class MainActivity extends android.app.Activity {
                 if (o == null) continue;
                 String n = o.optString("name", "").trim();
                 String u = normalizeUrl(o.optString("url", "").trim());
-                if (!n.isEmpty() && u != null && !GOOGLE_URL.equalsIgnoreCase(u)) sites.add(new Site(n, u));
+                String p = o.optString("passwordHash", "");
+                if (!n.isEmpty() && u != null && !GOOGLE_URL.equalsIgnoreCase(u)) {
+                    target.add(new Site(n, u, p));
+                }
             }
         } catch (Exception ignored) {}
     }
 
-    private void saveSites() {
+    private void saveSites(int slot) {
         JSONArray arr = new JSONArray();
+        List<Site> source = getSites(slot);
         try {
-            for (int i = 1; i < sites.size(); i++) {
+            for (int i = 1; i < source.size(); i++) {
+                Site s = source.get(i);
                 JSONObject o = new JSONObject();
-                o.put("name", sites.get(i).name);
-                o.put("url", sites.get(i).url);
+                o.put("name", s.name);
+                o.put("url", s.url);
+                o.put("passwordHash", s.passwordHash == null ? "" : s.passwordHash);
                 arr.put(o);
             }
         } catch (Exception ignored) {}
-        prefs.edit().putString(KEY_SITES, arr.toString()).apply();
+        prefs.edit().putString(slot == 2 ? KEY_SITES_D2 : KEY_SITES_D1, arr.toString()).apply();
+    }
+
+    private String hashPassword(String raw) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] out = digest.digest((raw == null ? "" : raw).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : out) sb.append(String.format(Locale.ROOT, "%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return raw == null ? "" : raw;
+        }
     }
 
     private void loadSlots() {
@@ -811,6 +1062,16 @@ public class MainActivity extends android.app.Activity {
     private static class Site {
         final String name;
         final String url;
-        Site(String name, String url) { this.name = name; this.url = url; }
+        String passwordHash;
+
+        Site(String name, String url, String passwordHash) {
+            this.name = name;
+            this.url = url;
+            this.passwordHash = passwordHash == null ? "" : passwordHash;
+        }
+
+        boolean hasPassword() {
+            return passwordHash != null && !passwordHash.isEmpty();
+        }
     }
 }
