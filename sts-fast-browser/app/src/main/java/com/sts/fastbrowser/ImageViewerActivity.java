@@ -78,7 +78,7 @@ public class ImageViewerActivity extends Activity {
     private ImageButton topMenu;
     private ImageButton topUndoButton;
     private ImageButton topRedoButton;
-    private ImageButton topOkButton;
+    private ImageButton topPreviewButton;
     private int topMode = TOP_MODE_NORMAL;
 
     private boolean cropMode = false;
@@ -185,7 +185,7 @@ public class ImageViewerActivity extends Activity {
 
         topUndoButton = null;
         topRedoButton = null;
-        topOkButton = null;
+        topPreviewButton = null;
     }
 
     private void showActionTopHeader(int mode) {
@@ -201,14 +201,7 @@ public class ImageViewerActivity extends Activity {
             if (topMode == TOP_MODE_CROP) imageCanvas.redoCrop();
             else if (topMode == TOP_MODE_SCAN) redoScan();
         });
-        topOkButton = addTopAction(R.drawable.ic_done, "OK", v -> {
-            if (topMode == TOP_MODE_CROP) {
-                applyCrop();
-            } else if (topMode == TOP_MODE_SCAN) {
-                clearScanHistory();
-                showNormalTopHeader();
-            }
-        });
+        topPreviewButton = addTopPreviewAction();
         updateTopActionStates();
     }
 
@@ -238,6 +231,62 @@ public class ImageViewerActivity extends Activity {
         holder.addView(label, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)));
         topBar.addView(holder, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         return button;
+    }
+
+    private ImageButton addTopPreviewAction() {
+        LinearLayout holder = new LinearLayout(this);
+        holder.setOrientation(LinearLayout.VERTICAL);
+        holder.setGravity(Gravity.CENTER);
+        holder.setPadding(dp(2), 0, dp(2), 0);
+
+        ImageButton button = new ImageButton(this);
+        button.setImageResource(R.drawable.ic_edit);
+        button.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        button.setPadding(dp(6), dp(2), dp(6), dp(1));
+        button.setBackgroundColor(Color.TRANSPARENT);
+        button.setContentDescription("Preview");
+
+        TextView label = new TextView(this);
+        label.setText("Preview");
+        label.setTextSize(8);
+        label.setTextColor(Color.parseColor("#162326"));
+        label.setGravity(Gravity.CENTER);
+        label.setSingleLine(true);
+
+        View.OnTouchListener previewTouch = (v, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                showOriginalPreview(true);
+                return true;
+            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                showOriginalPreview(false);
+                return true;
+            }
+            return true;
+        };
+        button.setOnTouchListener(previewTouch);
+        label.setOnTouchListener(previewTouch);
+
+        holder.addView(button, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        holder.addView(label, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(12)));
+        topBar.addView(holder, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        return button;
+    }
+
+    private void showOriginalPreview(boolean pressed) {
+        if (topMode == TOP_MODE_CROP) {
+            if (imageCanvas != null) imageCanvas.setPreviewOriginal(pressed);
+            return;
+        }
+
+        if (topMode == TOP_MODE_SCAN && scanUndoBitmap != null && bitmap != null) {
+            if (pressed) {
+                imageCanvas.setPreviewBitmap(scanUndoBitmap);
+            } else {
+                imageCanvas.setPreviewBitmap(bitmap);
+            }
+        }
     }
 
     private void updateTopActionStates() {
@@ -521,6 +570,8 @@ public class ImageViewerActivity extends Activity {
                             value = Math.round(value * 0.94f);
                         }
 
+                        // Slight overall brightness lift requested for scanned documents.
+                        value += 10;
                         value = Math.max(0, Math.min(255, value));
                         outRow[x] = Color.argb(255, value, value, value);
                     }
@@ -989,6 +1040,8 @@ public class ImageViewerActivity extends Activity {
         private final GestureDetector gestureDetector;
 
         private boolean cropEnabled = false;
+        private boolean previewOriginal = false;
+        private Bitmap previewBitmap = null;
         private int dragMode = -1;
         private float lastX;
         private float lastY;
@@ -1073,14 +1126,28 @@ public class ImageViewerActivity extends Activity {
 
         void setBitmap(Bitmap bitmap) {
             this.image = bitmap;
+            previewBitmap = null;
+            previewOriginal = false;
             cropEnabled = false;
             dragMode = -1;
             resetZoom();
             invalidate();
         }
 
+        void setPreviewOriginal(boolean enabled) {
+            previewOriginal = enabled;
+            invalidate();
+        }
+
+        void setPreviewBitmap(Bitmap bitmap) {
+            previewBitmap = bitmap;
+            invalidate();
+        }
+
         void setCropMode(boolean enabled) {
             cropEnabled = enabled;
+            previewOriginal = false;
+            previewBitmap = null;
             dragMode = -1;
             cropGestureMoved = false;
             if (enabled) {
@@ -1220,15 +1287,16 @@ public class ImageViewerActivity extends Activity {
             updateImageRect();
             if (image == null || imageRect.isEmpty()) return;
 
-            canvas.drawBitmap(image, null, imageRect, bitmapPaint);
+            Bitmap drawImage = previewBitmap != null ? previewBitmap : image;
+            canvas.drawBitmap(drawImage, null, imageRect, bitmapPaint);
 
-            if (cropEnabled) {
+            if (cropEnabled && !previewOriginal) {
                 rebuildCropPath();
                 canvas.drawRect(imageRect, shadePaint);
 
                 canvas.save();
                 canvas.clipPath(cropPath);
-                canvas.drawBitmap(image, null, imageRect, bitmapPaint);
+                canvas.drawBitmap(drawImage, null, imageRect, bitmapPaint);
                 canvas.restore();
 
                 canvas.drawPath(cropPath, borderPaint);
@@ -1576,10 +1644,26 @@ public class ImageViewerActivity extends Activity {
                 Matrix m = new Matrix();
                 if (!m.setPolyToPoly(src, 0, dst, 0, 3)) continue;
 
+                // Expand each triangle clip slightly. The old exact triangle clips could leave
+                // sub-pixel gaps along shared center-to-corner edges, which appeared as a white X.
+                float x0 = dstCx, y0 = dstCy;
+                float x1 = dx[i], y1 = dy[i];
+                float x2 = dx[j], y2 = dy[j];
+                float gcx = (x0 + x1 + x2) / 3f;
+                float gcy = (y0 + y1 + y2) / 3f;
+                float overlap = 1.8f;
+
+                float d0 = Math.max(1f, distance(x0, y0, gcx, gcy));
+                float d1 = Math.max(1f, distance(x1, y1, gcx, gcy));
+                float d2 = Math.max(1f, distance(x2, y2, gcx, gcy));
+
                 Path tri = new Path();
-                tri.moveTo(dstCx, dstCy);
-                tri.lineTo(dx[i], dy[i]);
-                tri.lineTo(dx[j], dy[j]);
+                tri.moveTo(gcx + (x0 - gcx) * ((d0 + overlap) / d0),
+                           gcy + (y0 - gcy) * ((d0 + overlap) / d0));
+                tri.lineTo(gcx + (x1 - gcx) * ((d1 + overlap) / d1),
+                           gcy + (y1 - gcy) * ((d1 + overlap) / d1));
+                tri.lineTo(gcx + (x2 - gcx) * ((d2 + overlap) / d2),
+                           gcy + (y2 - gcy) * ((d2 + overlap) / d2));
                 tri.close();
 
                 canvas.save();
