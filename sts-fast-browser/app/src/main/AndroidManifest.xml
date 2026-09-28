@@ -16,6 +16,7 @@
             android:name=".PdfViewerActivity"
             android:exported="false"
             android:documentLaunchMode="always"
+            android:taskAffinity="${applicationId}.pdf"
             android:launchMode="standard"
             android:excludeFromRecents="false"
             android:resizeableActivity="true"
