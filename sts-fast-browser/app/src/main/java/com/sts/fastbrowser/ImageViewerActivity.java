@@ -981,19 +981,21 @@ public class ImageViewerActivity extends Activity {
             handles[dragMode][0] = newX;
             handles[dragMode][1] = newY;
 
-            if (dragMode == 0) {
-                handles[1][1] = clamp(handles[1][1] + moveY, imageRect.top, imageRect.bottom);
-                handles[7][0] = clamp(handles[7][0] + moveX, imageRect.left, imageRect.right);
-            } else if (dragMode == 2) {
-                handles[1][1] = clamp(handles[1][1] + moveY, imageRect.top, imageRect.bottom);
-                handles[3][0] = clamp(handles[3][0] + moveX, imageRect.left, imageRect.right);
-            } else if (dragMode == 4) {
-                handles[3][0] = clamp(handles[3][0] + moveX, imageRect.left, imageRect.right);
-                handles[5][1] = clamp(handles[5][1] + moveY, imageRect.top, imageRect.bottom);
-            } else if (dragMode == 6) {
-                handles[5][1] = clamp(handles[5][1] + moveY, imageRect.top, imageRect.bottom);
-                handles[7][0] = clamp(handles[7][0] + moveX, imageRect.left, imageRect.right);
-            }
+            // Corner drag keeps every middle handle linked to the exact middle of its edge.
+            // This prevents the crop border from breaking into the bent/zig-zag shape.
+            snapMiddleHandlesToEdges();
+        }
+
+        private void snapMiddleHandlesToEdges() {
+            setMidpoint(1, 0, 2); // top
+            setMidpoint(3, 2, 4); // right
+            setMidpoint(5, 4, 6); // bottom
+            setMidpoint(7, 6, 0); // left
+        }
+
+        private void setMidpoint(int middle, int cornerA, int cornerB) {
+            handles[middle][0] = (handles[cornerA][0] + handles[cornerB][0]) * 0.5f;
+            handles[middle][1] = (handles[cornerA][1] + handles[cornerB][1]) * 0.5f;
         }
 
         private void moveAllHandles(float dx, float dy) {
@@ -1029,39 +1031,75 @@ public class ImageViewerActivity extends Activity {
 
             float[] px = new float[8];
             float[] py = new float[8];
-            float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
-            float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
-
             for (int i = 0; i < 8; i++) {
                 px[i] = clamp((handles[i][0] - imageRect.left) * sx, 0f, image.getWidth());
                 py[i] = clamp((handles[i][1] - imageRect.top) * sy, 0f, image.getHeight());
-                minX = Math.min(minX, px[i]);
-                minY = Math.min(minY, py[i]);
-                maxX = Math.max(maxX, px[i]);
-                maxY = Math.max(maxY, py[i]);
             }
 
-            int left = Math.max(0, (int) Math.floor(minX));
-            int top = Math.max(0, (int) Math.floor(minY));
-            int right = Math.min(image.getWidth(), (int) Math.ceil(maxX));
-            int bottom = Math.min(image.getHeight(), (int) Math.ceil(maxY));
-            int w = right - left;
-            int h = bottom - top;
-            if (w <= 1 || h <= 1) return null;
+            float topW = distance(px[0], py[0], px[1], py[1]) + distance(px[1], py[1], px[2], py[2]);
+            float bottomW = distance(px[6], py[6], px[5], py[5]) + distance(px[5], py[5], px[4], py[4]);
+            float leftH = distance(px[0], py[0], px[7], py[7]) + distance(px[7], py[7], px[6], py[6]);
+            float rightH = distance(px[2], py[2], px[3], py[3]) + distance(px[3], py[3], px[4], py[4]);
 
-            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            int outW = Math.max(2, Math.round(Math.max(topW, bottomW)));
+            int outH = Math.max(2, Math.round(Math.max(leftH, rightH)));
+            outW = Math.min(outW, 12000);
+            outH = Math.min(outH, 12000);
+
+            Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
             Canvas canvas = new Canvas(out);
-            canvas.drawColor(Color.TRANSPARENT);
+            canvas.drawColor(Color.WHITE);
 
-            Path p = new Path();
-            p.moveTo(px[0] - left, py[0] - top);
-            for (int i = 1; i < 8; i++) p.lineTo(px[i] - left, py[i] - top);
-            p.close();
+            float[] dx = new float[]{
+                    0f, outW * 0.5f, outW,
+                    outW, outW,
+                    outW * 0.5f, 0f, 0f
+            };
+            float[] dy = new float[]{
+                    0f, 0f, 0f,
+                    outH * 0.5f, outH,
+                    outH, outH, outH * 0.5f
+            };
 
-            canvas.save();
-            canvas.clipPath(p);
-            canvas.drawBitmap(image, -left, -top, bitmapPaint);
-            canvas.restore();
+            float srcCx = 0f, srcCy = 0f;
+            for (int i = 0; i < 8; i++) {
+                srcCx += px[i];
+                srcCy += py[i];
+            }
+            srcCx /= 8f;
+            srcCy /= 8f;
+            float dstCx = outW * 0.5f;
+            float dstCy = outH * 0.5f;
+
+            // Eight triangles map the selected 8-handle crop border into one filled rectangle.
+            for (int i = 0; i < 8; i++) {
+                int j = (i + 1) % 8;
+                float[] src = new float[]{
+                        srcCx, srcCy,
+                        px[i], py[i],
+                        px[j], py[j]
+                };
+                float[] dst = new float[]{
+                        dstCx, dstCy,
+                        dx[i], dy[i],
+                        dx[j], dy[j]
+                };
+
+                Matrix m = new Matrix();
+                if (!m.setPolyToPoly(src, 0, dst, 0, 3)) continue;
+
+                Path tri = new Path();
+                tri.moveTo(dstCx, dstCy);
+                tri.lineTo(dx[i], dy[i]);
+                tri.lineTo(dx[j], dy[j]);
+                tri.close();
+
+                canvas.save();
+                canvas.clipPath(tri);
+                canvas.drawBitmap(image, m, bitmapPaint);
+                canvas.restore();
+            }
+
             return out;
         }
     }
