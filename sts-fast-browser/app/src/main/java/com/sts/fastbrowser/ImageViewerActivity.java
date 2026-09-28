@@ -1459,71 +1459,97 @@ public class ImageViewerActivity extends Activity {
             restoreDragStartHandles();
 
             if (cornerMoveMode == 1) {
-                // Straight left/right keeps the current linked-edge behavior.
+                // Horizontal corner drag: only the grabbed corner and the middle handle
+                // on that same top/bottom edge move. The other corner stays fixed.
                 applyStraightCornerMove(totalDx, 0f);
-                snapMiddleHandlesToEdges();
                 return;
             }
 
             if (cornerMoveMode == 2) {
-                // Straight up/down keeps the current linked-edge behavior.
+                // Vertical corner drag: only the grabbed corner and the middle handle
+                // on that same left/right edge move. The other corner stays fixed.
                 applyStraightCornerMove(0f, totalDy);
-                snapMiddleHandlesToEdges();
                 return;
             }
 
-            // Diagonal/other direction: move only the grabbed corner.
-            // Only its two adjacent middle handles follow. Other corners/middles stay where they were.
+            // Diagonal/other direction keeps the current rule:
+            // grabbed corner + its two adjacent middle handles, no other corners.
             applyDiagonalCornerMove(totalDx, totalDy);
         }
 
         private void applyStraightCornerMove(float dx, float dy) {
+            boolean horizontal = Math.abs(dx) > 0f;
+
             if (dragMode == 0) { // top-left
-                float newX = clamp(dragStartHandles[0][0] + dx, imageRect.left, dragStartHandles[4][0] - minCrop);
-                float newY = clamp(dragStartHandles[0][1] + dy, imageRect.top, dragStartHandles[4][1] - minCrop);
-                handles[0][0] = newX; handles[0][1] = newY;
-                handles[2][1] = newY;
-                handles[6][0] = newX;
+                if (horizontal) {
+                    handles[0][0] = clamp(dragStartHandles[0][0] + dx,
+                            imageRect.left, dragStartHandles[2][0] - minCrop);
+                    handles[0][1] = dragStartHandles[0][1];
+                    setMidpoint(1, 0, 2); // only top-middle follows
+                } else {
+                    handles[0][0] = dragStartHandles[0][0];
+                    handles[0][1] = clamp(dragStartHandles[0][1] + dy,
+                            imageRect.top, dragStartHandles[6][1] - minCrop);
+                    setMidpoint(7, 6, 0); // only left-middle follows
+                }
             } else if (dragMode == 2) { // top-right
-                float newX = clamp(dragStartHandles[2][0] + dx, dragStartHandles[6][0] + minCrop, imageRect.right);
-                float newY = clamp(dragStartHandles[2][1] + dy, imageRect.top, dragStartHandles[6][1] - minCrop);
-                handles[2][0] = newX; handles[2][1] = newY;
-                handles[0][1] = newY;
-                handles[4][0] = newX;
+                if (horizontal) {
+                    handles[2][0] = clamp(dragStartHandles[2][0] + dx,
+                            dragStartHandles[0][0] + minCrop, imageRect.right);
+                    handles[2][1] = dragStartHandles[2][1];
+                    setMidpoint(1, 0, 2); // only top-middle follows
+                } else {
+                    handles[2][0] = dragStartHandles[2][0];
+                    handles[2][1] = clamp(dragStartHandles[2][1] + dy,
+                            imageRect.top, dragStartHandles[4][1] - minCrop);
+                    setMidpoint(3, 2, 4); // only right-middle follows
+                }
             } else if (dragMode == 4) { // bottom-right
-                float newX = clamp(dragStartHandles[4][0] + dx, dragStartHandles[0][0] + minCrop, imageRect.right);
-                float newY = clamp(dragStartHandles[4][1] + dy, dragStartHandles[0][1] + minCrop, imageRect.bottom);
-                handles[4][0] = newX; handles[4][1] = newY;
-                handles[2][0] = newX;
-                handles[6][1] = newY;
+                if (horizontal) {
+                    handles[4][0] = clamp(dragStartHandles[4][0] + dx,
+                            dragStartHandles[6][0] + minCrop, imageRect.right);
+                    handles[4][1] = dragStartHandles[4][1];
+                    setMidpoint(5, 4, 6); // only bottom-middle follows
+                } else {
+                    handles[4][0] = dragStartHandles[4][0];
+                    handles[4][1] = clamp(dragStartHandles[4][1] + dy,
+                            dragStartHandles[2][1] + minCrop, imageRect.bottom);
+                    setMidpoint(3, 2, 4); // only right-middle follows
+                }
             } else if (dragMode == 6) { // bottom-left
-                float newX = clamp(dragStartHandles[6][0] + dx, imageRect.left, dragStartHandles[2][0] - minCrop);
-                float newY = clamp(dragStartHandles[6][1] + dy, dragStartHandles[2][1] + minCrop, imageRect.bottom);
-                handles[6][0] = newX; handles[6][1] = newY;
-                handles[0][0] = newX;
-                handles[4][1] = newY;
+                if (horizontal) {
+                    handles[6][0] = clamp(dragStartHandles[6][0] + dx,
+                            imageRect.left, dragStartHandles[4][0] - minCrop);
+                    handles[6][1] = dragStartHandles[6][1];
+                    setMidpoint(5, 4, 6); // only bottom-middle follows
+                } else {
+                    handles[6][0] = dragStartHandles[6][0];
+                    handles[6][1] = clamp(dragStartHandles[6][1] + dy,
+                            dragStartHandles[0][1] + minCrop, imageRect.bottom);
+                    setMidpoint(7, 6, 0); // only left-middle follows
+                }
             }
         }
 
         private void applyDiagonalCornerMove(float dx, float dy) {
             if (dragMode == 0) { // top-left; adjacent middles: top(1), left(7)
-                handles[0][0] = clamp(dragStartHandles[0][0] + dx, imageRect.left, imageRect.right);
-                handles[0][1] = clamp(dragStartHandles[0][1] + dy, imageRect.top, imageRect.bottom);
+                handles[0][0] = clamp(dragStartHandles[0][0] + dx, imageRect.left, dragStartHandles[2][0] - minCrop);
+                handles[0][1] = clamp(dragStartHandles[0][1] + dy, imageRect.top, dragStartHandles[6][1] - minCrop);
                 setMidpoint(1, 0, 2);
                 setMidpoint(7, 6, 0);
             } else if (dragMode == 2) { // top-right; adjacent middles: top(1), right(3)
-                handles[2][0] = clamp(dragStartHandles[2][0] + dx, imageRect.left, imageRect.right);
-                handles[2][1] = clamp(dragStartHandles[2][1] + dy, imageRect.top, imageRect.bottom);
+                handles[2][0] = clamp(dragStartHandles[2][0] + dx, dragStartHandles[0][0] + minCrop, imageRect.right);
+                handles[2][1] = clamp(dragStartHandles[2][1] + dy, imageRect.top, dragStartHandles[4][1] - minCrop);
                 setMidpoint(1, 0, 2);
                 setMidpoint(3, 2, 4);
             } else if (dragMode == 4) { // bottom-right; adjacent middles: right(3), bottom(5)
-                handles[4][0] = clamp(dragStartHandles[4][0] + dx, imageRect.left, imageRect.right);
-                handles[4][1] = clamp(dragStartHandles[4][1] + dy, imageRect.top, imageRect.bottom);
+                handles[4][0] = clamp(dragStartHandles[4][0] + dx, dragStartHandles[6][0] + minCrop, imageRect.right);
+                handles[4][1] = clamp(dragStartHandles[4][1] + dy, dragStartHandles[2][1] + minCrop, imageRect.bottom);
                 setMidpoint(3, 2, 4);
                 setMidpoint(5, 4, 6);
             } else if (dragMode == 6) { // bottom-left; adjacent middles: bottom(5), left(7)
-                handles[6][0] = clamp(dragStartHandles[6][0] + dx, imageRect.left, imageRect.right);
-                handles[6][1] = clamp(dragStartHandles[6][1] + dy, imageRect.top, imageRect.bottom);
+                handles[6][0] = clamp(dragStartHandles[6][0] + dx, imageRect.left, dragStartHandles[4][0] - minCrop);
+                handles[6][1] = clamp(dragStartHandles[6][1] + dy, dragStartHandles[0][1] + minCrop, imageRect.bottom);
                 setMidpoint(5, 4, 6);
                 setMidpoint(7, 6, 0);
             }
