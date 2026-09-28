@@ -39,13 +39,15 @@ jobs:
           gradle-version: '8.7'
 
       - name: Build installable debug APK
-        run: gradle -p sts-fast-browser :app:assembleDebug --no-daemon --stacktrace
+        run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Upload installable APK
+      - name: Upload unsigned APK and signing tool
         uses: actions/upload-artifact@v4
         with:
-          name: STS-Fast-Browser-v1.0.1
-          path: sts-fast-browser/app/build/outputs/apk/debug/app-debug.apk
+          name: STS-Fast-Browser-v1.0.2-unsigned
+          path: |
+            sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+            /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar
           if-no-files-found: error
 
       - name: Prepare downloadable APK chunks
@@ -54,11 +56,11 @@ jobs:
           set -euo pipefail
           APK="sts-fast-browser/app/build/outputs/apk/debug/app-debug.apk"
           mkdir -p build-output
-          rm -f build-output/STS-Fast-Browser-v1.0.1.apk.b64.part-*
-          base64 -w 0 "$APK" | split -b 700000 -d -a 3 - build-output/STS-Fast-Browser-v1.0.1.apk.b64.part-
-          sha256sum "$APK" | awk '{print $1}' > build-output/STS-Fast-Browser-v1.0.1.sha256
-          stat -c%s "$APK" > build-output/STS-Fast-Browser-v1.0.1.size
-          ls build-output/STS-Fast-Browser-v1.0.1.apk.b64.part-* | sed 's#build-output/##' > build-output/STS-Fast-Browser-v1.0.1.parts.txt
+          rm -f build-output/STS-Fast-Browser-v1.0.2.apk.b64.part-*
+          base64 -w 0 "$APK" | split -b 700000 -d -a 3 - build-output/STS-Fast-Browser-v1.0.2.apk.b64.part-
+          sha256sum "$APK" | awk '{print $1}' > build-output/STS-Fast-Browser-v1.0.2.sha256
+          stat -c%s "$APK" > build-output/STS-Fast-Browser-v1.0.2.size
+          ls build-output/STS-Fast-Browser-v1.0.2.apk.b64.part-* | sed 's#build-output/##' > build-output/STS-Fast-Browser-v1.0.2.parts.txt
 
       - name: Save build output to build branch
         shell: bash
@@ -70,6 +72,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No build output changes"
           else
-            git commit -m "Build STS Fast Browser v1.0.1 APK"
+            git commit -m "Build STS Fast Browser v1.0.2 APK"
             git push origin HEAD:sts-fast-browser-build
           fi
