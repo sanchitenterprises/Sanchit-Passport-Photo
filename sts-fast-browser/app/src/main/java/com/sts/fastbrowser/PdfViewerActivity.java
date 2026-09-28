@@ -36,6 +36,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.PopupMenu;
 import android.widget.ScrollView;
@@ -129,12 +130,12 @@ public class PdfViewerActivity extends Activity {
         title.setPadding(dp(10), 0, dp(8), 0);
         top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
-        TextView menu = new TextView(this);
-        menu.setText("⋮");
-        menu.setTextSize(25);
-        menu.setTextColor(Color.parseColor("#162326"));
-        menu.setGravity(Gravity.CENTER);
-        menu.setClickable(true);
+        ImageButton menu = new ImageButton(this);
+        menu.setImageResource(R.drawable.ic_more);
+        menu.setScaleType(ImageButton.ScaleType.CENTER_INSIDE);
+        menu.setPadding(dp(10), dp(10), dp(10), dp(10));
+        menu.setBackgroundColor(Color.TRANSPARENT);
+        menu.setContentDescription("Menu");
         top.addView(menu, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
         menu.setOnClickListener(this::showMenu);
 
