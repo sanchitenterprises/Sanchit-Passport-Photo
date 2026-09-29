@@ -740,10 +740,10 @@ public class MainActivity extends android.app.Activity {
                 "if(window.__stsAdCleanerInstalled){try{window.__stsAdClean&&window.__stsAdClean();}catch(e){}return;}" +
                 "window.__stsAdCleanerInstalled=true;" +
                 "var selectors=[" +
-                "'ins.adsbygoogle','.adsbygoogle','[id^=\\"google_ads_\\"]','[id^=\\"div-gpt-ad\\"]'," +
-                "'iframe[src*=\\"doubleclick.net\\"]','iframe[src*=\\"googlesyndication.com\\"]'," +
-                "'iframe[src*=\\"googleadservices.com\\"]','[data-ad-client]','[data-ad-slot]'," +
-                "'amp-ad','amp-embed[type=\\"taboola\\"]','.advertisement','.ad-container','.ad-banner','.ad-wrapper'" +
+                "'ins.adsbygoogle','.adsbygoogle','[id^=\"google_ads_\"]','[id^=\"div-gpt-ad\"]'," +
+                "'iframe[src*=\"doubleclick.net\"]','iframe[src*=\"googlesyndication.com\"]'," +
+                "'iframe[src*=\"googleadservices.com\"]','[data-ad-client]','[data-ad-slot]'," +
+                "'amp-ad','amp-embed[type=\"taboola\"]','.advertisement','.ad-container','.ad-banner','.ad-wrapper'" +
                 "];" +
                 "window.__stsAdClean=function(){for(var i=0;i<selectors.length;i++){var n=document.querySelectorAll(selectors[i]);" +
                 "for(var j=0;j<n.length;j++){try{n[j].style.setProperty('display','none','important');" +
