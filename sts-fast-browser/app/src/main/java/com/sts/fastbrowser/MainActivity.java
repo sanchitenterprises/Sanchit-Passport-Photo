@@ -71,6 +71,7 @@ public class MainActivity extends android.app.Activity {
     private static final String KEY_SITES_D2 = "sites_d2_json";
     private static final String KEY_SITES_MIGRATED = "sites_split_migrated";
     private static final String KEY_ADBLOCK = "adblock";
+    private static final String KEY_HARD_ADBLOCK = "hard_adblock";
     private static final String KEY_SLOT1_NAME = "slot1_name";
     private static final String KEY_SLOT1_URL = "slot1_url";
     private static final String KEY_SLOT2_NAME = "slot2_name";
@@ -98,6 +99,7 @@ public class MainActivity extends android.app.Activity {
     private String pendingGeoOrigin;
     private GeolocationPermissions.Callback pendingGeoCallback;
     private boolean adBlockEnabled = true;
+    private boolean hardAdBlockEnabled = true;
     private int activeSlot = 1;
     private String slot1Name = GOOGLE_NAME;
     private String slot1Url = GOOGLE_URL;
@@ -126,6 +128,7 @@ public class MainActivity extends android.app.Activity {
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         adBlockEnabled = prefs.getBoolean(KEY_ADBLOCK, true);
+        hardAdBlockEnabled = prefs.getBoolean(KEY_HARD_ADBLOCK, true);
         loadSites();
         loadSlots();
         setContentView(buildUi());
@@ -362,7 +365,8 @@ public class MainActivity extends android.app.Activity {
                         if (handled || url == null) return false;
                         try {
                             Uri popupUri = Uri.parse(url);
-                            if (adBlockEnabled && isBlocked(popupUri)) {
+                            if ((adBlockEnabled && isBlocked(popupUri)) ||
+                                    (hardAdBlockEnabled && isHardAdRequest(popupUri))) {
                                 handled = true;
                                 child.post(child::destroy);
                                 return true;
@@ -430,13 +434,19 @@ public class MainActivity extends android.app.Activity {
                 super.onPageFinished(view, url);
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
-                if (adBlockEnabled) injectAdCleanup(view);
+                if (adBlockEnabled) injectNormalAdCleanup(view);
+                if (hardAdBlockEnabled) injectHardAdCleanup(view);
             }
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                if (adBlockEnabled && !request.isForMainFrame() && isAdRequest(request.getUrl())) {
-                    return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+                if (!request.isForMainFrame()) {
+                    Uri requestUri = request.getUrl();
+                    boolean blockNormal = adBlockEnabled && isBlocked(requestUri);
+                    boolean blockHard = hardAdBlockEnabled && isHardAdRequest(requestUri);
+                    if (blockNormal || blockHard) {
+                        return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
+                    }
                 }
                 return super.shouldInterceptRequest(view, request);
             }
@@ -733,17 +743,36 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
-    private void injectAdCleanup(WebView view) {
+    private void injectNormalAdCleanup(WebView view) {
+        if (view == null) return;
+        String js =
+                "(function(){" +
+                "if(window.__stsNormalAdBlockInstalled){try{window.__stsNormalAdClean&&window.__stsNormalAdClean();}catch(e){}return;}" +
+                "window.__stsNormalAdBlockInstalled=true;" +
+                "var sel=[" +
+                "'ins.adsbygoogle','.adsbygoogle','[id^=\"google_ads_\"]','[id^=\"div-gpt-ad\"]'," +
+                "'iframe[src*=\"doubleclick.net\"]','iframe[src*=\"googlesyndication.com\"]'," +
+                "'iframe[src*=\"googleadservices.com\"]','[data-ad-client]','[data-ad-slot]'," +
+                "'amp-ad','.advertisement','.ad-container','.ad-banner','.ad-wrapper'" +
+                "];" +
+                "window.__stsNormalAdClean=function(){for(var i=0;i<sel.length;i++){var n=[];try{n=document.querySelectorAll(sel[i]);}catch(e){}" +
+                "for(var j=0;j<n.length;j++){try{n[j].style.setProperty('display','none','important');" +
+                "n[j].style.setProperty('visibility','hidden','important');}catch(e){}}}};" +
+                "window.__stsNormalAdClean();" +
+                "try{new MutationObserver(function(){window.__stsNormalAdClean();}).observe(document.documentElement||document," +
+                "{childList:true,subtree:true});}catch(e){}" +
+                "})();";
+        try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    private void injectHardAdCleanup(WebView view) {
         if (view == null) return;
         String js =
                 "(function(){" +
                 "if(window.__stsHardAdBlockInstalled){try{window.__stsHardAdClean&&window.__stsHardAdClean();}catch(e){}return;}" +
                 "window.__stsHardAdBlockInstalled=true;" +
                 "var sel=[" +
-                "'ins.adsbygoogle','.adsbygoogle','[id^=\"google_ads_\"]','[id^=\"div-gpt-ad\"]'," +
-                "'iframe[src*=\"doubleclick.net\"]','iframe[src*=\"googlesyndication.com\"]'," +
-                "'iframe[src*=\"googleadservices.com\"]','[data-ad-client]','[data-ad-slot]'," +
-                "'amp-ad','amp-embed[type=\"taboola\"]','.advertisement','.ad-container','.ad-banner','.ad-wrapper'," +
+                "'amp-embed[type=\"taboola\"]','.sponsored','.promoted','.promoted-content'," +
                 "'#player-ads','ytd-ad-slot-renderer','ytd-display-ad-renderer','ytd-promoted-sparkles-web-renderer'," +
                 "'ytd-in-feed-ad-layout-renderer','ytd-promoted-video-renderer','ytm-promoted-video-renderer'," +
                 "'ytm-companion-ad-renderer','ytm-display-ad-renderer','ytm-ad-slot-renderer','.ytp-ad-overlay-container'," +
@@ -774,14 +803,13 @@ public class MainActivity extends android.app.Activity {
                 "window.__stsHardAdClean();" +
                 "try{new MutationObserver(function(){window.__stsHardAdClean();}).observe(document.documentElement||document," +
                 "{childList:true,subtree:true,attributes:true,attributeFilter:['class']});}catch(e){}" +
-                "try{window.__stsAdTimer=setInterval(window.__stsHardAdClean,700);}catch(e){}" +
+                "try{window.__stsHardAdTimer=setInterval(window.__stsHardAdClean,700);}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
 
-    private boolean isAdRequest(Uri uri) {
+    private boolean isHardAdRequest(Uri uri) {
         if (uri == null) return false;
-        if (isBlocked(uri)) return true;
 
         String host = uri.getHost();
         String path = uri.getEncodedPath();
@@ -1167,11 +1195,16 @@ public class MainActivity extends android.app.Activity {
     private void showMainMenu(View anchor) {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
         pm.getMenu().add(adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF");
+        pm.getMenu().add(hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF");
         pm.getMenu().add("Add Website");
         pm.getMenu().add("Manage Websites");
         pm.getMenu().add("About");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
+            if (t.startsWith("Hard Ad Blocker")) {
+                setHardAdBlockEnabled(!hardAdBlockEnabled, true);
+                return true;
+            }
             if (t.startsWith("Ad Blocker")) {
                 setAdBlockEnabled(!adBlockEnabled, true);
                 return true;
@@ -1495,7 +1528,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.24\n\nSimple • Fast • Two Quick Slots\nHard Ad Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.25\n\nSimple • Fast • Two Quick Slots\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -1505,8 +1538,8 @@ public class MainActivity extends android.app.Activity {
         prefs.edit().putBoolean(KEY_ADBLOCK, enabled).apply();
 
         if (enabled) {
-            if (webView1 != null) injectAdCleanup(webView1);
-            if (webView2 != null) injectAdCleanup(webView2);
+            if (webView1 != null) injectNormalAdCleanup(webView1);
+            if (webView2 != null) injectNormalAdCleanup(webView2);
         }
 
         if (showToast) {
@@ -1517,6 +1550,24 @@ public class MainActivity extends android.app.Activity {
 
         // The toggle is an explicit user action. Reload only the visible slot so
         // network-level blocking starts immediately without disturbing hidden D1/D2 state.
+        if (webView != null) webView.reload();
+    }
+
+    private void setHardAdBlockEnabled(boolean enabled, boolean showToast) {
+        hardAdBlockEnabled = enabled;
+        prefs.edit().putBoolean(KEY_HARD_ADBLOCK, enabled).apply();
+
+        if (enabled) {
+            if (webView1 != null) injectHardAdCleanup(webView1);
+            if (webView2 != null) injectHardAdCleanup(webView2);
+        }
+
+        if (showToast) {
+            Toast.makeText(this,
+                    enabled ? "Hard Ad Blocker ON" : "Hard Ad Blocker OFF",
+                    Toast.LENGTH_SHORT).show();
+        }
+
         if (webView != null) webView.reload();
     }
 
