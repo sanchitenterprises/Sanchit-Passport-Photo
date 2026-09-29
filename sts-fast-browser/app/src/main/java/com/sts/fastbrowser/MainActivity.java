@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -15,6 +16,7 @@ import android.net.Uri;
 import android.webkit.URLUtil;
 import android.os.Bundle;
 import android.text.InputType;
+import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -113,7 +115,9 @@ public class MainActivity extends android.app.Activity {
         configureWebView(webView2);
         showWebView(1);
         updateSlotLabels();
-        loadInitialPage();
+        if (!handleBrowserIntent(getIntent())) {
+            loadInitialPage();
+        }
     }
 
     private View buildUi() {
@@ -441,6 +445,7 @@ public class MainActivity extends android.app.Activity {
             String cookie = CookieManager.getInstance().getCookie(url);
             if (cookie != null) intent.putExtra("pdf_cookie", cookie);
             intent.putExtra("pdf_user_agent", webView.getSettings().getUserAgentString());
+            intent.putExtra("pdf_slot", activeSlot);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
             startActivity(intent);
         } catch (Exception e) {
@@ -607,30 +612,199 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void showSitePasswordDialog(Site site, Runnable onSuccess) {
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(22), dp(18), dp(22), dp(12));
+
+        GradientDrawable panelBg = new GradientDrawable();
+        panelBg.setColor(Color.parseColor("#F7FAF9"));
+        panelBg.setCornerRadius(dp(18));
+        panelBg.setStroke(dp(1), Color.parseColor("#B7CBC8"));
+        body.setBackground(panelBg);
+
+        TextView lockBadge = new TextView(this);
+        lockBadge.setText("SECURE WEBSITE");
+        lockBadge.setTextColor(Color.parseColor("#355C62"));
+        lockBadge.setTextSize(11);
+        lockBadge.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        lockBadge.setGravity(Gravity.CENTER);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setColor(Color.parseColor("#D9F0EE"));
+        badgeBg.setCornerRadius(dp(12));
+        lockBadge.setBackground(badgeBg);
+        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(dp(142), dp(28));
+        badgeLp.gravity = Gravity.CENTER_HORIZONTAL;
+        body.addView(lockBadge, badgeLp);
+
+        TextView title = new TextView(this);
+        title.setText(site.name);
+        title.setTextColor(Color.parseColor("#172326"));
+        title.setTextSize(22);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(12), 0, dp(4));
+        body.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Website खोलने के लिए password डालें");
+        subtitle.setTextColor(Color.parseColor("#5B676A"));
+        subtitle.setTextSize(13);
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setPadding(0, 0, 0, dp(14));
+        body.addView(subtitle, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        LinearLayout passRow = new LinearLayout(this);
+        passRow.setOrientation(LinearLayout.HORIZONTAL);
+        passRow.setGravity(Gravity.CENTER_VERTICAL);
+        passRow.setPadding(dp(4), 0, dp(4), 0);
+        GradientDrawable passBg = new GradientDrawable();
+        passBg.setColor(Color.WHITE);
+        passBg.setCornerRadius(dp(12));
+        passBg.setStroke(dp(1), Color.parseColor("#8FB5B1"));
+        passRow.setBackground(passBg);
+
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setHint("Password");
+        input.setTextColor(Color.parseColor("#172326"));
+        input.setHintTextColor(Color.parseColor("#7A8587"));
+        input.setTextSize(16);
+        input.setBackgroundColor(Color.TRANSPARENT);
+        input.setPadding(dp(14), 0, dp(8), 0);
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        input.setPadding(dp(18), dp(4), dp(18), dp(4));
+        input.setTransformationMethod(PasswordTransformationMethod.getInstance());
+
+        TextView show = new TextView(this);
+        show.setText("SHOW");
+        show.setTextColor(Color.parseColor("#4F8F8B"));
+        show.setTextSize(12);
+        show.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        show.setGravity(Gravity.CENTER);
+        show.setPadding(dp(10), 0, dp(10), 0);
+        show.setClickable(true);
+        show.setFocusable(true);
+
+        final boolean[] visible = {false};
+        show.setOnClickListener(v -> {
+            int pos = input.getSelectionStart();
+            visible[0] = !visible[0];
+            if (visible[0]) {
+                input.setTransformationMethod(null);
+                show.setText("HIDE");
+            } else {
+                input.setTransformationMethod(PasswordTransformationMethod.getInstance());
+                show.setText("SHOW");
+            }
+            if (pos >= 0) input.setSelection(Math.min(pos, input.length()));
+        });
+
+        passRow.addView(input, new LinearLayout.LayoutParams(0, dp(56), 1f));
+        passRow.addView(show, new LinearLayout.LayoutParams(dp(66), dp(56)));
+        body.addView(passRow, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+
+        TextView error = new TextView(this);
+        error.setTextColor(Color.parseColor("#8B3D3D"));
+        error.setTextSize(12);
+        error.setPadding(dp(4), dp(5), dp(4), 0);
+        error.setVisibility(View.GONE);
+        body.addView(error, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(28)));
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.CENTER);
+        actions.setPadding(0, dp(6), 0, 0);
+
+        TextView cancel = makePasswordAction("CANCEL", false);
+        TextView open = makePasswordAction("OPEN", true);
+        LinearLayout.LayoutParams actionLp1 = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        actionLp1.setMargins(0, 0, dp(6), 0);
+        LinearLayout.LayoutParams actionLp2 = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        actionLp2.setMargins(dp(6), 0, 0, 0);
+        actions.addView(cancel, actionLp1);
+        actions.addView(open, actionLp2);
+        body.addView(actions, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(site.name)
-                .setMessage("Website password डालें")
-                .setView(input)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Open", null)
+                .setView(body)
                 .create();
 
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        open.setOnClickListener(v -> {
             String entered = input.getText().toString();
             if (site.passwordHash.equals(hashPassword(entered))) {
                 dialog.dismiss();
                 if (onSuccess != null) onSuccess.run();
             } else {
-                input.setError("Wrong password");
+                error.setText("Password गलत है");
+                error.setVisibility(View.VISIBLE);
+                input.requestFocus();
             }
-        }));
+        });
+        input.setOnEditorActionListener((v, actionId, event) -> {
+            open.performClick();
+            return true;
+        });
+
+        dialog.setOnShowListener(d -> {
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            }
+            input.requestFocus();
+        });
         dialog.show();
+    }
+
+    private TextView makePasswordAction(String text, boolean primary) {
+        TextView button = new TextView(this);
+        button.setText(text);
+        button.setTextSize(14);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        button.setGravity(Gravity.CENTER);
+        button.setTextColor(primary ? Color.WHITE : Color.parseColor("#355C62"));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(primary ? Color.parseColor("#4F8F8B") : Color.parseColor("#E7EFEE"));
+        bg.setCornerRadius(dp(12));
+        bg.setStroke(dp(1), primary ? Color.parseColor("#3D7774") : Color.parseColor("#AEC7C4"));
+        button.setBackground(new RippleDrawable(
+                ColorStateList.valueOf(primary ? 0x33FFFFFF : 0x22355C62), bg, null));
+        button.setClickable(true);
+        button.setFocusable(true);
+        return button;
+    }
+
+    private boolean handleBrowserIntent(Intent intent) {
+        if (intent == null) return false;
+        String url = intent.getStringExtra("browser_open_url");
+        if (TextUtils.isEmpty(url)) return false;
+
+        Uri uri;
+        try {
+            uri = Uri.parse(url);
+        } catch (Exception e) {
+            return false;
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        if (!"http".equals(scheme) && !"https".equals(scheme)) return false;
+
+        int slot = intent.getIntExtra("browser_slot", activeSlot);
+        if (slot != 2) slot = 1;
+        showWebView(slot);
+        WebView target = webViewForSlot(slot);
+        target.loadUrl(url);
+        return true;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleBrowserIntent(intent);
     }
 
     private void goHome(int slot) {
