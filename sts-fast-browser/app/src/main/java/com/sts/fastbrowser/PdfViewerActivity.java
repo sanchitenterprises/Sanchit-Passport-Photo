@@ -45,6 +45,12 @@ import android.widget.Toast;
 
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
+import com.tom_roush.pdfbox.pdmodel.PDPage;
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle;
+import com.tom_roush.pdfbox.pdmodel.interactive.action.PDAction;
+import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionURI;
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
 
@@ -56,6 +62,10 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class PdfViewerActivity extends Activity {
     private static final int REQ_STORAGE = 701;
@@ -65,6 +75,7 @@ public class PdfViewerActivity extends Activity {
     private String fileName;
     private String cookie;
     private String userAgent;
+    private int browserSlot = 1;
 
     private File sourceFile;
     private File pdfFile;
@@ -75,6 +86,7 @@ public class PdfViewerActivity extends Activity {
     private LinearLayout pages;
     private TextView status;
     private boolean destroyed = false;
+    private final Map<Integer, List<PdfLink>> pageLinks = new HashMap<>();
     private int pendingImagePage = -1;
     private String pendingPageFormat = null;
 
@@ -91,6 +103,8 @@ public class PdfViewerActivity extends Activity {
         fileName = getIntent().getStringExtra("pdf_name");
         cookie = getIntent().getStringExtra("pdf_cookie");
         userAgent = getIntent().getStringExtra("pdf_user_agent");
+        browserSlot = getIntent().getIntExtra("pdf_slot", 1);
+        if (browserSlot != 2) browserSlot = 1;
 
         if (sourceUri != null) {
             String externalName = resolveDisplayName(sourceUri);
@@ -224,6 +238,7 @@ public class PdfViewerActivity extends Activity {
 
                 pdfPfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
                 pdfRenderer = new PdfRenderer(pdfPfd);
+                extractPdfLinks();
                 renderAllPages();
             } catch (InvalidPasswordException e) {
                 if (doc != null) try { doc.close(); } catch (Exception ignored) {}
@@ -261,6 +276,104 @@ public class PdfViewerActivity extends Activity {
             });
         });
         dialog.show();
+    }
+
+    private void extractPdfLinks() {
+        pageLinks.clear();
+        if (textDocument == null) return;
+
+        try {
+            int pageCount = textDocument.getNumberOfPages();
+            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+                PDPage page = textDocument.getPage(pageIndex);
+                PDRectangle box = page.getCropBox();
+                if (box == null) box = page.getMediaBox();
+                if (box == null) continue;
+
+                float pageW = box.getWidth();
+                float pageH = box.getHeight();
+                float boxLeft = box.getLowerLeftX();
+                float boxBottom = box.getLowerLeftY();
+                List<PdfLink> links = new ArrayList<>();
+
+                List<PDAnnotation> annotations = page.getAnnotations();
+                if (annotations == null) continue;
+
+                for (PDAnnotation annotation : annotations) {
+                    if (!(annotation instanceof PDAnnotationLink)) continue;
+                    PDAnnotationLink link = (PDAnnotationLink) annotation;
+                    PDAction action = link.getAction();
+                    if (!(action instanceof PDActionURI)) continue;
+
+                    String uri = ((PDActionURI) action).getURI();
+                    if (TextUtils.isEmpty(uri)) continue;
+                    String lower = uri.toLowerCase(Locale.ROOT);
+                    if (!(lower.startsWith("http://") || lower.startsWith("https://"))) continue;
+
+                    PDRectangle rect = link.getRectangle();
+                    if (rect == null) continue;
+
+                    float left = rect.getLowerLeftX() - boxLeft;
+                    float right = rect.getUpperRightX() - boxLeft;
+                    float bottom = rect.getLowerLeftY() - boxBottom;
+                    float top = rect.getUpperRightY() - boxBottom;
+
+                    links.add(new PdfLink(
+                            uri,
+                            Math.min(left, right),
+                            Math.max(left, right),
+                            Math.min(bottom, top),
+                            Math.max(bottom, top),
+                            pageW,
+                            pageH
+                    ));
+                }
+
+                if (!links.isEmpty()) pageLinks.put(pageIndex, links);
+            }
+        } catch (Exception ignored) {
+            pageLinks.clear();
+        }
+    }
+
+    private void openPdfLinkInBrowser(String url) {
+        if (TextUtils.isEmpty(url)) return;
+        try {
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.putExtra("browser_open_url", url);
+            intent.putExtra("browser_slot", browserSlot);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP |
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Link open नहीं हो पाया", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private static class PdfLink {
+        final String url;
+        final float left;
+        final float right;
+        final float bottom;
+        final float top;
+        final float pageWidth;
+        final float pageHeight;
+
+        PdfLink(String url, float left, float right, float bottom, float top,
+                float pageWidth, float pageHeight) {
+            this.url = url;
+            this.left = left;
+            this.right = right;
+            this.bottom = bottom;
+            this.top = top;
+            this.pageWidth = pageWidth;
+            this.pageHeight = pageHeight;
+        }
+
+        boolean contains(float x, float y) {
+            return x >= left && x <= right && y >= bottom && y <= top;
+        }
     }
 
     private void renderAllPages() throws Exception {
@@ -741,6 +854,16 @@ public class PdfViewerActivity extends Activity {
                 }
 
                 @Override
+                public boolean onSingleTapConfirmed(MotionEvent e) {
+                    String url = findLinkAt(e.getX(), e.getY());
+                    if (url != null) {
+                        openPdfLinkInBrowser(url);
+                        return true;
+                    }
+                    return false;
+                }
+
+                @Override
                 public boolean onDoubleTap(MotionEvent e) {
                     if (currentScale > 1.05f) {
                         resetMatrix();
@@ -753,6 +876,31 @@ public class PdfViewerActivity extends Activity {
                     return true;
                 }
             });
+        }
+
+        private String findLinkAt(float viewX, float viewY) {
+            List<PdfLink> links = pageLinks.get(pageIndex);
+            if (links == null || links.isEmpty() || getDrawable() == null) return null;
+
+            Matrix inverse = new Matrix();
+            if (!drawMatrix.invert(inverse)) return null;
+
+            float[] point = new float[]{viewX, viewY};
+            inverse.mapPoints(point);
+
+            float drawableW = getDrawable().getIntrinsicWidth();
+            float drawableH = getDrawable().getIntrinsicHeight();
+            if (drawableW <= 0f || drawableH <= 0f) return null;
+            if (point[0] < 0f || point[1] < 0f || point[0] > drawableW || point[1] > drawableH) {
+                return null;
+            }
+
+            for (PdfLink link : links) {
+                float pdfX = (point[0] / drawableW) * link.pageWidth;
+                float pdfY = link.pageHeight - ((point[1] / drawableH) * link.pageHeight);
+                if (link.contains(pdfX, pdfY)) return link.url;
+            }
+            return null;
         }
 
         @Override
