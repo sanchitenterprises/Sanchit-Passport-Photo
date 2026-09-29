@@ -775,8 +775,7 @@ public class MainActivity extends android.app.Activity {
                 "'amp-embed[type=\"taboola\"]','.sponsored','.promoted','.promoted-content'," +
                 "'#player-ads','ytd-ad-slot-renderer','ytd-display-ad-renderer','ytd-promoted-sparkles-web-renderer'," +
                 "'ytd-in-feed-ad-layout-renderer','ytd-promoted-video-renderer','ytm-promoted-video-renderer'," +
-                "'ytm-companion-ad-renderer','ytm-display-ad-renderer','ytm-ad-slot-renderer','.ytp-ad-overlay-container'," +
-                "'.ytp-ad-message-container','.ytp-ad-player-overlay','tp-yt-paper-dialog ytd-mealbar-promo-renderer'" +
+                "'ytm-companion-ad-renderer','ytm-display-ad-renderer','ytm-ad-slot-renderer','tp-yt-paper-dialog ytd-mealbar-promo-renderer'" +
                 "];" +
                 "function hideAds(){for(var i=0;i<sel.length;i++){var n=[];try{n=document.querySelectorAll(sel[i]);}catch(e){}" +
                 "for(var j=0;j<n.length;j++){try{n[j].style.setProperty('display','none','important');" +
@@ -791,11 +790,12 @@ public class MainActivity extends android.app.Activity {
                 "if(ad&&v){" +
                 "if(!window.__stsYtAdActive){window.__stsYtAdActive=true;window.__stsYtPrevMuted=!!v.muted;" +
                 "window.__stsYtPrevRate=(v.playbackRate&&isFinite(v.playbackRate))?v.playbackRate:1;}" +
-                "try{v.muted=true;}catch(e){}try{v.playbackRate=16;}catch(e){}" +
                 "clickSkip();" +
-                "try{if(isFinite(v.duration)&&v.duration>0.5&&v.currentTime<v.duration-0.2)v.currentTime=v.duration-0.12;}catch(e){}" +
+                "try{v.muted=true;}catch(e){}" +
+                "try{if(v.playbackRate<8)v.playbackRate=8;}catch(e){}" +
                 "}else if(window.__stsYtAdActive&&v){" +
-                "window.__stsYtAdActive=false;try{v.playbackRate=window.__stsYtPrevRate||1;}catch(e){}" +
+                "window.__stsYtAdActive=false;" +
+                "try{v.playbackRate=window.__stsYtPrevRate||1;}catch(e){}" +
                 "try{v.muted=!!window.__stsYtPrevMuted;}catch(e){}" +
                 "}" +
                 "}catch(e){}}" +
@@ -803,7 +803,7 @@ public class MainActivity extends android.app.Activity {
                 "window.__stsHardAdClean();" +
                 "try{new MutationObserver(function(){window.__stsHardAdClean();}).observe(document.documentElement||document," +
                 "{childList:true,subtree:true,attributes:true,attributeFilter:['class']});}catch(e){}" +
-                "try{window.__stsHardAdTimer=setInterval(window.__stsHardAdClean,700);}catch(e){}" +
+                "try{window.__stsHardAdTimer=setInterval(window.__stsHardAdClean,500);}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
@@ -818,19 +818,16 @@ public class MainActivity extends android.app.Activity {
         path = path == null ? "" : path.toLowerCase(Locale.ROOT);
         query = query == null ? "" : query.toLowerCase(Locale.ROOT);
 
-        // Never blanket-block Google video delivery: YouTube content and ads can share it.
-        if (host.endsWith("googlevideo.com")) return false;
-
-        // YouTube ad/tracking endpoints that are distinct from normal media delivery.
-        if (host.equals("youtube.com") || host.endsWith(".youtube.com")) {
-            return path.contains("/pagead/") ||
-                    path.contains("/api/stats/ads") ||
-                    path.contains("/ptracking") ||
-                    path.contains("/pcs/activeview") ||
-                    path.contains("/get_midroll_info");
+        // YouTube can keep the player waiting on a black frame when its own
+        // ad endpoints are cancelled. Let YouTube requests complete and handle
+        // its web ads in-page by auto-skip + safe fast playback instead.
+        if (host.endsWith("googlevideo.com") ||
+                host.equals("youtube.com") || host.endsWith(".youtube.com") ||
+                host.equals("youtu.be") || host.endsWith(".youtu.be")) {
+            return false;
         }
 
-        // Conservative same-host ad endpoints used by many publishers.
+        // Aggressive same-host filtering remains enabled for other websites.
         return path.contains("/gampad/") ||
                 path.contains("/pagead/") ||
                 path.contains("/adserver/") ||
@@ -1528,7 +1525,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.25\n\nSimple • Fast • Two Quick Slots\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
+                .setMessage("Version 1.0.26\n\nSimple • Fast • Two Quick Slots\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
