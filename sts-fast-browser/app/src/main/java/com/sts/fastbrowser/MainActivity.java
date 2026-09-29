@@ -36,7 +36,6 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.ImageButton;
@@ -111,7 +110,11 @@ public class MainActivity extends android.app.Activity {
             "taboola.com", "outbrain.com", "criteo.com", "criteo.net",
             "scorecardresearch.com", "zedo.com", "pubmatic.com", "rubiconproject.com",
             "openx.net", "moatads.com", "amazon-adsystem.com", "serving-sys.com",
-            "smartadserver.com", "adform.net", "quantserve.com", "yieldmo.com"
+            "smartadserver.com", "adform.net", "quantserve.com", "yieldmo.com",
+            "casalemedia.com", "lijit.com", "smaato.net", "advertising.com",
+            "media.net", "revcontent.com", "mgid.com", "exoclick.com",
+            "propellerads.com", "popads.net", "popcash.net", "onclickads.net",
+            "hilltopads.net", "juicyads.com", "trafficjunky.net", "adsafeprotected.com"
     };
 
     @Override
@@ -357,6 +360,14 @@ public class MainActivity extends android.app.Activity {
 
                     private boolean handle(String url) {
                         if (handled || url == null) return false;
+                        try {
+                            Uri popupUri = Uri.parse(url);
+                            if (adBlockEnabled && isBlocked(popupUri)) {
+                                handled = true;
+                                child.post(child::destroy);
+                                return true;
+                            }
+                        } catch (Exception ignored) {}
                         if (isPdfCandidate(url, null)) {
                             handled = true;
                             openPdfTask(url, guessPdfName(url, null));
@@ -419,6 +430,7 @@ public class MainActivity extends android.app.Activity {
                 super.onPageFinished(view, url);
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
+                if (adBlockEnabled) injectAdCleanup(view);
             }
 
             @Override
@@ -719,6 +731,28 @@ public class MainActivity extends android.app.Activity {
             Toast.makeText(this, "Link open नहीं हो पाया", Toast.LENGTH_SHORT).show();
             return true;
         }
+    }
+
+    private void injectAdCleanup(WebView view) {
+        if (view == null) return;
+        String js =
+                "(function(){" +
+                "if(window.__stsAdCleanerInstalled){try{window.__stsAdClean&&window.__stsAdClean();}catch(e){}return;}" +
+                "window.__stsAdCleanerInstalled=true;" +
+                "var selectors=[" +
+                "'ins.adsbygoogle','.adsbygoogle','[id^=\\"google_ads_\\"]','[id^=\\"div-gpt-ad\\"]'," +
+                "'iframe[src*=\\"doubleclick.net\\"]','iframe[src*=\\"googlesyndication.com\\"]'," +
+                "'iframe[src*=\\"googleadservices.com\\"]','[data-ad-client]','[data-ad-slot]'," +
+                "'amp-ad','amp-embed[type=\\"taboola\\"]','.advertisement','.ad-container','.ad-banner','.ad-wrapper'" +
+                "];" +
+                "window.__stsAdClean=function(){for(var i=0;i<selectors.length;i++){var n=document.querySelectorAll(selectors[i]);" +
+                "for(var j=0;j<n.length;j++){try{n[j].style.setProperty('display','none','important');" +
+                "n[j].style.setProperty('visibility','hidden','important');n[j].setAttribute('aria-hidden','true');}catch(e){}}}};" +
+                "window.__stsAdClean();" +
+                "try{new MutationObserver(function(){window.__stsAdClean();}).observe(document.documentElement||document," +
+                "{childList:true,subtree:true,attributes:false});}catch(e){}" +
+                "})();";
+        try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
 
     private boolean isBlocked(Uri uri) {
@@ -1075,7 +1109,6 @@ public class MainActivity extends android.app.Activity {
         pm.getMenu().add(adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF");
         pm.getMenu().add("Add Website");
         pm.getMenu().add("Manage Websites");
-        pm.getMenu().add("Settings");
         pm.getMenu().add("About");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
@@ -1089,10 +1122,6 @@ public class MainActivity extends android.app.Activity {
             }
             if (t.equals("Manage Websites")) {
                 showManageSitesDialog();
-                return true;
-            }
-            if (t.equals("Settings")) {
-                showSettingsDialog();
                 return true;
             }
             if (t.equals("About")) {
@@ -1403,30 +1432,10 @@ public class MainActivity extends android.app.Activity {
                 }).show();
     }
 
-    private void showSettingsDialog() {
-        CheckBox cb = new CheckBox(this);
-        cb.setText("Ad Blocker ON");
-        cb.setTextSize(16);
-        cb.setTextColor(Color.parseColor("#172326"));
-        cb.setChecked(adBlockEnabled);
-        cb.setPadding(dp(20), dp(12), dp(20), dp(12));
-        cb.setOnCheckedChangeListener((buttonView, isChecked) -> setAdBlockEnabled(isChecked, false));
-
-        LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.addView(cb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(60)));
-
-        new AlertDialog.Builder(this)
-                .setTitle("Settings")
-                .setView(body)
-                .setPositiveButton("Done", null)
-                .show();
-    }
-
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.22\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.23\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
@@ -1434,7 +1443,20 @@ public class MainActivity extends android.app.Activity {
     private void setAdBlockEnabled(boolean enabled, boolean showToast) {
         adBlockEnabled = enabled;
         prefs.edit().putBoolean(KEY_ADBLOCK, enabled).apply();
-        if (showToast) Toast.makeText(this, enabled ? "Ad Blocker ON" : "Ad Blocker OFF", Toast.LENGTH_SHORT).show();
+
+        if (enabled) {
+            if (webView1 != null) injectAdCleanup(webView1);
+            if (webView2 != null) injectAdCleanup(webView2);
+        }
+
+        if (showToast) {
+            Toast.makeText(this,
+                    enabled ? "Ad Blocker ON" : "Ad Blocker OFF",
+                    Toast.LENGTH_SHORT).show();
+        }
+
+        // The toggle is an explicit user action. Reload only the visible slot so
+        // network-level blocking starts immediately without disturbing hidden D1/D2 state.
         if (webView != null) webView.reload();
     }
 
