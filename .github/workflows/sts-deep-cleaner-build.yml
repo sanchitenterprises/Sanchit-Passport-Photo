@@ -1,0 +1,55 @@
+name: Build STS Deep Cleaner APK
+
+on:
+  push:
+    branches:
+      - sts-deep-cleaner-build
+    paths:
+      - 'sts-deep-cleaner/**'
+      - '.github/workflows/sts-deep-cleaner-build.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Use Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build release APK
+        run: gradle -p sts-deep-cleaner :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Align APK
+        shell: bash
+        run: |
+          /usr/local/lib/android/sdk/build-tools/35.0.0/zipalign -f -p 4             sts-deep-cleaner/app/build/outputs/apk/release/app-release-unsigned.apk             STS-Deep-Cleaner-v0.1.0-aligned-unsigned.apk
+
+      - name: Upload unsigned APK and signer
+        uses: actions/upload-artifact@v4
+        with:
+          name: STS-Deep-Cleaner-v0.1.0-unsigned
+          path: |
+            STS-Deep-Cleaner-v0.1.0-aligned-unsigned.apk
+            /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar
+          if-no-files-found: error
