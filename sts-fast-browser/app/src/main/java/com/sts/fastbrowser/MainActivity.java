@@ -435,7 +435,7 @@ public class MainActivity extends android.app.Activity {
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                if (adBlockEnabled && !request.isForMainFrame() && isBlocked(request.getUrl())) {
+                if (adBlockEnabled && !request.isForMainFrame() && isAdRequest(request.getUrl())) {
                     return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream(new byte[0]));
                 }
                 return super.shouldInterceptRequest(view, request);
@@ -737,22 +737,82 @@ public class MainActivity extends android.app.Activity {
         if (view == null) return;
         String js =
                 "(function(){" +
-                "if(window.__stsAdCleanerInstalled){try{window.__stsAdClean&&window.__stsAdClean();}catch(e){}return;}" +
-                "window.__stsAdCleanerInstalled=true;" +
-                "var selectors=[" +
+                "if(window.__stsHardAdBlockInstalled){try{window.__stsHardAdClean&&window.__stsHardAdClean();}catch(e){}return;}" +
+                "window.__stsHardAdBlockInstalled=true;" +
+                "var sel=[" +
                 "'ins.adsbygoogle','.adsbygoogle','[id^=\"google_ads_\"]','[id^=\"div-gpt-ad\"]'," +
                 "'iframe[src*=\"doubleclick.net\"]','iframe[src*=\"googlesyndication.com\"]'," +
                 "'iframe[src*=\"googleadservices.com\"]','[data-ad-client]','[data-ad-slot]'," +
-                "'amp-ad','amp-embed[type=\"taboola\"]','.advertisement','.ad-container','.ad-banner','.ad-wrapper'" +
+                "'amp-ad','amp-embed[type=\"taboola\"]','.advertisement','.ad-container','.ad-banner','.ad-wrapper'," +
+                "'#player-ads','ytd-ad-slot-renderer','ytd-display-ad-renderer','ytd-promoted-sparkles-web-renderer'," +
+                "'ytd-in-feed-ad-layout-renderer','ytd-promoted-video-renderer','ytm-promoted-video-renderer'," +
+                "'ytm-companion-ad-renderer','ytm-display-ad-renderer','ytm-ad-slot-renderer','.ytp-ad-overlay-container'," +
+                "'.ytp-ad-message-container','.ytp-ad-player-overlay','tp-yt-paper-dialog ytd-mealbar-promo-renderer'" +
                 "];" +
-                "window.__stsAdClean=function(){for(var i=0;i<selectors.length;i++){var n=document.querySelectorAll(selectors[i]);" +
+                "function hideAds(){for(var i=0;i<sel.length;i++){var n=[];try{n=document.querySelectorAll(sel[i]);}catch(e){}" +
                 "for(var j=0;j<n.length;j++){try{n[j].style.setProperty('display','none','important');" +
-                "n[j].style.setProperty('visibility','hidden','important');n[j].setAttribute('aria-hidden','true');}catch(e){}}}};" +
-                "window.__stsAdClean();" +
-                "try{new MutationObserver(function(){window.__stsAdClean();}).observe(document.documentElement||document," +
-                "{childList:true,subtree:true,attributes:false});}catch(e){}" +
+                "n[j].style.setProperty('visibility','hidden','important');n[j].setAttribute('aria-hidden','true');}catch(e){}}}}" +
+                "function clickSkip(){var q=['.ytp-ad-skip-button-modern','.ytp-ad-skip-button','.ytp-skip-ad-button'," +
+                "'button.ytp-ad-skip-button','button[id*=skip]'];for(var i=0;i<q.length;i++){var b=null;try{b=document.querySelector(q[i]);}catch(e){}" +
+                "if(b&&b.offsetParent!==null){try{b.click();return true;}catch(e){}}}return false;}" +
+                "function youtube(){try{" +
+                "var p=document.querySelector('.html5-video-player');if(!p)return;" +
+                "var ad=p.classList.contains('ad-showing')||p.classList.contains('ad-interrupting');" +
+                "var v=p.querySelector('video');" +
+                "if(ad&&v){" +
+                "if(!window.__stsYtAdActive){window.__stsYtAdActive=true;window.__stsYtPrevMuted=!!v.muted;" +
+                "window.__stsYtPrevRate=(v.playbackRate&&isFinite(v.playbackRate))?v.playbackRate:1;}" +
+                "try{v.muted=true;}catch(e){}try{v.playbackRate=16;}catch(e){}" +
+                "clickSkip();" +
+                "try{if(isFinite(v.duration)&&v.duration>0.5&&v.currentTime<v.duration-0.2)v.currentTime=v.duration-0.12;}catch(e){}" +
+                "}else if(window.__stsYtAdActive&&v){" +
+                "window.__stsYtAdActive=false;try{v.playbackRate=window.__stsYtPrevRate||1;}catch(e){}" +
+                "try{v.muted=!!window.__stsYtPrevMuted;}catch(e){}" +
+                "}" +
+                "}catch(e){}}" +
+                "window.__stsHardAdClean=function(){hideAds();youtube();};" +
+                "window.__stsHardAdClean();" +
+                "try{new MutationObserver(function(){window.__stsHardAdClean();}).observe(document.documentElement||document," +
+                "{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});}catch(e){}" +
+                "try{window.__stsAdTimer=setInterval(window.__stsHardAdClean,700);}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    private boolean isAdRequest(Uri uri) {
+        if (uri == null) return false;
+        if (isBlocked(uri)) return true;
+
+        String host = uri.getHost();
+        String path = uri.getEncodedPath();
+        String query = uri.getEncodedQuery();
+        host = host == null ? "" : host.toLowerCase(Locale.ROOT);
+        path = path == null ? "" : path.toLowerCase(Locale.ROOT);
+        query = query == null ? "" : query.toLowerCase(Locale.ROOT);
+
+        // Never blanket-block Google video delivery: YouTube content and ads can share it.
+        if (host.endsWith("googlevideo.com")) return false;
+
+        // YouTube ad/tracking endpoints that are distinct from normal media delivery.
+        if (host.equals("youtube.com") || host.endsWith(".youtube.com")) {
+            return path.contains("/pagead/") ||
+                    path.contains("/api/stats/ads") ||
+                    path.contains("/ptracking") ||
+                    path.contains("/pcs/activeview") ||
+                    path.contains("/get_midroll_info");
+        }
+
+        // Conservative same-host ad endpoints used by many publishers.
+        return path.contains("/gampad/") ||
+                path.contains("/pagead/") ||
+                path.contains("/adserver/") ||
+                path.contains("/adservice/") ||
+                path.contains("/prebid/") ||
+                path.contains("/vast/") ||
+                path.contains("/vmap/") ||
+                query.contains("google_ad_client=") ||
+                query.contains("ad_slot=") ||
+                query.contains("adunit=");
     }
 
     private boolean isBlocked(Uri uri) {
@@ -1435,7 +1495,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.23\n\nSimple • Fast • Two Quick Slots\nAd Blocker can be switched ON/OFF from the common menu.")
+                .setMessage("Version 1.0.24\n\nSimple • Fast • Two Quick Slots\nHard Ad Blocker can be switched ON/OFF from the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
