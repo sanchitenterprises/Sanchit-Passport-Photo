@@ -1525,7 +1525,7 @@ public class MainActivity extends android.app.Activity {
     private void showAboutDialog() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.26\n\nSimple • Fast • Two Quick Slots\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
+                .setMessage("Version 1.0.27\n\nSimple • Fast • Two Quick Slots\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
     }
