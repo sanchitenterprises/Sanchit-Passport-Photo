@@ -47,6 +47,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -288,6 +294,7 @@ public class MainActivity extends android.app.Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(targetWebView, true);
 
         targetWebView.addJavascriptInterface(new PdfBridge(), "STSPdf");
+        targetWebView.addJavascriptInterface(new RdBridge(), "STSRD");
 
         targetWebView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -375,6 +382,7 @@ public class MainActivity extends android.app.Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 injectPdfHook(view);
+                injectBrowserCompatibility(view);
             }
 
             @Override
@@ -385,6 +393,207 @@ public class MainActivity extends android.app.Activity {
                 return super.shouldInterceptRequest(view, request);
             }
         });
+    }
+
+    private void injectBrowserCompatibility(WebView view) {
+        String js =
+                "(function(){" +
+                "try{" +
+                "var m=document.querySelector('meta[name=viewport]');" +
+                "if(!m){m=document.createElement('meta');m.name='viewport';document.head&&document.head.appendChild(m);}" +
+                "if(m){var ct=m.getAttribute('content')||'';" +
+                "ct=ct.replace(/user-scalable\\s*=\\s*no/ig,'user-scalable=yes')" +
+                ".replace(/maximum-scale\\s*=\\s*1(?:\\.0+)?/ig,'maximum-scale=5.0');" +
+                "if(!/user-scalable\\s*=/i.test(ct))ct+=(ct?', ':'')+'user-scalable=yes';" +
+                "if(!/maximum-scale\\s*=/i.test(ct))ct+=(ct?', ':'')+'maximum-scale=5.0';" +
+                "m.setAttribute('content',ct);}" +
+                "}catch(e){}" +
+                "if(window.__stsRdBridgeInstalled)return;window.__stsRdBridgeInstalled=true;" +
+                "function rd(u,method){try{var a=document.createElement('a');a.href=String(u||'');" +
+                "var h=(a.hostname||'').toLowerCase(),p=parseInt(a.port||'80',10);" +
+                "return (h==='127.0.0.1'||h==='localhost')&&p>=11100&&p<=11120;}catch(e){return false;}}" +
+                "function callNative(method,url,body,ctype){var r=STSRD.request(String(method||'GET'),String(url||'')," +
+                "body==null?'':String(body),String(ctype||''));return JSON.parse(r);}" +
+                "var of=window.fetch?window.fetch.bind(window):null;" +
+                "if(of){window.fetch=function(input,init){var u=(typeof input==='string')?input:(input&&input.url)||'';" +
+                "var method=(init&&init.method)||(input&&input.method)||'GET';" +
+                "if(!rd(u,method))return of(input,init);" +
+                "return new Promise(function(resolve,reject){setTimeout(function(){try{" +
+                "var body=init&&init.body!=null?init.body:'';var ct='';" +
+                "try{ct=(init&&init.headers&&((init.headers['Content-Type'])||(init.headers['content-type'])))||'';}catch(x){}" +
+                "var z=callNative(method,u,body,ct);if(!z||!z.ok){reject(new TypeError((z&&z.error)||'RD Service unavailable'));return;}" +
+                "resolve(new Response(z.body||'',{status:z.status||200,statusText:z.statusText||'OK'," +
+                "headers:{'Content-Type':z.contentType||'text/xml'}}));}catch(e){reject(e);}},0);});};}" +
+                "var O=window.XMLHttpRequest;" +
+                "if(O&&window.Proxy){window.XMLHttpRequest=function(){var x=new O();var s={rd:false,method:'GET',url:'',async:true," +
+                "body:'',ctype:'',readyState:0,status:0,statusText:'',responseText:'',response:'',responseURL:''," +
+                "handlers:{},listeners:{},headers:{}};" +
+                "function fire(n){var ev={type:n,target:px,currentTarget:px};" +
+                "try{if(typeof s.handlers['on'+n]==='function')s.handlers['on'+n].call(px,ev);}catch(e){}" +
+                "var ls=s.listeners[n]||[];for(var i=0;i<ls.length;i++){try{ls[i].call(px,ev);}catch(e){}}}" +
+                "function complete(z){if(z&&z.ok){s.status=z.status||200;s.statusText=z.statusText||'OK';s.responseText=z.body||'';" +
+                "s.response=s.responseText;s.responseURL=s.url;s.readyState=4;s.headers={'content-type':z.contentType||'text/xml'};" +
+                "fire('readystatechange');fire('load');fire('loadend');}else{s.status=0;s.readyState=4;" +
+                "fire('readystatechange');fire('error');fire('loadend');}}" +
+                "var px=new Proxy(x,{get:function(t,p){if(p==='open')return function(method,url,async,user,password){" +
+                "s.method=String(method||'GET').toUpperCase();s.url=String(url||'');s.async=async!==false;s.rd=rd(s.url,s.method);" +
+                "if(!s.rd)return t.open(method,url,async,user,password);s.readyState=1;fire('readystatechange');};" +
+                "if(p==='send')return function(body){if(!s.rd)return t.send(body);s.body=body==null?'':String(body);" +
+                "var run=function(){try{complete(callNative(s.method,s.url,s.body,s.ctype));}catch(e){complete({ok:false,error:String(e)});}};" +
+                "if(s.async)setTimeout(run,0);else run();};" +
+                "if(p==='setRequestHeader')return function(k,v){if(!s.rd)return t.setRequestHeader(k,v);s.headers[String(k).toLowerCase()]=String(v);" +
+                "if(String(k).toLowerCase()==='content-type')s.ctype=String(v);};" +
+                "if(p==='getResponseHeader')return function(k){if(!s.rd)return t.getResponseHeader(k);return s.headers[String(k).toLowerCase()]||null;};" +
+                "if(p==='getAllResponseHeaders')return function(){if(!s.rd)return t.getAllResponseHeaders();return 'content-type: '+(s.headers['content-type']||'text/xml')+'\\r\\n';};" +
+                "if(p==='addEventListener')return function(n,fn){if(!s.listeners[n])s.listeners[n]=[];s.listeners[n].push(fn);try{t.addEventListener(n,fn);}catch(e){}};" +
+                "if(p==='removeEventListener')return function(n,fn){var a=s.listeners[n]||[];var q=a.indexOf(fn);if(q>=0)a.splice(q,1);try{t.removeEventListener(n,fn);}catch(e){}};" +
+                "if(p==='abort')return function(){if(!s.rd)return t.abort();s.readyState=0;fire('abort');fire('loadend');};" +
+                "if(/^on/.test(String(p)))return s.handlers[p];" +
+                "if(s.rd&&(p==='readyState'||p==='status'||p==='statusText'||p==='responseText'||p==='response'||p==='responseURL'))return s[p];" +
+                "var v=t[p];return typeof v==='function'?v.bind(t):v;}," +
+                "set:function(t,p,v){if(/^on/.test(String(p))){s.handlers[p]=v;try{t[p]=v;}catch(e){}return true;}" +
+                "if(s.rd&&(p==='responseType'||p==='timeout'||p==='withCredentials')){s[p]=v;return true;}try{t[p]=v;}catch(e){}return true;}});" +
+                "return px;};window.XMLHttpRequest.prototype=O.prototype;}" +
+                "})();";
+        try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    private class RdBridge {
+        @JavascriptInterface
+        public String request(String method, String url, String body, String contentType) {
+            JSONObject result = new JSONObject();
+            try {
+                Uri uri = Uri.parse(url);
+                String host = uri.getHost();
+                int port = uri.getPort();
+                if (host == null ||
+                        !(host.equalsIgnoreCase("127.0.0.1") || host.equalsIgnoreCase("localhost")) ||
+                        port < 11100 || port > 11120) {
+                    result.put("ok", false);
+                    result.put("error", "Blocked non-RD address");
+                    return result.toString();
+                }
+
+                String verb = method == null ? "GET" : method.trim().toUpperCase(Locale.ROOT);
+                if (verb.isEmpty()) verb = "GET";
+                String target;
+                if ("RDSERVICE".equals(verb) || "RDERVICE".equals(verb)) {
+                    target = "*";
+                } else {
+                    target = uri.getEncodedPath();
+                    if (target == null || target.isEmpty()) target = "/";
+                    if (uri.getEncodedQuery() != null) target += "?" + uri.getEncodedQuery();
+                }
+
+                byte[] payload = body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
+                String ct = (contentType == null || contentType.trim().isEmpty()) ? "text/xml" : contentType.trim();
+
+                try (Socket socket = new Socket()) {
+                    socket.connect(new InetSocketAddress("127.0.0.1", port), 2500);
+                    socket.setSoTimeout(30000);
+
+                    OutputStream out = socket.getOutputStream();
+                    StringBuilder req = new StringBuilder();
+                    req.append(verb).append(" ").append(target).append(" HTTP/1.1\r\n");
+                    req.append("Host: 127.0.0.1:").append(port).append("\r\n");
+                    req.append("Connection: close\r\n");
+                    req.append("Accept: text/xml, application/xml, */*\r\n");
+                    if ("RDSERVICE".equals(verb) || "RDERVICE".equals(verb)) {
+                        req.append("EXT: STS Fast Browser\r\n");
+                    }
+                    if (payload.length > 0 || "POST".equals(verb)) {
+                        req.append("Content-Type: ").append(ct).append("\r\n");
+                        req.append("Content-Length: ").append(payload.length).append("\r\n");
+                    }
+                    req.append("\r\n");
+                    out.write(req.toString().getBytes(StandardCharsets.ISO_8859_1));
+                    if (payload.length > 0) out.write(payload);
+                    out.flush();
+
+                    InputStream in = socket.getInputStream();
+                    ByteArrayOutputStream all = new ByteArrayOutputStream();
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) != -1) all.write(buf, 0, n);
+                    byte[] raw = all.toByteArray();
+
+                    int split = headerEnd(raw);
+                    if (split < 0) throw new IllegalStateException("Invalid RD response");
+                    String headers = new String(raw, 0, split, StandardCharsets.ISO_8859_1);
+                    byte[] responseBody = Arrays.copyOfRange(raw, split + 4, raw.length);
+                    if (headers.toLowerCase(Locale.ROOT).contains("transfer-encoding: chunked")) {
+                        responseBody = decodeChunked(responseBody);
+                    }
+
+                    String[] lines = headers.split("\\r?\\n");
+                    int status = 200;
+                    String statusText = "OK";
+                    if (lines.length > 0) {
+                        String[] p = lines[0].split(" ", 3);
+                        if (p.length > 1) {
+                            try { status = Integer.parseInt(p[1]); } catch (Exception ignored) {}
+                        }
+                        if (p.length > 2) statusText = p[2];
+                    }
+
+                    String responseCt = "text/xml";
+                    for (String line : lines) {
+                        int colon = line.indexOf(':');
+                        if (colon > 0 && "content-type".equalsIgnoreCase(line.substring(0, colon).trim())) {
+                            responseCt = line.substring(colon + 1).trim();
+                        }
+                    }
+
+                    result.put("ok", status >= 200 && status < 400);
+                    result.put("status", status);
+                    result.put("statusText", statusText);
+                    result.put("contentType", responseCt);
+                    result.put("body", new String(responseBody, StandardCharsets.UTF_8));
+                    return result.toString();
+                }
+            } catch (Exception e) {
+                try {
+                    result.put("ok", false);
+                    result.put("status", 0);
+                    result.put("error", e.getClass().getSimpleName() + ": " +
+                            (e.getMessage() == null ? "RD Service unavailable" : e.getMessage()));
+                } catch (Exception ignored) {}
+                return result.toString();
+            }
+        }
+    }
+
+    private int headerEnd(byte[] data) {
+        for (int i = 0; i + 3 < data.length; i++) {
+            if (data[i] == '\r' && data[i + 1] == '\n' &&
+                    data[i + 2] == '\r' && data[i + 3] == '\n') return i;
+        }
+        return -1;
+    }
+
+    private byte[] decodeChunked(byte[] data) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int pos = 0;
+        while (pos < data.length) {
+            int lineEnd = -1;
+            for (int i = pos; i + 1 < data.length; i++) {
+                if (data[i] == '\r' && data[i + 1] == '\n') {
+                    lineEnd = i;
+                    break;
+                }
+            }
+            if (lineEnd < 0) break;
+            String sizeLine = new String(data, pos, lineEnd - pos, StandardCharsets.US_ASCII).trim();
+            int semi = sizeLine.indexOf(';');
+            if (semi >= 0) sizeLine = sizeLine.substring(0, semi);
+            int size = Integer.parseInt(sizeLine.trim(), 16);
+            pos = lineEnd + 2;
+            if (size == 0) break;
+            if (pos + size > data.length) throw new IllegalStateException("Invalid chunk");
+            out.write(data, pos, size);
+            pos += size + 2;
+        }
+        return out.toByteArray();
     }
 
     private boolean isPdfCandidate(String url, String typeHint) {
