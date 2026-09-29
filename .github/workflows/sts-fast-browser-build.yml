@@ -43,7 +43,7 @@ jobs:
       - name: Upload unsigned APK and signing tool
         uses: actions/upload-artifact@v4
         with:
-          name: STS-Fast-Browser-v1.0.24-unsigned
+          name: STS-Fast-Browser-v1.0.25-unsigned
           path: |
             sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
             /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar
@@ -58,11 +58,11 @@ jobs:
           cp -a sts-fast-browser full-source/
           cp .github/workflows/sts-fast-browser-build.yml full-source/.github/workflows/
           cd full-source
-          zip -r ../STS-Fast-Browser-v1.0.24-SOURCE.zip . >/dev/null
+          zip -r ../STS-Fast-Browser-v1.0.25-SOURCE.zip . >/dev/null
 
       - name: Upload complete source package
         uses: actions/upload-artifact@v4
         with:
-          name: STS-Fast-Browser-v1.0.24-SOURCE
-          path: STS-Fast-Browser-v1.0.24-SOURCE.zip
+          name: STS-Fast-Browser-v1.0.25-SOURCE
+          path: STS-Fast-Browser-v1.0.25-SOURCE.zip
           if-no-files-found: error
