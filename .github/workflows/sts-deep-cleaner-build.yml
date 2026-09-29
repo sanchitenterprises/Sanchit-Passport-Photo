@@ -4,9 +4,9 @@ on:
   push:
     branches:
       - sts-deep-cleaner-build
-    paths:
-      - 'sts-deep-cleaner/**'
-      - '.github/workflows/sts-deep-cleaner-build.yml'
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -41,9 +41,7 @@ jobs:
         run: gradle -p sts-deep-cleaner :app:assembleRelease --no-daemon --stacktrace
 
       - name: Align APK
-        shell: bash
-        run: |
-          /usr/local/lib/android/sdk/build-tools/35.0.0/zipalign -f -p 4             sts-deep-cleaner/app/build/outputs/apk/release/app-release-unsigned.apk             STS-Deep-Cleaner-v0.1.0-aligned-unsigned.apk
+        run: /usr/local/lib/android/sdk/build-tools/35.0.0/zipalign -f -p 4 sts-deep-cleaner/app/build/outputs/apk/release/app-release-unsigned.apk STS-Deep-Cleaner-v0.1.0-aligned-unsigned.apk
 
       - name: Upload unsigned APK and signer
         uses: actions/upload-artifact@v4
