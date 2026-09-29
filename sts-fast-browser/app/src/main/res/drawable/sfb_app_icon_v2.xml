@@ -14,12 +14,8 @@
         android:fillColor="#0B416F"
         android:pathData="M54,13 C76.6,13 95,31.4 95,54 C95,76.6 76.6,95 54,95 C31.4,95 13,76.6 13,54 C13,31.4 31.4,13 54,13 Z"/>
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="8.5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M24,34 C31,24 48,25 52,33 C56,42 47,46 37,48 C27,50 24,56 28,64 C33,74 48,75 55,66"/>
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,33 C47,26 42,23 35,23 C25,23 19,28 19,36 C19,45 26,48 36,50 C44,52 48,54 48,59 C48,65 43,69 36,69 C29,69 24,66 20,61 L15,68 C20,75 28,79 36,79 C49,79 57,71 57,59 C57,48 50,44 39,41 C31,39 28,37 28,34 C28,31 31,29 36,29 C42,29 46,31 49,36 Z"/>
     <path
         android:fillColor="#00000000"
         android:strokeColor="#38E5F1"
