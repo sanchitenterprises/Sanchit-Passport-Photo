@@ -773,7 +773,7 @@ public class MainActivity extends android.app.Activity {
                 "window.__stsHardAdClean=function(){hideAds();youtube();};" +
                 "window.__stsHardAdClean();" +
                 "try{new MutationObserver(function(){window.__stsHardAdClean();}).observe(document.documentElement||document," +
-                "{childList:true,subtree:true,attributes:true,attributeFilter:['class','style']});}catch(e){}" +
+                "{childList:true,subtree:true,attributes:true,attributeFilter:['class']});}catch(e){}" +
                 "try{window.__stsAdTimer=setInterval(window.__stsHardAdClean,700);}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
