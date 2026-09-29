@@ -1,11 +1,13 @@
 package com.sts.fastbrowser;
 
+import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -14,7 +16,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.webkit.URLUtil;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.text.method.PasswordTransformationMethod;
@@ -24,6 +28,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
+import android.webkit.GeolocationPermissions;
 import android.webkit.WebChromeClient;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
@@ -60,6 +65,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 public class MainActivity extends android.app.Activity {
+    private static final int REQ_LOCATION = 812;
     private static final String PREFS = "sts_fast_browser_prefs";
     private static final String KEY_SITES = "sites_json";
     private static final String KEY_SITES_D1 = "sites_d1_json";
@@ -90,6 +96,8 @@ public class MainActivity extends android.app.Activity {
     private WebView webView2;
     // Active-slot alias. D1 and D2 themselves stay alive independently.
     private WebView webView;
+    private String pendingGeoOrigin;
+    private GeolocationPermissions.Callback pendingGeoCallback;
     private boolean adBlockEnabled = true;
     private int activeSlot = 1;
     private String slot1Name = GOOGLE_NAME;
@@ -281,6 +289,7 @@ public class MainActivity extends android.app.Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setDatabaseEnabled(true);
+        s.setGeolocationEnabled(true);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
         s.setBuiltInZoomControls(true);
@@ -297,6 +306,33 @@ public class MainActivity extends android.app.Activity {
         targetWebView.addJavascriptInterface(new RdBridge(), "STSRD");
 
         targetWebView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
+                if (hasLocationPermission()) {
+                    callback.invoke(origin, true, false);
+                    return;
+                }
+
+                pendingGeoOrigin = origin;
+                pendingGeoCallback = callback;
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    requestPermissions(new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                    }, REQ_LOCATION);
+                } else {
+                    callback.invoke(origin, true, false);
+                    pendingGeoOrigin = null;
+                    pendingGeoCallback = null;
+                }
+            }
+
+            @Override
+            public void onGeolocationPermissionsHidePrompt() {
+                // Keep Android runtime permission flow independent from the webpage prompt.
+            }
+
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, android.os.Message resultMsg) {
                 WebView child = new WebView(MainActivity.this);
@@ -1548,6 +1584,45 @@ public class MainActivity extends android.app.Activity {
         int g = Math.max(0, (int)(Color.green(color) * (1f - amount)));
         int b = Math.max(0, (int)(Color.blue(color) * (1f - amount)));
         return Color.rgb(r, g, b);
+    }
+
+    private boolean hasLocationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQ_LOCATION) return;
+
+        boolean granted = hasLocationPermission();
+        if (pendingGeoCallback != null && pendingGeoOrigin != null) {
+            pendingGeoCallback.invoke(pendingGeoOrigin, granted, false);
+        }
+        pendingGeoCallback = null;
+        pendingGeoOrigin = null;
+
+        if (!granted) {
+            showLocationPermissionHelp();
+        }
+    }
+
+    private void showLocationPermissionHelp() {
+        if (isFinishing()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Location Permission")
+                .setMessage("इस website को location चाहिए। Location permission Allow करें। अगर popup दोबारा नहीं आता है, App Settings में Location permission ON करें।")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("App Settings", (d, w) -> {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:" + getPackageName()));
+                        startActivity(intent);
+                    } catch (Exception ignored) {}
+                })
+                .show();
     }
 
     @Override
