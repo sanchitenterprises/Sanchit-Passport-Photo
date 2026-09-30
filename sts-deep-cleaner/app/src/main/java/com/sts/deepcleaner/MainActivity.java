@@ -3534,19 +3534,82 @@ public class MainActivity extends Activity {
     private static final class StorageRing extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         private long total, used;
+        private StorageAnalytics analytics;
+
         StorageRing(Context c){super(c);}
-        void setStorage(long t,long u){total=t;used=u;invalidate();}
+
+        void setStorage(long t,long u){
+            total=Math.max(0L,t);
+            used=Math.max(0L,Math.min(t,u));
+            invalidate();
+        }
+
+        void setAnalytics(StorageAnalytics a){
+            analytics=a;
+            invalidate();
+        }
+
         @Override protected void onDraw(Canvas c){
             float cx=getWidth()/2f, cy=getHeight()/2f, r=Math.min(cx,cy)-22;
-            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(17);p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.argb(70,255,255,255));c.drawCircle(cx,cy,r,p);
-            float f=total<=0?.65f:Math.min(1f,(float)used/total);
-            p.setColor(TEAL);c.drawArc(new RectF(cx-r,cy-r,cx+r,cy+r),-90,360*f,false,p);
-            p.setStyle(Paint.Style.FILL);p.setColor(Color.WHITE);p.setTextAlign(Paint.Align.CENTER);
-            p.setTypeface(Typeface.DEFAULT_BOLD);p.setTextSize(27*getResources().getDisplayMetrics().scaledDensity);
-            c.drawText(formatStatic(used),cx,cy+2,p);
-            p.setTypeface(Typeface.DEFAULT);p.setTextSize(12*getResources().getDisplayMetrics().scaledDensity);
-            c.drawText("used of "+formatStatic(total),cx,cy+30,p);
+            RectF oval=new RectF(cx-r,cy-r,cx+r,cy+r);
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(17);
+            p.setStrokeCap(Paint.Cap.BUTT);
+            p.setColor(Color.argb(72,255,255,255));
+            c.drawCircle(cx,cy,r,p);
+
+            float usedSweep=total<=0?0f:360f*Math.min(1f,(float)used/(float)total);
+            if(analytics!=null){
+                long categorized=0L;
+                for(StorageCategory cat:StorageCategory.values()){
+                    categorized+=Math.max(0L,analytics.bytes(cat));
+                }
+                if(categorized>0L){
+                    float start=-90f;
+                    for(StorageCategory cat:StorageCategory.values()){
+                        long b=Math.max(0L,analytics.bytes(cat));
+                        if(b<=0L) continue;
+                        float sweep=usedSweep*((float)b/(float)categorized);
+                        if(sweep<=0f) continue;
+                        p.setColor(cat.color);
+                        c.drawArc(oval,start,Math.max(0.8f,sweep-0.8f),false,p);
+                        start+=sweep;
+                    }
+                }else{
+                    p.setColor(TEAL);
+                    c.drawArc(oval,-90,usedSweep,false,p);
+                }
+            }else{
+                p.setStrokeCap(Paint.Cap.ROUND);
+                p.setColor(TEAL);
+                c.drawArc(oval,-90,usedSweep,false,p);
+            }
+
+            long free=Math.max(0L,total-used);
+            float sd=getResources().getDisplayMetrics().scaledDensity;
+            p.setStyle(Paint.Style.FILL);
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setColor(Color.WHITE);
+
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(23*sd);
+            c.drawText(formatStatic(used),cx,cy-17,p);
+
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(10*sd);
+            p.setColor(Color.argb(220,255,255,255));
+            c.drawText("USED",cx,cy+2,p);
+
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(15*sd);
+            p.setColor(Color.WHITE);
+            c.drawText(formatStatic(free)+" FREE",cx,cy+27,p);
+
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(9*sd);
+            p.setColor(Color.argb(210,255,255,255));
+            c.drawText("TOTAL "+formatStatic(total),cx,cy+45,p);
         }
     }
 
