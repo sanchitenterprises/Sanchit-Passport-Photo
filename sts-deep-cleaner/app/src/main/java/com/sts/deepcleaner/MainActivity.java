@@ -93,6 +93,9 @@ public class MainActivity extends Activity {
     private StorageAnalytics cachedAnalytics = null;
     private long cachedAnalyticsAt = 0L;
     private boolean pendingUsageAnalyzer = false;
+    private SystemStorageResult activeSystemResult = null;
+    private AppDetailResult activeAppDetailResult = null;
+    private AppVisibleCategory activeVisibleCategory = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -573,6 +576,10 @@ public class MainActivity extends Activity {
     }
 
     private void showSystemAnalyzerResult(SystemStorageResult result) {
+        activeSystemResult = result;
+        activeToolResult = null;
+        activeAppDetailResult = null;
+        activeVisibleCategory = null;
         getWindow().getDecorView().setTag("systemAnalyzerResult");
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -635,10 +642,19 @@ public class MainActivity extends Activity {
                     "  •  Cache " + format(e.cacheBytes),11,MUTED,false));
 
             c.addView(space(9));
-            TextView manage=pill("OPEN APP STORAGE",PURPLE,Color.rgb(239,236,255));
+            LinearLayout actions=row();
+            TextView details=pill("DETAILS",Color.rgb(18,145,123),Color.rgb(228,252,248));
+            TextView manage=pill("APP STORAGE",PURPLE,Color.rgb(239,236,255));
+            touch(details);
             touch(manage);
+            details.setOnClickListener(v -> showAppDetailLoading(e));
             manage.setOnClickListener(v -> openAppStorageSettings(e.packageName));
-            c.addView(manage);
+            actions.addView(details,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            actions.addView(spaceH(8));
+            actions.addView(manage,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            c.addView(actions,matchWrap());
+            c.setOnClickListener(v -> showAppDetailLoading(e));
+            touch(c);
             root.addView(c,matchWrap());
             root.addView(space(9));
         }
@@ -653,6 +669,409 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
         fadeIn(root);
+    }
+
+    private void showAppDetailLoading(AppStorageEntry entry){
+        getWindow().getDecorView().setTag("appDetailLoading");
+        LinearLayout root=column();
+        root.setPadding(dp(18),dp(24),dp(18),dp(28));
+        root.setBackgroundColor(BG);
+
+        LinearLayout header=row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        try{
+            Drawable d=getPackageManager().getApplicationIcon(entry.packageName);
+            ImageView iv=new ImageView(this);
+            iv.setImageDrawable(d);
+            header.addView(iv,new LinearLayout.LayoutParams(dp(50),dp(50)));
+            header.addView(spaceH(12));
+        }catch(Exception ignored){}
+        LinearLayout labels=column();
+        labels.addView(text(entry.appName,24,INK,true));
+        labels.addView(text(entry.packageName,10,MUTED,false));
+        header.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        root.addView(header,matchWrap());
+        root.addView(space(24));
+
+        ScanRing ring=new ScanRing(this);
+        LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(190),dp(190));
+        rp.gravity=Gravity.CENTER_HORIZONTAL;
+        root.addView(ring,rp);
+        root.addView(space(14));
+
+        TextView status=centerText("Visible/shared files map कर रहे हैं…",13,MUTED,false);
+        root.addView(status,matchWrap());
+
+        root.addView(space(18));
+        LinearLayout note=card();
+        note.setPadding(dp(16),dp(15),dp(16),dp(15));
+        note.addView(text("Private app data",14,INK,true));
+        note.addView(space(5));
+        note.addView(text("Normal Android mode में private folder की individual files पढ़ना blocked है। लेकिन exact private-data size और safe/unsafe action नीचे दिखेगा।",12,MUTED,false));
+        root.addView(note,matchWrap());
+
+        Space flex=new Space(this);
+        root.addView(flex,new LinearLayout.LayoutParams(1,0,1f));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> {
+            if(activeSystemResult!=null) showSystemAnalyzerResult(activeSystemResult);
+            else showHome();
+        });
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        setContentView(root);
+        fadeIn(root);
+
+        new Thread(() -> {
+            AppDetailResult result=collectAppDetail(entry);
+            runOnUiThread(() -> {
+                ring.setDone();
+                showAppDetailResult(result);
+            });
+        },"sts-app-detail").start();
+    }
+
+    private AppDetailResult collectAppDetail(AppStorageEntry entry){
+        AppDetailResult result=new AppDetailResult(entry);
+        File root=Environment.getExternalStorageDirectory();
+        Set<String> seen=new HashSet<>();
+        scanAppVisibleFiles(root,seen,0,result);
+        return result;
+    }
+
+    private void scanAppVisibleFiles(File f,Set<String> seen,int depth,AppDetailResult result){
+        if(f==null||depth>24) return;
+        String path;
+        try{ path=f.getCanonicalPath(); }catch(Exception e){ path=f.getAbsolutePath(); }
+        if(!seen.add(path)) return;
+        String low=path.toLowerCase(Locale.ROOT);
+        if(low.contains("/sts_trash/")) return;
+
+        if(f.isDirectory()){
+            File[] children;
+            try{ children=f.listFiles(); }catch(Exception e){ children=null; }
+            if(children==null) return;
+            for(File x:children) scanAppVisibleFiles(x,seen,depth+1,result);
+            return;
+        }
+
+        if(!belongsToAppVisible(path,result.entry.packageName,result.entry.appName)) return;
+
+        long len=Math.max(0L,f.length());
+        AppVisibleCategory cat=visibleCategoryForFile(f,low);
+        AppFileInfo info=describeAppFile(f);
+        result.add(cat,new AppVisibleFile(f,len,info));
+    }
+
+    private boolean belongsToAppVisible(String path,String pkg,String appName){
+        String p=path.replace('\\','/').toLowerCase(Locale.ROOT);
+        String pl=pkg==null?"":pkg.toLowerCase(Locale.ROOT);
+        if(pl.length()>0){
+            if(p.contains("/android/media/"+pl+"/")) return true;
+            if(p.contains("/android/data/"+pl+"/")) return true;
+            if(p.contains("/android/obb/"+pl+"/")) return true;
+        }
+
+        if("com.whatsapp".equalsIgnoreCase(pkg)){
+            return p.contains("/whatsapp/") && !p.contains("whatsapp business");
+        }
+        if("com.whatsapp.w4b".equalsIgnoreCase(pkg)){
+            return p.contains("/whatsapp business/") || p.contains("/android/media/com.whatsapp.w4b/");
+        }
+        if(pkg!=null && pkg.toLowerCase(Locale.ROOT).contains("telegram")){
+            return p.contains("/telegram/");
+        }
+        if("com.facebook.katana".equalsIgnoreCase(pkg)){
+            return p.contains("/facebook/");
+        }
+        if("com.instagram.android".equalsIgnoreCase(pkg)){
+            return p.contains("/instagram/");
+        }
+        if("com.google.android.youtube".equalsIgnoreCase(pkg)){
+            return p.contains("/youtube/");
+        }
+        if("com.spotify.music".equalsIgnoreCase(pkg)){
+            return p.contains("/spotify/");
+        }
+
+        return false;
+    }
+
+    private AppVisibleCategory visibleCategoryForFile(File f,String lowPath){
+        String n=f.getName().toLowerCase(Locale.ROOT);
+        if(isImageFile(f)) return AppVisibleCategory.PHOTOS;
+        if(isVideoFile(f)) return AppVisibleCategory.VIDEOS;
+        if(isAudioFile(n)) return AppVisibleCategory.AUDIO;
+        if(n.endsWith(".pdf")||n.endsWith(".doc")||n.endsWith(".docx")||
+                n.endsWith(".xls")||n.endsWith(".xlsx")||n.endsWith(".ppt")||
+                n.endsWith(".pptx")||n.endsWith(".txt")||n.endsWith(".csv"))
+            return AppVisibleCategory.DOCUMENTS;
+        if(isWhatsAppChatBackup(n,lowPath)||isDatabaseLike(n,lowPath)||
+                lowPath.contains("/backup/")||lowPath.contains("/backups/")||
+                n.contains("backup")||n.endsWith(".bak"))
+            return AppVisibleCategory.BACKUPS;
+        if(lowPath.contains("/cache/")||lowPath.contains("/.cache/")||
+                lowPath.contains("/temp/")||lowPath.contains("/tmp/")||
+                n.endsWith(".tmp")||n.endsWith(".temp")||n.endsWith(".log"))
+            return AppVisibleCategory.JUNK;
+        if(lowPath.contains("/download/")||lowPath.contains("/downloads/")||
+                lowPath.contains("/offline/"))
+            return AppVisibleCategory.DOWNLOADS;
+        return AppVisibleCategory.OTHER;
+    }
+
+    private void showAppDetailResult(AppDetailResult result){
+        activeAppDetailResult=result;
+        activeVisibleCategory=null;
+        activeToolResult=null;
+        getWindow().getDecorView().setTag("appDetail");
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        LinearLayout header=row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        try{
+            Drawable d=getPackageManager().getApplicationIcon(result.entry.packageName);
+            ImageView iv=new ImageView(this);
+            iv.setImageDrawable(d);
+            header.addView(iv,new LinearLayout.LayoutParams(dp(48),dp(48)));
+            header.addView(spaceH(11));
+        }catch(Exception ignored){}
+        LinearLayout labels=column();
+        labels.addView(text(result.entry.appName,23,INK,true));
+        labels.addView(text(format(result.entry.totalBytes)+" total reported",12,PURPLE,true));
+        labels.addView(text(result.entry.packageName,9,MUTED,false));
+        header.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        root.addView(header,matchWrap());
+
+        root.addView(section("Private storage"));
+        root.addView(appStoragePart("App code",result.entry.codeBytes,
+                "DO NOT DELETE",ROSE,Color.rgb(255,238,243),
+                "यह installed app/program files हैं। इन्हें manually delete नहीं करना चाहिए। Space चाहिए तो app uninstall करें।",
+                false,result.entry.packageName));
+        root.addView(space(9));
+        root.addView(appStoragePart("Private app data",result.entry.dataBytes,
+                "IMPORTANT • REVIEW",AMBER,Color.rgb(255,247,230),
+                "Login, database, settings, offline content और app की private files इसमें हो सकती हैं। CLEAR STORAGE करने से app reset/login logout हो सकता है।",
+                true,result.entry.packageName));
+        root.addView(space(9));
+        root.addView(appStoragePart("App cache",result.entry.cacheBytes,
+                "SAFE TO CLEAN",Color.rgb(18,145,123),Color.rgb(228,252,248),
+                "Temporary cache है। सामान्यतः safely clear किया जा सकता है और app जरूरत पर इसे फिर बनाएगा।",
+                true,result.entry.packageName));
+
+        LinearLayout locked=card();
+        locked.setPadding(dp(16),dp(14),dp(16),dp(14));
+        locked.addView(text("Private file-level detail",14,INK,true));
+        locked.addView(space(6));
+        locked.addView(pill("LOCKED IN NORMAL MODE",PURPLE,Color.rgb(239,236,255)));
+        locked.addView(space(6));
+        locked.addView(text("Android दूसरे app के private folder की individual files normal mode में नहीं दिखाता। Shizuku/Root Deep Access आने पर यहाँ database, offline files, internal cache आदि file-level में दिखेंगे।",11,MUTED,false));
+        root.addView(space(9));
+        root.addView(locked,matchWrap());
+
+        root.addView(section("Visible / shared files"));
+        if(result.visibleBytes<=0){
+            LinearLayout empty=card();
+            empty.setPadding(dp(16),dp(18),dp(16),dp(18));
+            empty.addView(text("No app-linked shared files found",14,INK,true));
+            empty.addView(space(5));
+            empty.addView(text("इस app की files या तो private storage में हैं या shared folders से reliably map नहीं हुईं।",11,MUTED,false));
+            root.addView(empty,matchWrap());
+        }else{
+            LinearLayout sum=card();
+            sum.setPadding(dp(16),dp(15),dp(16),dp(15));
+            sum.addView(text(format(result.visibleBytes)+" visible/shared",22,PURPLE,true));
+            sum.addView(text(result.visibleFiles+" files mapped to this app",11,MUTED,false));
+            root.addView(sum,matchWrap());
+            root.addView(space(10));
+
+            for(AppVisibleCategory cat:AppVisibleCategory.values()){
+                long b=result.bytes(cat);
+                int c=result.count(cat);
+                if(b<=0) continue;
+                LinearLayout item=card();
+                item.setPadding(dp(15),dp(13),dp(15),dp(13));
+                LinearLayout rr=row();
+                rr.setGravity(Gravity.CENTER_VERTICAL);
+                rr.addView(text("●",18,cat.color,true),new LinearLayout.LayoutParams(dp(24),ViewGroup.LayoutParams.WRAP_CONTENT));
+                LinearLayout ll=column();
+                ll.addView(text(cat.label,13,INK,true));
+                ll.addView(text(c+" files",10,MUTED,false));
+                rr.addView(ll,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+                rr.addView(text(format(b),13,cat.color,true));
+                item.addView(rr,matchWrap());
+                item.addView(space(7));
+                item.addView(text(appCategoryGuidance(cat),11,MUTED,false));
+                item.addView(space(8));
+                TextView view=pill("VIEW FILES",PURPLE,Color.rgb(239,236,255));
+                touch(view);
+                view.setOnClickListener(v -> showAppVisibleFiles(result,cat));
+                item.addView(view);
+                item.setOnClickListener(v -> showAppVisibleFiles(result,cat));
+                touch(item);
+                root.addView(item,matchWrap());
+                root.addView(space(9));
+            }
+        }
+
+        root.addView(space(8));
+        TextView settings=actionButton("OPEN APP STORAGE SETTINGS",PURPLE);
+        touch(settings);
+        settings.setOnClickListener(v -> openAppStorageSettings(result.entry.packageName));
+        root.addView(settings,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(56)));
+        root.addView(space(9));
+
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> {
+            if(activeSystemResult!=null) showSystemAnalyzerResult(activeSystemResult);
+            else showHome();
+        });
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        fadeIn(root);
+    }
+
+    private LinearLayout appStoragePart(String title,long bytes,String status,int color,int bg,
+                                        String explanation,boolean settingsAction,String pkg){
+        LinearLayout c=card();
+        c.setPadding(dp(16),dp(14),dp(16),dp(14));
+        LinearLayout top=row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text(title,14,INK,true),new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        top.addView(text(format(bytes),14,color,true));
+        c.addView(top,matchWrap());
+        c.addView(space(7));
+        c.addView(pill(status,color,bg));
+        c.addView(space(7));
+        c.addView(text(explanation,11,MUTED,false));
+        if(settingsAction && bytes>0){
+            c.addView(space(9));
+            TextView manage=pill("MANAGE IN ANDROID",PURPLE,Color.rgb(239,236,255));
+            touch(manage);
+            manage.setOnClickListener(v -> openAppStorageSettings(pkg));
+            c.addView(manage);
+        }
+        return c;
+    }
+
+    private String appCategoryGuidance(AppVisibleCategory cat){
+        if(cat==AppVisibleCategory.JUNK) return "Temporary/cache-like files • usually safe, but review list first.";
+        if(cat==AppVisibleCategory.BACKUPS) return "Backup/database files • current backup may be protected; old backup review before delete.";
+        if(cat==AppVisibleCategory.PHOTOS||cat==AppVisibleCategory.VIDEOS||
+                cat==AppVisibleCategory.AUDIO||cat==AppVisibleCategory.DOCUMENTS)
+            return "User content • preview/open करके ही delete करें.";
+        if(cat==AppVisibleCategory.DOWNLOADS) return "Offline/downloaded content • delete करने पर app में offline access खत्म हो सकता है.";
+        return "App-linked shared files • type/status देखकर review करें.";
+    }
+
+    private void showAppVisibleFiles(AppDetailResult result,AppVisibleCategory cat){
+        activeAppDetailResult=result;
+        activeVisibleCategory=cat;
+        activeToolResult=null;
+        getWindow().getDecorView().setTag("appVisibleFiles");
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text(result.entry.appName+" • "+cat.label,24,INK,true));
+        root.addView(space(5));
+        root.addView(text(result.count(cat)+" files • "+format(result.bytes(cat)),12,cat.color,true));
+        root.addView(space(16));
+
+        int shown=0;
+        for(AppVisibleFile vf:result.files){
+            if(vf.category!=cat) continue;
+            if(shown>=100) break;
+            shown++;
+
+            AppFileInfo info=vf.info;
+            LinearLayout c=card();
+            c.setPadding(dp(14),dp(12),dp(14),dp(12));
+            c.addView(text(vf.file.getName(),13,INK,true));
+            c.addView(space(3));
+            c.addView(text(format(vf.bytes),12,cat.color,true));
+            c.addView(space(6));
+            c.addView(pill(info.status,info.statusColor,info.statusBg));
+            c.addView(space(6));
+            c.addView(text(info.explanation,10,MUTED,false));
+            c.addView(space(5));
+            c.addView(text(shortPath(vf.file.getAbsolutePath()),9,MUTED,false));
+            c.addView(space(9));
+
+            LinearLayout actions=row();
+            String openLabel=info.detailsOnly?"DETAILS":isImageFile(vf.file)?"PREVIEW":isVideoFile(vf.file)?"PLAY":"OPEN";
+            TextView open=pill(openLabel,PURPLE,Color.rgb(239,236,255));
+            touch(open);
+            open.setOnClickListener(v -> {
+                if(info.detailsOnly) showFileDetails(vf.file,info);
+                else openFoundFile(vf.file);
+            });
+            actions.addView(open,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            actions.addView(spaceH(8));
+
+            if(info.protectedFile){
+                TextView keep=pill("KEEP / PROTECTED",Color.rgb(18,145,123),Color.rgb(228,252,248));
+                actions.addView(keep,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            }else{
+                TextView del=pill("MOVE TO TRASH",ROSE,Color.rgb(255,238,243));
+                touch(del);
+                del.setOnClickListener(v -> confirmAppVisibleTrash(result,cat,vf));
+                actions.addView(del,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            }
+            c.addView(actions,matchWrap());
+            root.addView(c,matchWrap());
+            root.addView(space(8));
+        }
+
+        if(result.count(cat)>shown)
+            root.addView(text("+ "+(result.count(cat)-shown)+" more files",11,MUTED,false));
+
+        root.addView(space(10));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showAppDetailResult(result));
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        fadeIn(root);
+    }
+
+    private void confirmAppVisibleTrash(AppDetailResult result,AppVisibleCategory cat,AppVisibleFile vf){
+        if(vf.info.protectedFile){
+            showFileDetails(vf.file,vf.info);
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Move to STS Trash?")
+                .setMessage(vf.file.getName()+"\n"+format(vf.bytes)+"\n\n"+vf.info.explanation+
+                        "\n\n7 दिन तक Restore किया जा सकता है।")
+                .setNegativeButton("Cancel",null)
+                .setPositiveButton("MOVE TO TRASH",(d,w) -> {
+                    if(moveToTrash(vf.file)){
+                        result.remove(vf);
+                        showAppVisibleFiles(result,cat);
+                    }else{
+                        new AlertDialog.Builder(this).setTitle("Move failed")
+                                .setMessage("File को STS Trash में move नहीं किया जा सका।")
+                                .setPositiveButton("OK",null).show();
+                    }
+                }).show();
     }
 
     private LinearLayout systemRow(String label,long bytes,int color){
@@ -1572,8 +1991,15 @@ public class MainActivity extends Activity {
     private void returnFromPreview() {
         haptic();
         releasePreviewResources();
-        if (activeToolResult != null) showToolResult(activeToolResult);
-        else showHome();
+        if (activeVisibleCategory != null && activeAppDetailResult != null) {
+            showAppVisibleFiles(activeAppDetailResult, activeVisibleCategory);
+        } else if (activeToolResult != null) {
+            showToolResult(activeToolResult);
+        } else if (activeAppDetailResult != null) {
+            showAppDetailResult(activeAppDetailResult);
+        } else {
+            showHome();
+        }
     }
 
     private void releasePreviewResources() {
@@ -2345,6 +2771,15 @@ public class MainActivity extends Activity {
         Object tag = getWindow().getDecorView().getTag();
         if ("preview".equals(tag)) {
             returnFromPreview();
+        } else if ("appVisibleFiles".equals(tag) && activeAppDetailResult != null) {
+            haptic();
+            showAppDetailResult(activeAppDetailResult);
+        } else if (("appDetail".equals(tag) || "appDetailLoading".equals(tag)) && activeSystemResult != null) {
+            haptic();
+            showSystemAnalyzerResult(activeSystemResult);
+        } else if ("systemAnalyzerResult".equals(tag) || "systemAnalyzer".equals(tag)) {
+            haptic();
+            showHome();
         } else if (tag == null || "home".equals(tag)) {
             moveTaskToBack(true);
         } else {
@@ -2745,6 +3180,78 @@ public class MainActivity extends Activity {
             p.setColor(Color.argb(45,0,0,0));
             c.drawRoundRect(new RectF(left,top,right,bottom),radius,radius,p);
         }
+    }
+
+    private enum AppVisibleCategory {
+        PHOTOS("Photos", Color.rgb(231,76,120)),
+        VIDEOS("Videos", Color.rgb(108,76,230)),
+        AUDIO("Audio / Voice / Music", Color.rgb(35,180,155)),
+        DOCUMENTS("Documents", Color.rgb(61,132,224)),
+        BACKUPS("Backups / Databases", Color.rgb(160,94,210)),
+        DOWNLOADS("Downloads / Offline", Color.rgb(255,159,64)),
+        JUNK("Junk / Temp / Cache", Color.rgb(72,196,120)),
+        OTHER("Other app files", Color.rgb(124,132,150));
+
+        final String label;
+        final int color;
+        AppVisibleCategory(String label,int color){
+            this.label=label;
+            this.color=color;
+        }
+    }
+
+    private static final class AppVisibleFile {
+        final File file;
+        final long bytes;
+        final AppFileInfo info;
+        final AppVisibleCategory category;
+
+        AppVisibleFile(File file,long bytes,AppFileInfo info){
+            this.file=file;
+            this.bytes=bytes;
+            this.info=info;
+            this.category=null;
+        }
+
+        AppVisibleFile(File file,long bytes,AppFileInfo info,AppVisibleCategory category){
+            this.file=file;
+            this.bytes=bytes;
+            this.info=info;
+            this.category=category;
+        }
+    }
+
+    private static final class AppDetailResult {
+        final AppStorageEntry entry;
+        final long[] bytes=new long[AppVisibleCategory.values().length];
+        final int[] counts=new int[AppVisibleCategory.values().length];
+        final List<AppVisibleFile> files=new ArrayList<>();
+        long visibleBytes;
+        int visibleFiles;
+
+        AppDetailResult(AppStorageEntry entry){this.entry=entry;}
+
+        void add(AppVisibleCategory cat,AppVisibleFile f){
+            AppVisibleFile stored=new AppVisibleFile(f.file,f.bytes,f.info,cat);
+            files.add(stored);
+            bytes[cat.ordinal()]+=Math.max(0L,f.bytes);
+            counts[cat.ordinal()]++;
+            visibleBytes+=Math.max(0L,f.bytes);
+            visibleFiles++;
+        }
+
+        void remove(AppVisibleFile f){
+            if(files.remove(f)){
+                AppVisibleCategory cat=f.category;
+                bytes[cat.ordinal()]=Math.max(0L,bytes[cat.ordinal()]-f.bytes);
+                counts[cat.ordinal()]=Math.max(0,counts[cat.ordinal()]-1);
+                visibleBytes=Math.max(0L,visibleBytes-f.bytes);
+                visibleFiles=Math.max(0,visibleFiles-1);
+            }
+        }
+
+        long bytes(AppVisibleCategory c){return bytes[c.ordinal()];}
+        int count(AppVisibleCategory c){return counts[c.ordinal()];}
     }
 
     private static final class AppStorageEntry {
