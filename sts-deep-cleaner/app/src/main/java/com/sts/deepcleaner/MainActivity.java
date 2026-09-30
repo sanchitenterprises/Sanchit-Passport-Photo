@@ -52,6 +52,8 @@ public class MainActivity extends Activity {
     private static final int MUTED = Color.rgb(102,108,128);
 
     private ScanSummary lastSummary;
+    private boolean pendingScanAfterAccess = false;
+    private boolean pendingDeepAfterAccess = false;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -65,6 +67,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingScanAfterAccess && hasAllFilesAccess()) {
+            boolean deep = pendingDeepAfterAccess;
+            pendingScanAfterAccess = false;
+            pendingDeepAfterAccess = false;
+            startScan(deep);
+            return;
+        }
         if (getWindow().getDecorView().getTag() != null &&
                 "home".equals(getWindow().getDecorView().getTag())) {
             showHome();
@@ -101,7 +110,7 @@ public class MainActivity extends Activity {
         modeCard.setPadding(dp(18), dp(16), dp(18), dp(16));
         TextView free = text("Free storage", 14, MUTED, false);
         TextView freeValue = text(format(s[0] - s[1]), 27, PURPLE, true);
-        TextView mode = pill(hasAllFilesAccess() ? "Deep access ON" : "Standard mode",
+        TextView mode = pill(hasAllFilesAccess() ? "Full storage access ON" : "Full scan access OFF",
                 hasAllFilesAccess() ? Color.rgb(18,145,123) : PURPLE,
                 hasAllFilesAccess() ? Color.rgb(228,252,248) : Color.rgb(244,240,255));
         modeCard.addView(free);
@@ -128,7 +137,7 @@ public class MainActivity extends Activity {
         root.addView(space(22));
         TextView scan = actionButton("SMART SCAN", PURPLE);
         touch(scan);
-        scan.setOnClickListener(v -> startScan(false));
+        scan.setOnClickListener(v -> beginScan(false));
         root.addView(scan, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
 
         root.addView(space(10));
@@ -136,11 +145,7 @@ public class MainActivity extends Activity {
                 Color.rgb(236,233,255));
         deep.setTextColor(PURPLE);
         touch(deep);
-        deep.setOnClickListener(v -> {
-            haptic();
-            if (hasAllFilesAccess()) startScan(true);
-            else requestAllFiles();
-        });
+        deep.setOnClickListener(v -> beginScan(true));
         root.addView(deep, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
 
         root.addView(space(16));
@@ -153,8 +158,18 @@ public class MainActivity extends Activity {
         fadeIn(root);
     }
 
-    private void startScan(boolean deep) {
+    private void beginScan(boolean deep) {
         haptic();
+        if (Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) {
+            pendingScanAfterAccess = true;
+            pendingDeepAfterAccess = deep;
+            requestAllFiles(deep);
+            return;
+        }
+        startScan(deep);
+    }
+
+    private void startScan(boolean deep) {
         getWindow().getDecorView().setTag("scan");
         LinearLayout root = column();
         root.setPadding(dp(22), dp(28), dp(22), dp(28));
@@ -214,14 +229,39 @@ public class MainActivity extends Activity {
 
         root.addView(text("Scan Result", 28, INK, true));
         root.addView(space(5));
-        root.addView(text("Delete से पहले safe classification", 14, MUTED, false));
-        root.addView(space(22));
+        root.addView(text("Actual storage scan • delete से पहले review", 14, MUTED, false));
+        root.addView(space(18));
 
-        root.addView(resultCard("Safe Junk", s.safeCount, s.safeBytes, TEAL, "AUTO-SAFE"));
+        LinearLayout scanned = card();
+        scanned.setPadding(dp(18), dp(17), dp(18), dp(17));
+        scanned.addView(text((s.fullAccess ? "FULL STORAGE SCAN" : "LIMITED SCAN"), 12,
+                s.fullAccess ? Color.rgb(18,145,123) : ROSE, true));
+        scanned.addView(space(7));
+        scanned.addView(text(s.scannedFiles + " files scanned", 18, INK, true));
+        scanned.addView(space(4));
+        scanned.addView(text(format(s.scannedBytes) + " visible storage analyzed", 14, MUTED, false));
+        if (!s.fullAccess) {
+            scanned.addView(space(7));
+            scanned.addView(text("Full Storage Access ON करने पर ज्यादा folders दिखाई देंगे।", 12, ROSE, false));
+        }
+        root.addView(scanned, matchWrap());
+        root.addView(space(14));
+
+        LinearLayout safeCard = resultCard("Safe Junk", s.safeCount, s.safeBytes, TEAL, "AUTO-SAFE");
+        safeCard.setOnClickListener(v -> showItemDetails(s, true));
+        touch(safeCard);
+        root.addView(safeCard, matchWrap());
         root.addView(space(12));
-        root.addView(resultCard("Review Before Delete", s.reviewCount, s.reviewBytes, AMBER, "NOT AUTO"));
+
+        LinearLayout reviewCard = resultCard("Review Before Delete", s.reviewCount, s.reviewBytes, AMBER, "TAP TO VIEW");
+        reviewCard.setOnClickListener(v -> showItemDetails(s, false));
+        touch(reviewCard);
+        root.addView(reviewCard, matchWrap());
         root.addView(space(12));
-        root.addView(resultCard("Restricted / Protected", s.restrictedCount, 0, ROSE, "PROTECTED"));
+
+        root.addView(resultCard("Personal Files (Protected)", s.personalCount, s.personalBytes, BLUE, "NEVER AUTO"));
+        root.addView(space(12));
+        root.addView(resultCard("Restricted Android Area", s.restrictedCount, 0, ROSE, "PROTECTED"));
         root.addView(space(18));
 
         LinearLayout reclaim = card();
@@ -230,7 +270,7 @@ public class MainActivity extends Activity {
         reclaim.addView(space(5));
         reclaim.addView(text(format(s.safeBytes), 30, PURPLE, true));
         reclaim.addView(space(5));
-        reclaim.addView(text("Personal media selected नहीं है", 12, MUTED, false));
+        reclaim.addView(text("Photos, videos और documents auto-selected नहीं हैं", 12, MUTED, false));
         root.addView(reclaim, matchWrap());
 
         root.addView(space(22));
@@ -249,6 +289,28 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
         fadeIn(root);
+    }
+
+    private void showItemDetails(ScanSummary s, boolean safeOnly) {
+        StringBuilder b = new StringBuilder();
+        int shown = 0;
+        for (ScanItem i : s.items) {
+            if (i.safe != safeOnly) continue;
+            if (shown >= 30) break;
+            b.append("• ").append(i.file.getName()).append("  ").append(format(i.bytes)).append("\n");
+            String parent = i.file.getParent();
+            if (parent != null) b.append("  ").append(parent).append("\n");
+            shown++;
+        }
+        if (shown == 0) b.append(safeOnly ? "Safe junk item नहीं मिला।" : "Review item नहीं मिला।");
+        if ((safeOnly ? s.safeCount : s.reviewCount) > shown) {
+            b.append("\n+ ").append((safeOnly ? s.safeCount : s.reviewCount) - shown).append(" more items");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(safeOnly ? "Safe Junk Details" : "Review Before Delete")
+                .setMessage(b.toString())
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private void confirmClean(ScanSummary s) {
@@ -318,16 +380,20 @@ public class MainActivity extends Activity {
         popIn(check);
     }
 
-    private void requestAllFiles() {
+    private void requestAllFiles(boolean deep) {
         if (Build.VERSION.SDK_INT < 30) {
-            startScan(true);
+            pendingScanAfterAccess = false;
+            startScan(deep);
             return;
         }
         new AlertDialog.Builder(this)
-                .setTitle("Deep Scan Access")
-                .setMessage("Android की अनुमति के अंदर अधिक folders scan करने के लिए All Files Access enable करें। यह root नहीं करता और security bypass नहीं करता।")
-                .setNegativeButton("अभी नहीं", null)
-                .setPositiveButton("Access खोलें", (d,w) -> {
+                .setTitle("Full Storage Scan Access")
+                .setMessage("अभी Android app को पूरे shared storage की file-list देखने नहीं दे रहा है, इसलिए result 0 या बहुत कम आ सकता है। Full Storage Access ON करें; वापस आते ही scan अपने-आप शुरू होगा।")
+                .setNegativeButton("Cancel", (d,w) -> {
+                    pendingScanAfterAccess = false;
+                    pendingDeepAfterAccess = false;
+                })
+                .setPositiveButton("ALLOW & SCAN", (d,w) -> {
                     try {
                         Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
                                 Uri.parse("package:" + getPackageName()));
@@ -345,42 +411,53 @@ public class MainActivity extends Activity {
     private void scanStorage(ScanCallback cb) {
         new Thread(() -> {
             ScanSummary out = new ScanSummary();
+            out.fullAccess = hasAllFilesAccess();
             cb.progress(4, "Storage map पढ़ रहे हैं…");
+
             List<File> roots = new ArrayList<>();
-            File[] appRoots = getExternalFilesDirs(null);
-            if (appRoots != null) for (File f : appRoots) if (f != null) roots.add(f);
-            if (hasAllFilesAccess()) {
+            if (out.fullAccess) {
                 roots.add(Environment.getExternalStorageDirectory());
             } else {
+                File[] appRoots = getExternalFilesDirs(null);
+                if (appRoots != null) for (File f : appRoots) if (f != null) roots.add(f);
                 File d = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                 if (d != null) roots.add(d);
             }
+
             Set<String> seen = new HashSet<>();
             int idx = 0;
             for (File root : roots) {
                 if (root == null || !root.exists()) continue;
                 idx++;
-                cb.progress(Math.min(84, 8 + idx * 22), "Scanning: " + root.getName());
+                cb.progress(Math.min(86, 8 + idx * 24), "Scanning: " + root.getAbsolutePath());
                 walk(root, out, seen, 0);
             }
-            cb.progress(94, "Safe categories verify कर रहे हैं…");
-            cb.progress(100, "Scan complete");
+
+            cb.progress(92, "Junk / large / old files verify कर रहे हैं…");
+            cb.progress(100, "Scan complete • " + out.scannedFiles + " files");
             cb.done(out);
         }, "sts-scan").start();
     }
 
     private void walk(File f, ScanSummary out, Set<String> seen, int depth) {
-        if (f == null || depth > 14) return;
+        if (f == null || depth > 22) return;
         String path;
         try { path = f.getCanonicalPath(); } catch (Exception e) { path = f.getAbsolutePath(); }
         if (!seen.add(path)) return;
         String low = path.toLowerCase(Locale.ROOT);
-        if (isCritical(low)) { out.restrictedCount++; return; }
+
+        if (isCritical(low)) {
+            out.restrictedCount++;
+            return;
+        }
 
         if (f.isDirectory()) {
             File[] children;
             try { children = f.listFiles(); } catch (Exception e) { children = null; }
-            if (children == null) { out.restrictedCount++; return; }
+            if (children == null) {
+                out.restrictedCount++;
+                return;
+            }
             for (File x : children) walk(x, out, seen, depth + 1);
             return;
         }
@@ -390,27 +467,51 @@ public class MainActivity extends Activity {
         long len = Math.max(0, f.length());
         long age = System.currentTimeMillis() - Math.max(0, f.lastModified());
 
+        out.scannedFiles++;
+        out.scannedBytes += len;
+
+        boolean isPersonal = personal(name);
+        if (isPersonal) {
+            out.personalCount++;
+            out.personalBytes += len;
+        }
+
         boolean safe = false;
         boolean review = false;
+
         if (name.endsWith(".tmp") || name.endsWith(".temp") || name.endsWith(".log") ||
-                name.endsWith(".bak") || name.endsWith(".old")) safe = true;
-        else if ((parent.contains("/cache") || parent.contains("/.cache")) && !personal(name)) safe = true;
-        else if (name.endsWith(".apk") && age > 30L*24*60*60*1000) review = true;
-        else if (len >= 250L*1024*1024) review = true;
-        else if (personal(name)) review = true;
+                name.endsWith(".bak") || name.endsWith(".old") || name.endsWith(".dmp") ||
+                name.endsWith(".crash")) {
+            safe = !isPersonal;
+        } else if ((parent.contains("/cache") || parent.contains("/.cache") ||
+                parent.contains("/.thumbnails")) && !isPersonal) {
+            safe = true;
+        } else if (name.endsWith(".apk") && age > 7L*24*60*60*1000) {
+            review = true;
+        } else if (low.contains("/.trash") || name.startsWith(".trashed-")) {
+            review = true;
+        } else if (len >= 100L*1024*1024) {
+            review = true;
+        } else if ((parent.contains("/download") || parent.contains("/downloads")) &&
+                age > 90L*24*60*60*1000 && !isPersonal) {
+            review = true;
+        }
 
         if (safe) {
             out.items.add(new ScanItem(f, len, true));
-            out.safeBytes += len; out.safeCount++;
+            out.safeBytes += len;
+            out.safeCount++;
         } else if (review) {
             out.items.add(new ScanItem(f, len, false));
-            out.reviewBytes += len; out.reviewCount++;
+            out.reviewBytes += len;
+            out.reviewCount++;
         }
     }
 
     private boolean isCritical(String p) {
         return p.startsWith("/system") || p.startsWith("/vendor") || p.startsWith("/product") ||
-                p.startsWith("/data/system") || p.startsWith("/data/adb") || p.contains("/android/obb/");
+                p.startsWith("/data/system") || p.startsWith("/data/adb") ||
+                p.contains("/android/data") || p.contains("/android/obb");
     }
 
     private boolean personal(String n) {
@@ -440,7 +541,7 @@ public class MainActivity extends Activity {
         c.addView(space(5));
         c.addView(text(count + " items", 12, MUTED, false));
         c.addView(space(8));
-        c.addView(text(bytes > 0 ? format(bytes) : "Protected", 20, accent, true));
+        c.addView(text(format(bytes), 20, accent, true));
         c.addView(space(7));
         TextView b = pill(badge, accent, Color.argb(25, Color.red(accent), Color.green(accent), Color.blue(accent)));
         c.addView(b);
@@ -574,7 +675,9 @@ public class MainActivity extends Activity {
         ScanItem(File f,long b,boolean s){file=f;bytes=b;safe=s;}
     }
     private static final class ScanSummary {
-        long safeBytes, reviewBytes; int safeCount, reviewCount, restrictedCount;
+        long safeBytes, reviewBytes, scannedBytes, personalBytes;
+        int safeCount, reviewCount, restrictedCount, scannedFiles, personalCount;
+        boolean fullAccess;
         final List<ScanItem> items = new ArrayList<>();
     }
     private interface ScanCallback {
