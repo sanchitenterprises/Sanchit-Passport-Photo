@@ -30,7 +30,9 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.MediaController;
 import android.widget.ScrollView;
+import android.widget.VideoView;
 import android.widget.Space;
 import android.widget.TextView;
 
@@ -47,6 +49,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import android.webkit.MimeTypeMap;
+import androidx.core.content.FileProvider;
+
 public class MainActivity extends Activity {
     private static final int PURPLE = Color.rgb(90,74,227);
     private static final int PURPLE2 = Color.rgb(117,92,255);
@@ -62,6 +67,7 @@ public class MainActivity extends Activity {
     private boolean pendingScanAfterAccess = false;
     private boolean pendingDeepAfterAccess = false;
     private String pendingToolAfterAccess = null;
+    private ToolResult activeToolResult = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -320,6 +326,7 @@ public class MainActivity extends Activity {
     }
 
     private void showToolResult(ToolResult result) {
+        activeToolResult = result;
         getWindow().getDecorView().setTag("toolResult");
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -368,12 +375,26 @@ public class MainActivity extends Activity {
                 itemCard.addView(space(3));
                 itemCard.addView(text(shortPath(item.file.getAbsolutePath()), 10, MUTED, false));
 
-                if ("large".equals(result.type) || "duplicates".equals(result.type)) {
-                    itemCard.addView(space(8));
-                    TextView del = pill("TAP TO REVIEW / DELETE", ROSE, Color.rgb(255,238,243));
-                    itemCard.addView(del);
-                    itemCard.setOnClickListener(v -> confirmDeleteToolItem(result, item));
-                    touch(itemCard);
+                if (!item.directory) {
+                    itemCard.addView(space(10));
+                    LinearLayout actions = row();
+
+                    String openLabel = isImageFile(item.file) ? "PREVIEW"
+                            : isVideoFile(item.file) ? "PLAY"
+                            : "OPEN";
+                    TextView open = pill(openLabel, PURPLE, Color.rgb(239,236,255));
+                    touch(open);
+                    open.setOnClickListener(v -> openFoundFile(item.file));
+                    actions.addView(open, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                    if ("large".equals(result.type) || "duplicates".equals(result.type)) {
+                        actions.addView(spaceH(8));
+                        TextView del = pill("DELETE", ROSE, Color.rgb(255,238,243));
+                        touch(del);
+                        del.setOnClickListener(v -> confirmDeleteToolItem(result, item));
+                        actions.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    }
+                    itemCard.addView(actions, matchWrap());
                 }
                 root.addView(itemCard, matchWrap());
                 root.addView(space(9));
@@ -412,6 +433,156 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
         fadeIn(root);
+    }
+
+    private boolean isImageFile(File f) {
+        String n = f.getName().toLowerCase(Locale.ROOT);
+        return n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") ||
+                n.endsWith(".webp") || n.endsWith(".gif") || n.endsWith(".bmp") ||
+                n.endsWith(".heic") || n.endsWith(".heif");
+    }
+
+    private boolean isVideoFile(File f) {
+        String n = f.getName().toLowerCase(Locale.ROOT);
+        return n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".mov") ||
+                n.endsWith(".avi") || n.endsWith(".webm") || n.endsWith(".3gp") ||
+                n.endsWith(".m4v");
+    }
+
+    private String mimeForFile(File f) {
+        String name = f.getName();
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0 && dot < name.length()-1) {
+            String ext = name.substring(dot+1).toLowerCase(Locale.ROOT);
+            String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (mime != null) return mime;
+        }
+        return "*/*";
+    }
+
+    private void openFoundFile(File file) {
+        haptic();
+        if (!file.exists()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("File not found")
+                    .setMessage("यह file अब storage में मौजूद नहीं है।")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        if (isImageFile(file)) {
+            showPhotoPreview(file);
+        } else if (isVideoFile(file)) {
+            showVideoPreview(file);
+        } else {
+            openExternalFile(file);
+        }
+    }
+
+    private void showPhotoPreview(File file) {
+        getWindow().getDecorView().setTag("preview");
+        LinearLayout root = column();
+        root.setBackgroundColor(Color.rgb(12,14,20));
+        root.setPadding(dp(12), dp(12), dp(12), dp(14));
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = pill("‹ BACK", Color.WHITE, Color.rgb(40,43,54));
+        touch(back);
+        back.setOnClickListener(v -> returnFromPreview());
+        top.addView(back);
+        TextView name = text(file.getName(), 14, Color.WHITE, true);
+        name.setPadding(dp(12),0,0,0);
+        top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(top, matchWrap());
+        root.addView(space(10));
+
+        ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setAdjustViewBounds(true);
+        image.setBackgroundColor(Color.BLACK);
+        try {
+            image.setImageURI(Uri.fromFile(file));
+        } catch (Exception ignored) {}
+        root.addView(image, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        root.addView(space(10));
+        TextView info = centerText(format(file.length()) + "  •  " + shortPath(file.getAbsolutePath()), 11, Color.LTGRAY, false);
+        root.addView(info, matchWrap());
+
+        root.addView(space(8));
+        TextView external = actionButton("OPEN IN OTHER APP", PURPLE);
+        touch(external);
+        external.setOnClickListener(v -> openExternalFile(file));
+        root.addView(external, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+
+        setContentView(root);
+        fadeIn(root);
+    }
+
+    private void showVideoPreview(File file) {
+        getWindow().getDecorView().setTag("preview");
+        LinearLayout root = column();
+        root.setBackgroundColor(Color.rgb(12,14,20));
+        root.setPadding(dp(12), dp(12), dp(12), dp(14));
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = pill("‹ BACK", Color.WHITE, Color.rgb(40,43,54));
+        touch(back);
+        back.setOnClickListener(v -> returnFromPreview());
+        top.addView(back);
+        TextView name = text(file.getName(), 14, Color.WHITE, true);
+        name.setPadding(dp(12),0,0,0);
+        top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(top, matchWrap());
+        root.addView(space(10));
+
+        VideoView video = new VideoView(this);
+        video.setBackgroundColor(Color.BLACK);
+        MediaController controls = new MediaController(this);
+        controls.setAnchorView(video);
+        video.setMediaController(controls);
+        video.setVideoURI(Uri.fromFile(file));
+        video.setOnPreparedListener(mp -> {
+            mp.setLooping(false);
+            video.start();
+        });
+        root.addView(video, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        root.addView(space(8));
+        TextView info = centerText("PLAY / PAUSE / SEEK  •  " + format(file.length()), 11, Color.LTGRAY, false);
+        root.addView(info, matchWrap());
+        root.addView(space(8));
+
+        TextView external = actionButton("OPEN IN VIDEO PLAYER", PURPLE);
+        touch(external);
+        external.setOnClickListener(v -> openExternalFile(file));
+        root.addView(external, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+
+        setContentView(root);
+        fadeIn(root);
+        video.requestFocus();
+    }
+
+    private void openExternalFile(File file) {
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", file);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, mimeForFile(file));
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(intent, "Open with"));
+        } catch (Exception e) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Open file")
+                    .setMessage("इस file type को खोलने के लिए compatible app नहीं मिला।")
+                    .setPositiveButton("OK", null).show();
+        }
+    }
+
+    private void returnFromPreview() {
+        haptic();
+        if (activeToolResult != null) showToolResult(activeToolResult);
+        else showHome();
     }
 
     private void confirmDeleteToolItem(ToolResult result, ToolItem item) {
@@ -908,7 +1079,9 @@ public class MainActivity extends Activity {
 
     private void handleBack() {
         Object tag = getWindow().getDecorView().getTag();
-        if (tag == null || "home".equals(tag)) {
+        if ("preview".equals(tag)) {
+            returnFromPreview();
+        } else if (tag == null || "home".equals(tag)) {
             moveTaskToBack(true);
         } else {
             haptic();
