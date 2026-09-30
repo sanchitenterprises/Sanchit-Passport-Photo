@@ -910,6 +910,15 @@ public class MainActivity extends Activity {
         root.addView(systemSettings,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(56)));
 
         root.addView(section("Apps using most storage"));
+        String appSortKey = "sort:systemApps";
+        sortApps(result, sortMode(appSortKey, 0));
+        TextView appSort = sortControl(appSortKey, APP_SORT_OPTIONS, 0, () -> {
+            resetSavedScroll("systemResult");
+            showSystemAnalyzerResult(result);
+        });
+        root.addView(appSort, matchWrap());
+        root.addView(space(10));
+
         int limit=Math.min(60,result.apps.size());
         for(int i=0;i<limit;i++){
             AppStorageEntry e=result.apps.get(i);
@@ -1306,6 +1315,15 @@ public class MainActivity extends Activity {
         root.addView(text(result.entry.appName+" • "+cat.label,24,INK,true));
         root.addView(space(5));
         root.addView(text(result.count(cat)+" files • "+format(result.bytes(cat)),12,cat.color,true));
+        root.addView(space(12));
+
+        String appFileSortKey = "sort:appFiles:" + result.entry.packageName + ":" + cat.name();
+        sortAppVisibleFiles(result, sortMode(appFileSortKey, 0));
+        TextView fileSort = sortControl(appFileSortKey, FILE_SORT_OPTIONS, 0, () -> {
+            resetSavedScroll("appFiles:" + result.entry.packageName + ":" + cat.name());
+            showAppVisibleFiles(result, cat);
+        });
+        root.addView(fileSort, matchWrap());
         root.addView(space(16));
 
         int shown=0;
@@ -1552,6 +1570,9 @@ public class MainActivity extends Activity {
         root.setPadding(dp(16), dp(24), dp(16), dp(28));
 
         int accent = toolAccent(result.type);
+        String sortKey = "sort:tool:" + result.type;
+        sortToolItems(result, sortMode(sortKey, 0));
+
         root.addView(text(toolTitle(result.type), 28, INK, true));
         root.addView(space(5));
         String sub = "duplicates".equals(result.type)
@@ -1570,6 +1591,15 @@ public class MainActivity extends Activity {
                 "downloads".equals(result.type) || "backups".equals(result.type);
         summary.addView(text(reviewOnlyTool ? "total size listed" : "potential reclaim", 12, MUTED, false));
         root.addView(summary, matchWrap());
+
+        if (!result.items.isEmpty()) {
+            root.addView(space(10));
+            TextView sort = sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
+                resetSavedScroll("toolResult:" + result.type);
+                showToolResult(result);
+            });
+            root.addView(sort, matchWrap());
+        }
 
         if (result.items.isEmpty()) {
             root.addView(space(18));
@@ -2533,7 +2563,18 @@ public class MainActivity extends Activity {
         File dir = trashDir();
         File[] metas = dir.listFiles((d,n) -> n.endsWith(".stsmeta"));
         if (metas == null) metas = new File[0];
-        java.util.Arrays.sort(metas, (a,b) -> Long.compare(b.lastModified(), a.lastModified()));
+
+        String trashSortKey = "sort:trash";
+        sortTrashMeta(metas, sortMode(trashSortKey, 0));
+
+        if (metas.length > 0) {
+            TextView trashSort = sortControl(trashSortKey, TRASH_SORT_OPTIONS, 0, () -> {
+                resetSavedScroll("trash");
+                showTrashScreen();
+            });
+            root.addView(trashSort, matchWrap());
+            root.addView(space(12));
+        }
 
         if (metas.length == 0) {
             LinearLayout empty = card();
@@ -3032,10 +3073,16 @@ public class MainActivity extends Activity {
     }
 
     private void showItemDetails(ScanSummary s, boolean safeOnly) {
+        String sortKey = "sort:scanDetails:" + (safeOnly ? "safe" : "review");
+        List<ScanItem> list = new ArrayList<>();
+        for (ScanItem i : s.items) {
+            if (i.safe == safeOnly) list.add(i);
+        }
+        sortScanItems(list, sortMode(sortKey, 0));
+
         StringBuilder b = new StringBuilder();
         int shown = 0;
-        for (ScanItem i : s.items) {
-            if (i.safe != safeOnly) continue;
+        for (ScanItem i : list) {
             if (shown >= 30) break;
             b.append("• ").append(i.file.getName()).append("  ").append(format(i.bytes)).append("\n");
             String parent = i.file.getParent();
@@ -3043,12 +3090,18 @@ public class MainActivity extends Activity {
             shown++;
         }
         if (shown == 0) b.append(safeOnly ? "Safe junk item नहीं मिला।" : "Review item नहीं मिला।");
-        if ((safeOnly ? s.safeCount : s.reviewCount) > shown) {
-            b.append("\n+ ").append((safeOnly ? s.safeCount : s.reviewCount) - shown).append(" more items");
+        if (list.size() > shown) {
+            b.append("\n+ ").append(list.size() - shown).append(" more items");
         }
+
+        int mode = sortMode(sortKey, 0);
         new AlertDialog.Builder(this)
-                .setTitle(safeOnly ? "Safe Junk Details" : "Review Before Delete")
+                .setTitle((safeOnly ? "Safe Junk Details" : "Review Before Delete") +
+                        "\nSort: " + FILE_SORT_OPTIONS[mode])
                 .setMessage(b.toString())
+                .setNeutralButton("SORT BY", (d,w) ->
+                        showSortChooser(sortKey, FILE_SORT_OPTIONS, 0,
+                                () -> showItemDetails(s, safeOnly)))
                 .setPositiveButton("OK", null)
                 .show();
     }
