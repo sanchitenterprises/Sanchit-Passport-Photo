@@ -10,8 +10,10 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.pdf.PdfRenderer;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
@@ -22,6 +24,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.ParcelFileDescriptor;
 import android.os.StatFs;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
@@ -33,14 +36,16 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.MediaController;
 import android.widget.ScrollView;
-import android.widget.VideoView;
 import android.widget.Space;
 import android.widget.TextView;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -54,6 +59,11 @@ import java.util.Set;
 
 import android.webkit.MimeTypeMap;
 import androidx.core.content.FileProvider;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.ui.PlayerView;
 
 public class MainActivity extends Activity {
     private static final int PURPLE = Color.rgb(90,74,227);
@@ -71,6 +81,9 @@ public class MainActivity extends Activity {
     private boolean pendingDeepAfterAccess = false;
     private String pendingToolAfterAccess = null;
     private ToolResult activeToolResult = null;
+    private ExoPlayer activePlayer = null;
+    private PdfRenderer activePdfRenderer = null;
+    private ParcelFileDescriptor activePdfFd = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -104,6 +117,8 @@ public class MainActivity extends Activity {
     }
 
     private void showHome() {
+        releasePreviewResources();
+        purgeExpiredTrashAsync();
         getWindow().getDecorView().setTag("home");
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -183,6 +198,11 @@ public class MainActivity extends Activity {
         residualTool.setOnClickListener(v -> openTool("residual"));
         row2.addView(residualTool, weight());
         content.addView(row2, matchWrap());
+
+        content.addView(space(12));
+        LinearLayout trashTool = toolCard("♻", "STS Trash", "Restore • 7 days", Color.rgb(72,120,210));
+        trashTool.setOnClickListener(v -> showTrashScreen());
+        content.addView(trashTool, matchWrap());
 
         content.addView(space(22));
         TextView scan = actionButton("SMART SCAN", PURPLE);
@@ -761,10 +781,14 @@ public class MainActivity extends Activity {
         }
         if (isImageFile(file)) {
             showPhotoPreview(file);
-        } else if (isVideoFile(file)) {
-            showVideoPreview(file);
+        } else if (isVideoFile(file) || isAudioFile(file.getName().toLowerCase(Locale.ROOT))) {
+            showMediaPreview(file, isVideoFile(file));
+        } else if (isPdfFile(file)) {
+            showPdfPreview(file);
+        } else if (isTextFile(file)) {
+            showTextPreview(file);
         } else {
-            openExternalFile(file);
+            showInternalFilePage(file);
         }
     }
 
@@ -809,8 +833,10 @@ public class MainActivity extends Activity {
         fadeIn(root);
     }
 
-    private void showVideoPreview(File file) {
+    private void showMediaPreview(File file, boolean videoMode) {
+        releasePreviewResources();
         getWindow().getDecorView().setTag("preview");
+
         LinearLayout root = column();
         root.setBackgroundColor(Color.rgb(12,14,20));
         root.setPadding(dp(12), dp(12), dp(12), dp(14));
@@ -827,31 +853,260 @@ public class MainActivity extends Activity {
         root.addView(top, matchWrap());
         root.addView(space(10));
 
-        VideoView video = new VideoView(this);
-        video.setBackgroundColor(Color.BLACK);
-        MediaController controls = new MediaController(this);
-        controls.setAnchorView(video);
-        video.setMediaController(controls);
-        video.setVideoURI(Uri.fromFile(file));
-        video.setOnPreparedListener(mp -> {
-            mp.setLooping(false);
-            video.start();
-        });
-        root.addView(video, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        TextView status = centerText(videoMode ? "Loading video…" : "Loading audio…", 12, Color.LTGRAY, false);
+
+        if (!videoMode) {
+            LinearLayout audioHero = column();
+            audioHero.setGravity(Gravity.CENTER);
+            audioHero.setBackgroundColor(Color.rgb(22,25,34));
+            audioHero.addView(centerText("♪", 64, TEAL, true));
+            audioHero.addView(space(8));
+            audioHero.addView(centerText(file.getName(), 15, Color.WHITE, true));
+            root.addView(audioHero, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(210)));
+            root.addView(space(8));
+        }
+
+        PlayerView playerView = new PlayerView(this);
+        playerView.setUseController(true);
+        playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING);
+        playerView.setBackgroundColor(Color.BLACK);
+        int playerHeight = videoMode ? 0 : dp(110);
+        LinearLayout.LayoutParams playerLp = videoMode
+                ? new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+                : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, playerHeight);
+        root.addView(playerView, playerLp);
 
         root.addView(space(8));
-        TextView info = centerText("PLAY / PAUSE / SEEK  •  " + format(file.length()), 11, Color.LTGRAY, false);
-        root.addView(info, matchWrap());
+        root.addView(status, matchWrap());
         root.addView(space(8));
 
-        TextView external = actionButton("OPEN IN VIDEO PLAYER", PURPLE);
+        TextView external = actionButton("OPEN IN OTHER PLAYER", PURPLE);
         touch(external);
         external.setOnClickListener(v -> openExternalFile(file));
         root.addView(external, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
         setContentView(root);
         fadeIn(root);
-        video.requestFocus();
+
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", file);
+            activePlayer = new ExoPlayer.Builder(this).build();
+            playerView.setPlayer(activePlayer);
+            activePlayer.addListener(new Player.Listener() {
+                @Override public void onPlaybackStateChanged(int state) {
+                    if (state == Player.STATE_READY) {
+                        status.setText((videoMode ? "VIDEO READY" : "AUDIO READY") + " • " + format(file.length()));
+                    } else if (state == Player.STATE_BUFFERING) {
+                        status.setText("Buffering… • " + format(file.length()));
+                    } else if (state == Player.STATE_ENDED) {
+                        status.setText("Playback complete • " + format(file.length()));
+                    }
+                }
+                @Override public void onPlayerError(PlaybackException error) {
+                    status.setText("इस codec को device/player decode नहीं कर पा रहा • Other Player try करें");
+                }
+            });
+            activePlayer.setMediaItem(MediaItem.fromUri(uri));
+            activePlayer.prepare();
+            activePlayer.setPlayWhenReady(true);
+        } catch (Exception e) {
+            status.setText("Player start नहीं हुआ • Other Player try करें");
+        }
+    }
+
+    private boolean isPdfFile(File f) {
+        return f.getName().toLowerCase(Locale.ROOT).endsWith(".pdf");
+    }
+
+    private boolean isTextFile(File f) {
+        String n = f.getName().toLowerCase(Locale.ROOT);
+        return n.endsWith(".txt") || n.endsWith(".log") || n.endsWith(".json") ||
+                n.endsWith(".xml") || n.endsWith(".csv") || n.endsWith(".md") ||
+                n.endsWith(".html") || n.endsWith(".htm") || n.endsWith(".ini") ||
+                n.endsWith(".conf") || n.endsWith(".properties");
+    }
+
+    private void showPdfPreview(File file) {
+        releasePreviewResources();
+        getWindow().getDecorView().setTag("preview");
+
+        LinearLayout root = column();
+        root.setBackgroundColor(Color.rgb(20,22,30));
+        root.setPadding(dp(10), dp(10), dp(10), dp(12));
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = pill("‹ BACK", Color.WHITE, Color.rgb(40,43,54));
+        touch(back);
+        back.setOnClickListener(v -> returnFromPreview());
+        top.addView(back);
+        TextView name = text(file.getName(), 14, Color.WHITE, true);
+        name.setPadding(dp(12),0,0,0);
+        top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(top, matchWrap());
+        root.addView(space(8));
+
+        ImageView pageView = new ImageView(this);
+        pageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        pageView.setBackgroundColor(Color.WHITE);
+        root.addView(pageView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        TextView pageInfo = centerText("Opening PDF…", 12, Color.LTGRAY, false);
+        root.addView(space(7));
+        root.addView(pageInfo, matchWrap());
+
+        LinearLayout controls = row();
+        TextView prev = pill("‹ PREV", Color.WHITE, Color.rgb(55,58,72));
+        TextView next = pill("NEXT ›", Color.WHITE, Color.rgb(55,58,72));
+        controls.addView(prev, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        controls.addView(spaceH(8));
+        controls.addView(next, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(space(7));
+        root.addView(controls, matchWrap());
+
+        setContentView(root);
+        fadeIn(root);
+
+        try {
+            activePdfFd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+            activePdfRenderer = new PdfRenderer(activePdfFd);
+            final int[] index = {0};
+            renderPdfPage(activePdfRenderer, index[0], pageView, pageInfo);
+
+            prev.setOnClickListener(v -> {
+                if (activePdfRenderer != null && index[0] > 0) {
+                    index[0]--;
+                    renderPdfPage(activePdfRenderer, index[0], pageView, pageInfo);
+                }
+            });
+            next.setOnClickListener(v -> {
+                if (activePdfRenderer != null && index[0] < activePdfRenderer.getPageCount()-1) {
+                    index[0]++;
+                    renderPdfPage(activePdfRenderer, index[0], pageView, pageInfo);
+                }
+            });
+            touch(prev); touch(next);
+        } catch (Exception e) {
+            pageInfo.setText("PDF preview नहीं खुला • file damaged/encrypted हो सकती है");
+        }
+    }
+
+    private void renderPdfPage(PdfRenderer renderer, int index, ImageView target, TextView info) {
+        PdfRenderer.Page page = null;
+        try {
+            page = renderer.openPage(index);
+            int width = Math.max(900, getResources().getDisplayMetrics().widthPixels - dp(20));
+            float ratio = (float) page.getHeight() / Math.max(1, page.getWidth());
+            int height = Math.max(1, Math.round(width * ratio));
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            bitmap.eraseColor(Color.WHITE);
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            target.setImageBitmap(bitmap);
+            info.setText("Page " + (index+1) + " / " + renderer.getPageCount());
+        } catch (Exception e) {
+            info.setText("Page render failed");
+        } finally {
+            if (page != null) page.close();
+        }
+    }
+
+    private void showTextPreview(File file) {
+        releasePreviewResources();
+        getWindow().getDecorView().setTag("preview");
+        LinearLayout root = column();
+        root.setBackgroundColor(Color.rgb(245,246,251));
+        root.setPadding(dp(12), dp(12), dp(12), dp(12));
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = pill("‹ BACK", PURPLE, Color.WHITE);
+        touch(back);
+        back.setOnClickListener(v -> returnFromPreview());
+        top.addView(back);
+        TextView name = text(file.getName(), 14, INK, true);
+        name.setPadding(dp(12),0,0,0);
+        top.addView(name, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(top, matchWrap());
+        root.addView(space(8));
+
+        ScrollView textScroll = new ScrollView(this);
+        TextView body = text(readTextPreview(file), 12, INK, false);
+        body.setTypeface(Typeface.MONOSPACE);
+        body.setTextIsSelectable(true);
+        body.setPadding(dp(10),dp(10),dp(10),dp(10));
+        textScroll.addView(body);
+        root.addView(textScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        root.addView(space(8));
+        TextView other = actionButton("OPEN IN OTHER APP", PURPLE);
+        touch(other);
+        other.setOnClickListener(v -> openExternalFile(file));
+        root.addView(other, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+
+        setContentView(root);
+        fadeIn(root);
+    }
+
+    private String readTextPreview(File file) {
+        StringBuilder out = new StringBuilder();
+        int chars = 0;
+        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = br.readLine()) != null && chars < 500000) {
+                out.append(line).append('\n');
+                chars += line.length()+1;
+            }
+            if (br.readLine() != null) out.append("\n… preview limited to first 500 KB of text");
+        } catch (Exception e) {
+            return "इस file को text के रूप में read नहीं किया जा सका।";
+        }
+        return out.toString();
+    }
+
+    private void showInternalFilePage(File file) {
+        releasePreviewResources();
+        getWindow().getDecorView().setTag("preview");
+        AppFileInfo info = describeAppFile(file);
+
+        LinearLayout root = column();
+        root.setBackgroundColor(BG);
+        root.setPadding(dp(18), dp(20), dp(18), dp(24));
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView back = pill("‹ BACK", PURPLE, Color.WHITE);
+        touch(back);
+        back.setOnClickListener(v -> returnFromPreview());
+        top.addView(back);
+        root.addView(top, matchWrap());
+        root.addView(space(20));
+
+        root.addView(text(file.getName(), 22, INK, true));
+        root.addView(space(10));
+        root.addView(text("App: " + info.appName, 14, INK, true));
+        root.addView(space(6));
+        root.addView(text("Type: " + info.category, 13, MUTED, false));
+        root.addView(space(6));
+        root.addView(text("Size: " + format(file.length()), 13, MUTED, false));
+        root.addView(space(10));
+        root.addView(pill(info.status, info.statusColor, info.statusBg));
+        root.addView(space(14));
+        root.addView(text(info.explanation, 13, MUTED, false));
+        root.addView(space(14));
+        TextView path = text(file.getAbsolutePath(), 11, MUTED, false);
+        path.setTextIsSelectable(true);
+        root.addView(path);
+
+        Space flex = new Space(this);
+        root.addView(flex, new LinearLayout.LayoutParams(1,0,1f));
+
+        TextView other = actionButton("OPEN IN COMPATIBLE APP", PURPLE);
+        touch(other);
+        other.setOnClickListener(v -> openExternalFile(file));
+        root.addView(other, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        setContentView(root);
+        fadeIn(root);
     }
 
     private void openExternalFile(File file) {
@@ -871,8 +1126,31 @@ public class MainActivity extends Activity {
 
     private void returnFromPreview() {
         haptic();
+        releasePreviewResources();
         if (activeToolResult != null) showToolResult(activeToolResult);
         else showHome();
+    }
+
+    private void releasePreviewResources() {
+        try {
+            if (activePlayer != null) {
+                activePlayer.stop();
+                activePlayer.release();
+                activePlayer = null;
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (activePdfRenderer != null) {
+                activePdfRenderer.close();
+                activePdfRenderer = null;
+            }
+        } catch (Exception ignored) {}
+        try {
+            if (activePdfFd != null) {
+                activePdfFd.close();
+                activePdfFd = null;
+            }
+        } catch (Exception ignored) {}
     }
 
     private void confirmDeleteToolItem(ToolResult result, ToolItem item) {
@@ -882,23 +1160,22 @@ public class MainActivity extends Activity {
             return;
         }
         String warning = "duplicates".equals(result.type)
-                ? "यह duplicate copy delete होगी। इसी hash group की एक original copy scan में keep की गई है।"
-                : "यह file permanently delete होगी। Large Files review-only हैं, इसलिए delete आपकी confirmation के बाद ही होगा।";
+                ? "यह duplicate copy STS Trash में जाएगी। Original/first copy रखी जाएगी।"
+                : "यह file पहले STS Trash में जाएगी। 7 दिन तक Restore कर सकते हैं; उसके बाद auto-delete होगी।";
         new AlertDialog.Builder(this)
-                .setTitle("Delete " + item.file.getName() + "?")
+                .setTitle("Move to STS Trash?")
                 .setMessage(warning + "\n\nApp: " + info.appName + "\nType: " + info.category +
                         "\nStatus: " + info.status + "\n\n" + item.file.getAbsolutePath() + "\n" + format(item.bytes))
                 .setNegativeButton("Cancel", null)
-                .setPositiveButton("DELETE", (d,w) -> {
-                    boolean ok = false;
-                    try { ok = item.file.delete(); } catch (Exception ignored) {}
+                .setPositiveButton("MOVE TO TRASH", (d,w) -> {
+                    boolean ok = moveToTrash(item.file);
                     if (ok) {
                         result.items.remove(item);
                         result.totalBytes = Math.max(0, result.totalBytes - item.bytes);
                         showToolResult(result);
                     } else {
-                        new AlertDialog.Builder(this).setTitle("Delete failed")
-                                .setMessage("Android ने इस item को delete करने की permission नहीं दी।")
+                        new AlertDialog.Builder(this).setTitle("Move failed")
+                                .setMessage("इस file को STS Trash में move नहीं किया जा सका।")
                                 .setPositiveButton("OK", null).show();
                     }
                 }).show();
@@ -944,11 +1221,12 @@ public class MainActivity extends Activity {
             int count = 0;
             int failed = 0;
             List<ToolItem> copy = new ArrayList<>(result.items);
+            boolean useTrash = "duplicates".equals(result.type);
             for (ToolItem item : copy) {
                 try {
                     if (!item.directory && describeAppFile(item.file).protectedFile) continue;
                     long n = item.bytes;
-                    boolean ok = item.file.delete();
+                    boolean ok = useTrash ? moveToTrash(item.file) : item.file.delete();
                     if (ok) { freed += n; count++; }
                     else failed++;
                 } catch (Exception e) { failed++; }
@@ -956,8 +1234,232 @@ public class MainActivity extends Activity {
             long f = freed;
             int c = count;
             int x = failed;
-            runOnUiThread(() -> showCleanDone(f, c, x));
+            runOnUiThread(() -> {
+                if (useTrash) showTrashMovedDone(f, c, x);
+                else showCleanDone(f, c, x);
+            });
         }, "sts-tool-clean").start();
+    }
+
+    private File trashDir() {
+        File base = getExternalFilesDir(null);
+        File dir = new File(base != null ? base : getFilesDir(), "STS_Trash");
+        if (!dir.exists()) dir.mkdirs();
+        return dir;
+    }
+
+    private boolean moveToTrash(File source) {
+        if (source == null || !source.exists()) return false;
+        File dir = trashDir();
+        long now = System.currentTimeMillis();
+        String safeName = source.getName().replaceAll("[\\\\/:*?\"<>|]", "_");
+        File target = new File(dir, now + "_" + safeName);
+        File meta = new File(dir, target.getName() + ".stsmeta");
+
+        boolean moved = source.renameTo(target);
+        if (!moved && source.isFile()) {
+            moved = copyFile(source, target);
+            if (moved && !source.delete()) {
+                target.delete();
+                moved = false;
+            }
+        }
+        if (!moved) return false;
+
+        try (FileWriter w = new FileWriter(meta)) {
+            w.write(source.getAbsolutePath());
+            w.write("\n");
+            w.write(Long.toString(now));
+            w.write("\n");
+        } catch (Exception e) {
+            // file remains safely in STS Trash even if metadata write fails
+        }
+        return true;
+    }
+
+    private boolean copyFile(File source, File target) {
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(target)) {
+            byte[] buf = new byte[256*1024];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf,0,n);
+            out.flush();
+            return true;
+        } catch (Exception e) {
+            try { target.delete(); } catch (Exception ignored) {}
+            return false;
+        }
+    }
+
+    private String[] readTrashMeta(File meta) {
+        String[] out = new String[]{"", "0"};
+        try (BufferedReader br = new BufferedReader(new FileReader(meta))) {
+            String p = br.readLine();
+            String t = br.readLine();
+            if (p != null) out[0] = p;
+            if (t != null) out[1] = t;
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    private void showTrashScreen() {
+        releasePreviewResources();
+        getWindow().getDecorView().setTag("trash");
+        purgeExpiredTrash();
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16),dp(24),dp(16),dp(28));
+
+        root.addView(text("STS Trash",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("Deleted user files 7 दिन तक restore की जा सकती हैं",13,MUTED,false));
+        root.addView(space(18));
+
+        File dir = trashDir();
+        File[] metas = dir.listFiles((d,n) -> n.endsWith(".stsmeta"));
+        if (metas == null) metas = new File[0];
+        java.util.Arrays.sort(metas, (a,b) -> Long.compare(b.lastModified(), a.lastModified()));
+
+        if (metas.length == 0) {
+            LinearLayout empty = card();
+            empty.setPadding(dp(18),dp(26),dp(18),dp(26));
+            empty.addView(centerText("♻",44,TEAL,true));
+            empty.addView(space(8));
+            empty.addView(centerText("STS Trash खाली है",16,INK,true));
+            root.addView(empty,matchWrap());
+        } else {
+            for (File meta : metas) {
+                String baseName = meta.getName().substring(0,meta.getName().length()-8);
+                File data = new File(dir,baseName);
+                if (!data.exists()) { meta.delete(); continue; }
+                String[] md = readTrashMeta(meta);
+                String original = md[0];
+
+                LinearLayout c = card();
+                c.setPadding(dp(15),dp(13),dp(15),dp(13));
+                c.addView(text(data.getName().replaceFirst("^\\d+_",""),14,INK,true));
+                c.addView(space(4));
+                c.addView(text(format(data.length()),12,PURPLE,true));
+                c.addView(space(4));
+                c.addView(text("Original: " + shortPath(original),10,MUTED,false));
+
+                LinearLayout actions = row();
+                actions.setPadding(0,dp(10),0,0);
+                TextView restore = pill("RESTORE",Color.rgb(18,145,123),Color.rgb(228,252,248));
+                TextView del = pill("DELETE FOREVER",ROSE,Color.rgb(255,238,243));
+                touch(restore); touch(del);
+                restore.setOnClickListener(v -> {
+                    if (restoreTrashItem(data,meta,original)) showTrashScreen();
+                    else new AlertDialog.Builder(this).setTitle("Restore failed")
+                            .setMessage("Original location पर file restore नहीं हो सकी।")
+                            .setPositiveButton("OK",null).show();
+                });
+                del.setOnClickListener(v -> new AlertDialog.Builder(this)
+                        .setTitle("Delete permanently?")
+                        .setMessage("यह file STS Trash से भी हमेशा के लिए delete हो जाएगी।")
+                        .setNegativeButton("Cancel",null)
+                        .setPositiveButton("DELETE",(d,w) -> {
+                            data.delete(); meta.delete(); showTrashScreen();
+                        }).show());
+                actions.addView(restore,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+                actions.addView(spaceH(8));
+                actions.addView(del,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+                c.addView(actions,matchWrap());
+                root.addView(c,matchWrap());
+                root.addView(space(9));
+            }
+        }
+
+        root.addView(space(14));
+        TextView back = actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        fadeIn(root);
+    }
+
+    private boolean restoreTrashItem(File data, File meta, String originalPath) {
+        if (originalPath == null || originalPath.length() == 0) return false;
+        File target = new File(originalPath);
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists()) parent.mkdirs();
+        if (target.exists()) {
+            target = new File(parent, "restored_" + System.currentTimeMillis() + "_" + target.getName());
+        }
+
+        boolean ok = data.renameTo(target);
+        if (!ok && data.isFile()) {
+            ok = copyFile(data,target);
+            if (ok && !data.delete()) {
+                target.delete();
+                ok = false;
+            }
+        }
+        if (ok) meta.delete();
+        return ok;
+    }
+
+    private void purgeExpiredTrashAsync() {
+        new Thread(this::purgeExpiredTrash,"sts-trash-expiry").start();
+    }
+
+    private void purgeExpiredTrash() {
+        File dir = trashDir();
+        File[] metas = dir.listFiles((d,n) -> n.endsWith(".stsmeta"));
+        if (metas == null) return;
+        long cutoff = System.currentTimeMillis() - 7L*24*60*60*1000;
+        for (File meta : metas) {
+            String[] md = readTrashMeta(meta);
+            long when = 0;
+            try { when = Long.parseLong(md[1]); } catch (Exception ignored) {}
+            if (when > 0 && when < cutoff) {
+                String baseName = meta.getName().substring(0,meta.getName().length()-8);
+                new File(dir,baseName).delete();
+                meta.delete();
+            }
+        }
+    }
+
+    private void showTrashMovedDone(long bytes, int count, int failed) {
+        getWindow().getDecorView().setTag("done");
+        LinearLayout root = column();
+        root.setPadding(dp(24),dp(48),dp(24),dp(36));
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setBackgroundColor(BG);
+
+        TextView icon = text("♻",62,TEAL,true);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(circle(Color.rgb(225,250,246)));
+        root.addView(icon,new LinearLayout.LayoutParams(dp(130),dp(130)));
+        root.addView(space(24));
+        root.addView(centerText("Moved to STS Trash",28,INK,true));
+        root.addView(space(10));
+        root.addView(centerText(format(bytes),30,PURPLE,true));
+        root.addView(centerText(count + " files protected for 7 days",14,MUTED,false));
+        root.addView(space(8));
+        root.addView(centerText(failed + " failed",12,MUTED,false));
+
+        Space flex = new Space(this);
+        root.addView(flex,new LinearLayout.LayoutParams(1,0,1f));
+        TextView trash = actionButton("OPEN STS TRASH",PURPLE);
+        touch(trash);
+        trash.setOnClickListener(v -> showTrashScreen());
+        root.addView(trash,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(58)));
+        root.addView(space(8));
+        TextView done = actionButton("DONE",Color.WHITE);
+        done.setTextColor(PURPLE);
+        touch(done);
+        done.setOnClickListener(v -> showHome());
+        root.addView(done,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+        setContentView(root);
+        popIn(icon);
     }
 
     private void scanTool(String type, ToolCallback cb) {
