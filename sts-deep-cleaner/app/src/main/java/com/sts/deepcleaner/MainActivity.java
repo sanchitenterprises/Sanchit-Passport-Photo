@@ -95,6 +95,7 @@ public class MainActivity extends Activity {
     private boolean pendingUsageAnalyzer = false;
 
     private final Map<String,Integer> scrollPositions = new HashMap<>();
+    private final Map<String,Integer> sortModes = new HashMap<>();
     private ScrollView currentScrollView = null;
     private String currentScrollKey = null;
     private SystemStorageResult activeSystemResult = null;
@@ -287,6 +288,213 @@ public class MainActivity extends Activity {
         bindScrollPosition("home", scroll);
         fadeIn(root);
         popIn(logo);
+    }
+
+    private static final String[] FILE_SORT_OPTIONS = new String[]{
+            "Size • Large → Small",
+            "Size • Small → Large",
+            "Name • A → Z",
+            "Name • Z → A",
+            "Date • Newest first",
+            "Date • Oldest first",
+            "Type / App",
+            "Safety / Status"
+    };
+
+    private static final String[] APP_SORT_OPTIONS = new String[]{
+            "Total size • Large → Small",
+            "Total size • Small → Large",
+            "Name • A → Z",
+            "Name • Z → A",
+            "Private data • Large → Small",
+            "Cache • Large → Small",
+            "App code • Large → Small",
+            "User apps / System apps"
+    };
+
+    private static final String[] TRASH_SORT_OPTIONS = new String[]{
+            "Deleted • Newest first",
+            "Deleted • Oldest first",
+            "Size • Large → Small",
+            "Size • Small → Large",
+            "Name • A → Z",
+            "Name • Z → A"
+    };
+
+    private interface SortRefresh {
+        void refresh();
+    }
+
+    private int sortMode(String key, int defaultMode) {
+        if (sortModes.containsKey(key)) return sortModes.get(key);
+        int mode = getSharedPreferences("sts_sort_modes", MODE_PRIVATE)
+                .getInt(key, defaultMode);
+        sortModes.put(key, mode);
+        return mode;
+    }
+
+    private void setSortMode(String key, int mode) {
+        sortModes.put(key, mode);
+        getSharedPreferences("sts_sort_modes", MODE_PRIVATE)
+                .edit().putInt(key, mode).apply();
+    }
+
+    private void resetSavedScroll(String key) {
+        scrollPositions.put(key, 0);
+        getSharedPreferences("sts_scroll_positions", MODE_PRIVATE)
+                .edit().putInt(key, 0).apply();
+    }
+
+    private TextView sortControl(String key, String[] options, int defaultMode, SortRefresh refresh) {
+        int current = Math.max(0, Math.min(options.length - 1, sortMode(key, defaultMode)));
+        TextView v = pill("SORT BY  •  " + options[current], PURPLE, Color.rgb(239,236,255));
+        touch(v);
+        v.setOnClickListener(x -> showSortChooser(key, options, defaultMode, refresh));
+        return v;
+    }
+
+    private void showSortChooser(String key, String[] options, int defaultMode, SortRefresh refresh) {
+        int current = Math.max(0, Math.min(options.length - 1, sortMode(key, defaultMode)));
+        new AlertDialog.Builder(this)
+                .setTitle("Sort By")
+                .setSingleChoiceItems(options, current, (dialog, which) -> {
+                    setSortMode(key, which);
+                    dialog.dismiss();
+                    refresh.refresh();
+                })
+                .setNegativeButton("CANCEL", null)
+                .show();
+    }
+
+    private void sortToolItems(ToolResult result, int mode) {
+        Comparator<ToolItem> cmp;
+        switch (mode) {
+            case 1:
+                cmp = Comparator.comparingLong(a -> a.bytes);
+                break;
+            case 2:
+                cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT));
+                break;
+            case 3:
+                cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName());
+                break;
+            case 4:
+                cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified());
+                break;
+            case 5:
+                cmp = Comparator.comparingLong(a -> a.file.lastModified());
+                break;
+            case 6:
+                cmp = Comparator.comparing((ToolItem a) -> {
+                    if (a.directory) return "Folder";
+                    AppFileInfo info = describeAppFile(a.file);
+                    return info.category + " • " + info.appName;
+                }, String.CASE_INSENSITIVE_ORDER).thenComparing(a -> a.file.getName(), String.CASE_INSENSITIVE_ORDER);
+                break;
+            case 7:
+                cmp = Comparator.comparing((ToolItem a) -> {
+                    if (a.directory) return "Folder";
+                    return describeAppFile(a.file).status;
+                }, String.CASE_INSENSITIVE_ORDER).thenComparing((ToolItem a) -> -a.bytes);
+                break;
+            case 0:
+            default:
+                cmp = (a,b) -> Long.compare(b.bytes, a.bytes);
+                break;
+        }
+        Collections.sort(result.items, cmp);
+    }
+
+    private void sortScanItems(List<ScanItem> items, int mode) {
+        Comparator<ScanItem> cmp;
+        switch (mode) {
+            case 1: cmp = Comparator.comparingLong(a -> a.bytes); break;
+            case 2: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
+            case 3: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
+            case 4: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
+            case 5: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
+            case 6:
+                cmp = Comparator.comparing((ScanItem a) -> fileTypeFromExtension(a.file.getName().toLowerCase(Locale.ROOT)),
+                        String.CASE_INSENSITIVE_ORDER).thenComparing(a -> a.file.getName(), String.CASE_INSENSITIVE_ORDER);
+                break;
+            case 7:
+                cmp = Comparator.comparing((ScanItem a) -> a.safe ? "SAFE" : "REVIEW")
+                        .thenComparing((ScanItem a) -> -a.bytes);
+                break;
+            case 0:
+            default: cmp = (a,b) -> Long.compare(b.bytes, a.bytes); break;
+        }
+        Collections.sort(items, cmp);
+    }
+
+    private void sortAppVisibleFiles(AppDetailResult result, int mode) {
+        Comparator<AppVisibleFile> cmp;
+        switch (mode) {
+            case 1: cmp = Comparator.comparingLong(a -> a.bytes); break;
+            case 2: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
+            case 3: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
+            case 4: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
+            case 5: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
+            case 6:
+                cmp = Comparator.comparing((AppVisibleFile a) -> a.info.category + " • " + a.info.appName,
+                        String.CASE_INSENSITIVE_ORDER).thenComparing(a -> a.file.getName(), String.CASE_INSENSITIVE_ORDER);
+                break;
+            case 7:
+                cmp = Comparator.comparing((AppVisibleFile a) -> a.info.status, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing((AppVisibleFile a) -> -a.bytes);
+                break;
+            case 0:
+            default: cmp = (a,b) -> Long.compare(b.bytes, a.bytes); break;
+        }
+        Collections.sort(result.files, cmp);
+    }
+
+    private void sortApps(SystemStorageResult result, int mode) {
+        Comparator<AppStorageEntry> cmp;
+        switch (mode) {
+            case 1: cmp = Comparator.comparingLong(a -> a.totalBytes); break;
+            case 2: cmp = Comparator.comparing(a -> a.appName.toLowerCase(Locale.ROOT)); break;
+            case 3: cmp = (a,b) -> b.appName.compareToIgnoreCase(a.appName); break;
+            case 4: cmp = (a,b) -> Long.compare(b.dataBytes, a.dataBytes); break;
+            case 5: cmp = (a,b) -> Long.compare(b.cacheBytes, a.cacheBytes); break;
+            case 6: cmp = (a,b) -> Long.compare(b.codeBytes, a.codeBytes); break;
+            case 7:
+                cmp = Comparator.comparing((AppStorageEntry a) -> a.systemApp)
+                        .thenComparing((AppStorageEntry a) -> -a.totalBytes);
+                break;
+            case 0:
+            default: cmp = (a,b) -> Long.compare(b.totalBytes, a.totalBytes); break;
+        }
+        Collections.sort(result.apps, cmp);
+    }
+
+    private File trashDataFile(File meta) {
+        String baseName = meta.getName().substring(0, meta.getName().length() - 8);
+        return new File(trashDir(), baseName);
+    }
+
+    private String trashDisplayName(File meta) {
+        File data = trashDataFile(meta);
+        return data.getName().replaceFirst("^\\d+_", "");
+    }
+
+    private long trashDeletedTime(File meta) {
+        String[] md = readTrashMeta(meta);
+        try { return Long.parseLong(md[1]); } catch (Exception e) { return meta.lastModified(); }
+    }
+
+    private void sortTrashMeta(File[] metas, int mode) {
+        Comparator<File> cmp;
+        switch (mode) {
+            case 1: cmp = Comparator.comparingLong(this::trashDeletedTime); break;
+            case 2: cmp = (a,b) -> Long.compare(trashDataFile(b).length(), trashDataFile(a).length()); break;
+            case 3: cmp = Comparator.comparingLong(a -> trashDataFile(a).length()); break;
+            case 4: cmp = Comparator.comparing(this::trashDisplayName, String.CASE_INSENSITIVE_ORDER); break;
+            case 5: cmp = (a,b) -> trashDisplayName(b).compareToIgnoreCase(trashDisplayName(a)); break;
+            case 0:
+            default: cmp = (a,b) -> Long.compare(trashDeletedTime(b), trashDeletedTime(a)); break;
+        }
+        java.util.Arrays.sort(metas, cmp);
     }
 
     private void rememberCurrentScroll() {
