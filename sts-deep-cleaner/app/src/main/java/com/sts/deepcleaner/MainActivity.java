@@ -7,12 +7,15 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
@@ -365,34 +368,79 @@ public class MainActivity extends Activity {
             int limit = Math.min(80, result.items.size());
             for (int i=0; i<limit; i++) {
                 ToolItem item = result.items.get(i);
+                AppFileInfo info = item.directory ? AppFileInfo.folder() : describeAppFile(item.file);
+
                 LinearLayout itemCard = card();
                 itemCard.setPadding(dp(15), dp(13), dp(15), dp(13));
+
+                if (!item.directory) {
+                    LinearLayout appRow = row();
+                    appRow.setGravity(Gravity.CENTER_VERTICAL);
+                    Drawable appIcon = appIcon(info.packageName);
+                    if (appIcon != null) {
+                        ImageView iv = new ImageView(this);
+                        iv.setImageDrawable(appIcon);
+                        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                        appRow.addView(iv, new LinearLayout.LayoutParams(dp(34), dp(34)));
+                        appRow.addView(spaceH(9));
+                    }
+                    LinearLayout appText = column();
+                    appText.addView(text(info.appName, 13, INK, true));
+                    if (info.packageName != null && info.packageName.length() > 0) {
+                        appText.addView(text(info.packageName, 9, MUTED, false));
+                    }
+                    appRow.addView(appText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                    itemCard.addView(appRow, matchWrap());
+                    itemCard.addView(space(9));
+                }
+
                 itemCard.addView(text(item.file.getName().length() == 0 ? item.file.getAbsolutePath() : item.file.getName(), 14, INK, true));
                 itemCard.addView(space(3));
                 itemCard.addView(text(item.directory ? "Folder" : format(item.bytes), 12, accent, true));
-                itemCard.addView(space(3));
-                itemCard.addView(text(item.note, 11, MUTED, false));
-                itemCard.addView(space(3));
+
+                if (!item.directory) {
+                    itemCard.addView(space(7));
+                    itemCard.addView(text(info.category, 12, INK, true));
+                    itemCard.addView(space(5));
+                    TextView risk = pill(info.status, info.statusColor, info.statusBg);
+                    itemCard.addView(risk);
+                    itemCard.addView(space(6));
+                    itemCard.addView(text(info.explanation, 11, MUTED, false));
+                } else {
+                    itemCard.addView(space(4));
+                    itemCard.addView(text(item.note, 11, MUTED, false));
+                }
+
+                itemCard.addView(space(6));
                 itemCard.addView(text(shortPath(item.file.getAbsolutePath()), 10, MUTED, false));
 
                 if (!item.directory) {
                     itemCard.addView(space(10));
                     LinearLayout actions = row();
 
-                    String openLabel = isImageFile(item.file) ? "PREVIEW"
+                    String openLabel = info.detailsOnly ? "DETAILS"
+                            : isImageFile(item.file) ? "PREVIEW"
                             : isVideoFile(item.file) ? "PLAY"
                             : "OPEN";
                     TextView open = pill(openLabel, PURPLE, Color.rgb(239,236,255));
                     touch(open);
-                    open.setOnClickListener(v -> openFoundFile(item.file));
+                    open.setOnClickListener(v -> {
+                        if (info.detailsOnly) showFileDetails(item.file, info);
+                        else openFoundFile(item.file);
+                    });
                     actions.addView(open, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
                     if ("large".equals(result.type) || "duplicates".equals(result.type)) {
                         actions.addView(spaceH(8));
-                        TextView del = pill("DELETE", ROSE, Color.rgb(255,238,243));
-                        touch(del);
-                        del.setOnClickListener(v -> confirmDeleteToolItem(result, item));
-                        actions.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                        if (info.protectedFile) {
+                            TextView keep = pill("KEEP / PROTECTED", Color.rgb(18,145,123), Color.rgb(228,252,248));
+                            actions.addView(keep, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                        } else {
+                            TextView del = pill("DELETE", ROSE, Color.rgb(255,238,243));
+                            touch(del);
+                            del.setOnClickListener(v -> confirmDeleteToolItem(result, item));
+                            actions.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+                        }
                     }
                     itemCard.addView(actions, matchWrap());
                 }
@@ -433,6 +481,248 @@ public class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
         fadeIn(root);
+    }
+
+    private AppFileInfo describeAppFile(File file) {
+        String path = file.getAbsolutePath();
+        String lowPath = path.toLowerCase(Locale.ROOT);
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        String pkg = packageFromPath(path);
+        String appName = resolveAppName(pkg, path);
+
+        if (isWhatsAppChatBackup(name, lowPath)) {
+            boolean dated = containsDate(name);
+            boolean current = name.startsWith("msgstore.db.") || name.equals("msgstore.db");
+            if (current && !dated) {
+                return new AppFileInfo(appName, pkg, "Encrypted Chat Backup",
+                        "CURRENT BACKUP • KEEP",
+                        Color.rgb(18,145,123), Color.rgb(228,252,248),
+                        "यह current/latest local chat backup है। Delete करने से restore option प्रभावित हो सकता है।",
+                        true, true);
+            }
+            return new AppFileInfo(appName, pkg, "Encrypted Chat Backup",
+                    "OLD BACKUP • REVIEW",
+                    AMBER, Color.rgb(255,247,230),
+                    "यह dated/older local chat backup है। Delete करने पर उस तारीख की local restore history खत्म हो सकती है।",
+                    false, true);
+        }
+
+        if (isDatabaseLike(name, lowPath)) {
+            boolean old = containsDate(name) || name.endsWith(".bak") || name.endsWith(".old") ||
+                    lowPath.contains("/backup/") || lowPath.contains("/backups/");
+            if (old) {
+                return new AppFileInfo(appName, pkg, "App Database / Backup",
+                        "BACKUP • REVIEW",
+                        AMBER, Color.rgb(255,247,230),
+                        "यह app database/backup file है। Delete करने से पुराने restore/history data पर असर पड़ सकता है।",
+                        false, true);
+            }
+            return new AppFileInfo(appName, pkg, "Active App Database",
+                    "IMPORTANT • KEEP",
+                    Color.rgb(18,145,123), Color.rgb(228,252,248),
+                    "यह app का active/current database लग रहा है। इसे delete करने से app data या history खराब हो सकती है।",
+                    true, true);
+        }
+
+        if (isImageFile(file)) {
+            return new AppFileInfo(appName, pkg, "Photo / Image",
+                    "PERSONAL FILE • REVIEW", BLUE, Color.rgb(235,245,255),
+                    "यह image file है। Preview करके ही delete करें।", false, false);
+        }
+
+        if (isVideoFile(file)) {
+            return new AppFileInfo(appName, pkg, "Video",
+                    "PERSONAL FILE • REVIEW", BLUE, Color.rgb(235,245,255),
+                    "यह video file है। Play/preview करके ही delete करें।", false, false);
+        }
+
+        if (isAudioFile(name)) {
+            return new AppFileInfo(appName, pkg, "Audio / Voice / Music",
+                    "USER MEDIA • REVIEW", BLUE, Color.rgb(235,245,255),
+                    "यह audio/media file है। Delete करने से saved audio या voice content हट सकता है।", false, false);
+        }
+
+        if (lowPath.contains("/cache/") || lowPath.contains("/.cache/") ||
+                name.endsWith(".tmp") || name.endsWith(".temp")) {
+            return new AppFileInfo(appName, pkg, "App Cache / Temporary File",
+                    "CACHE • USUALLY SAFE", Color.rgb(18,145,123), Color.rgb(228,252,248),
+                    "यह cache/temporary data है। App जरूरत पड़ने पर इसे दोबारा बना सकता है।", false, false);
+        }
+
+        if (name.endsWith(".apk")) {
+            return new AppFileInfo(appName, pkg, "Android Installer (APK)",
+                    "INSTALLER • REVIEW", AMBER, Color.rgb(255,247,230),
+                    "यह APK installer file है। Installed app पर असर नहीं पड़ता, लेकिन future reinstall के लिए काम आ सकती है।",
+                    false, false);
+        }
+
+        if (isArchiveFile(name)) {
+            return new AppFileInfo(appName, pkg, "Archive / Compressed File",
+                    "ARCHIVE • REVIEW", AMBER, Color.rgb(255,247,230),
+                    "यह ZIP/RAR/7Z जैसी archive file है। Open करके contents पहचानने के बाद delete करें।",
+                    false, false);
+        }
+
+        if (lowPath.contains("/offline/") || lowPath.contains("/downloads/") ||
+                lowPath.contains("/download/")) {
+            return new AppFileInfo(appName, pkg, "Downloaded / Offline Content",
+                    "OFFLINE DATA • REVIEW", AMBER, Color.rgb(255,247,230),
+                    "यह downloaded/offline content हो सकता है। Delete करने पर app में offline access खत्म हो सकता है।",
+                    false, false);
+        }
+
+        if (lowPath.contains("/backup/") || lowPath.contains("/backups/") ||
+                name.contains("backup") || name.endsWith(".bak")) {
+            return new AppFileInfo(appName, pkg, "App Backup",
+                    "BACKUP • REVIEW", AMBER, Color.rgb(255,247,230),
+                    "यह backup file लग रही है। Delete करने पर restore history कम हो सकती है।",
+                    false, true);
+        }
+
+        return new AppFileInfo(appName, pkg, fileTypeFromExtension(name),
+                "UNKNOWN / APP FILE • REVIEW", PURPLE, Color.rgb(239,236,255),
+                "यह app/storage file है। Type पूरी तरह सुरक्षित रूप से पहचान नहीं पाया, इसलिए delete से पहले OPEN/DETAILS से जांचें।",
+                false, false);
+    }
+
+    private String packageFromPath(String path) {
+        String normalized = path.replace('\\','/');
+        String[] roots = {"/Android/media/", "/Android/data/", "/Android/obb/"};
+        for (String root : roots) {
+            int i = normalized.indexOf(root);
+            if (i < 0) {
+                i = normalized.toLowerCase(Locale.ROOT).indexOf(root.toLowerCase(Locale.ROOT));
+            }
+            if (i >= 0) {
+                String tail = normalized.substring(i + root.length());
+                int slash = tail.indexOf('/');
+                String pkg = slash >= 0 ? tail.substring(0, slash) : tail;
+                if (pkg.contains(".") && pkg.length() > 3) return pkg;
+            }
+        }
+        return null;
+    }
+
+    private String resolveAppName(String pkg, String path) {
+        if (pkg != null) {
+            String known = knownPackageName(pkg);
+            if (known != null) return known;
+            try {
+                PackageManager pm = getPackageManager();
+                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                CharSequence label = pm.getApplicationLabel(ai);
+                if (label != null && label.length() > 0) return label.toString();
+            } catch (Exception ignored) {}
+        }
+
+        String low = path.toLowerCase(Locale.ROOT);
+        if (low.contains("whatsapp business")) return "WhatsApp Business";
+        if (low.contains("/whatsapp/")) return "WhatsApp";
+        if (low.contains("/telegram/")) return "Telegram";
+        if (low.contains("/instagram/")) return "Instagram";
+        if (low.contains("/facebook/")) return "Facebook";
+        if (low.contains("/messenger/")) return "Messenger";
+        if (low.contains("/snapchat/")) return "Snapchat";
+        if (low.contains("/signal/")) return "Signal";
+        if (low.contains("/youtube music/")) return "YouTube Music";
+        if (low.contains("/youtube/")) return "YouTube";
+        if (low.contains("/spotify/")) return "Spotify";
+        if (pkg != null) return pkg;
+        return "Device / App Storage";
+    }
+
+    private String knownPackageName(String pkg) {
+        String p = pkg.toLowerCase(Locale.ROOT);
+        if (p.equals("com.whatsapp")) return "WhatsApp";
+        if (p.equals("com.whatsapp.w4b")) return "WhatsApp Business";
+        if (p.equals("org.telegram.messenger")) return "Telegram";
+        if (p.equals("org.thunderdog.challegram")) return "Telegram X";
+        if (p.equals("com.instagram.android")) return "Instagram";
+        if (p.equals("com.facebook.katana")) return "Facebook";
+        if (p.equals("com.facebook.orca")) return "Messenger";
+        if (p.equals("com.android.chrome")) return "Google Chrome";
+        if (p.equals("com.google.android.youtube")) return "YouTube";
+        if (p.equals("com.google.android.apps.youtube.music")) return "YouTube Music";
+        if (p.equals("com.google.android.apps.maps")) return "Google Maps";
+        if (p.equals("com.snapchat.android")) return "Snapchat";
+        if (p.equals("org.thoughtcrime.securesms")) return "Signal";
+        if (p.equals("com.twitter.android") || p.equals("com.x.android")) return "X / Twitter";
+        if (p.equals("com.zhiliaoapp.musically")) return "TikTok";
+        if (p.equals("com.lemon.lvoverseas")) return "CapCut";
+        if (p.equals("org.videolan.vlc")) return "VLC";
+        if (p.startsWith("com.mxtech.videoplayer")) return "MX Player";
+        if (p.equals("com.microsoft.teams")) return "Microsoft Teams";
+        if (p.equals("us.zoom.videomeetings")) return "Zoom";
+        if (p.equals("com.google.android.gm")) return "Gmail";
+        if (p.equals("com.google.android.apps.docs")) return "Google Drive";
+        if (p.equals("com.microsoft.skydrive")) return "OneDrive";
+        if (p.equals("com.dropbox.android")) return "Dropbox";
+        if (p.equals("com.spotify.music")) return "Spotify";
+        if (p.equals("com.netflix.mediaclient")) return "Netflix";
+        if (p.equals("com.amazon.avod.thirdpartyclient")) return "Prime Video";
+        return null;
+    }
+
+    private Drawable appIcon(String pkg) {
+        if (pkg == null) return null;
+        try {
+            return getPackageManager().getApplicationIcon(pkg);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isWhatsAppChatBackup(String name, String lowPath) {
+        return lowPath.contains("whatsapp") && name.startsWith("msgstore") &&
+                (name.contains(".crypt") || name.endsWith(".db"));
+    }
+
+    private boolean isDatabaseLike(String name, String lowPath) {
+        return name.endsWith(".db") || name.endsWith(".sqlite") || name.endsWith(".sqlite3") ||
+                name.matches(".*\\.crypt\\d+$") || lowPath.contains("/databases/");
+    }
+
+    private boolean containsDate(String name) {
+        return name.matches(".*(19|20)\\d{2}[-_.](0[1-9]|1[0-2])[-_.]([0-2]\\d|3[01]).*");
+    }
+
+    private boolean isAudioFile(String name) {
+        return name.endsWith(".mp3") || name.endsWith(".m4a") || name.endsWith(".aac") ||
+                name.endsWith(".wav") || name.endsWith(".ogg") || name.endsWith(".opus") ||
+                name.endsWith(".flac") || name.endsWith(".amr");
+    }
+
+    private boolean isArchiveFile(String name) {
+        return name.endsWith(".zip") || name.endsWith(".rar") || name.endsWith(".7z") ||
+                name.endsWith(".tar") || name.endsWith(".gz") || name.endsWith(".tgz");
+    }
+
+    private String fileTypeFromExtension(String name) {
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0 && dot < name.length()-1) {
+            return name.substring(dot+1).toUpperCase(Locale.ROOT) + " File";
+        }
+        return "App / Storage File";
+    }
+
+    private void showFileDetails(File file, AppFileInfo info) {
+        StringBuilder b = new StringBuilder();
+        b.append("App: ").append(info.appName).append("\n");
+        if (info.packageName != null) b.append("Package: ").append(info.packageName).append("\n");
+        b.append("Type: ").append(info.category).append("\n");
+        b.append("Status: ").append(info.status).append("\n");
+        b.append("Size: ").append(format(file.length())).append("\n\n");
+        b.append(info.explanation).append("\n\n");
+        b.append(file.getAbsolutePath());
+
+        new AlertDialog.Builder(this)
+                .setTitle(file.getName())
+                .setMessage(b.toString())
+                .setNegativeButton("CLOSE", null)
+                .setPositiveButton(info.protectedFile ? "KEEP" : "OPEN", (d,w) -> {
+                    if (!info.protectedFile) openExternalFile(file);
+                })
+                .show();
     }
 
     private boolean isImageFile(File f) {
@@ -586,12 +876,18 @@ public class MainActivity extends Activity {
     }
 
     private void confirmDeleteToolItem(ToolResult result, ToolItem item) {
+        AppFileInfo info = describeAppFile(item.file);
+        if (info.protectedFile) {
+            showFileDetails(item.file, info);
+            return;
+        }
         String warning = "duplicates".equals(result.type)
                 ? "यह duplicate copy delete होगी। इसी hash group की एक original copy scan में keep की गई है।"
                 : "यह file permanently delete होगी। Large Files review-only हैं, इसलिए delete आपकी confirmation के बाद ही होगा।";
         new AlertDialog.Builder(this)
                 .setTitle("Delete " + item.file.getName() + "?")
-                .setMessage(warning + "\n\n" + item.file.getAbsolutePath() + "\n" + format(item.bytes))
+                .setMessage(warning + "\n\nApp: " + info.appName + "\nType: " + info.category +
+                        "\nStatus: " + info.status + "\n\n" + item.file.getAbsolutePath() + "\n" + format(item.bytes))
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("DELETE", (d,w) -> {
                     boolean ok = false;
@@ -611,15 +907,32 @@ public class MainActivity extends Activity {
     private void confirmCleanToolResult(ToolResult result) {
         String msg;
         if ("duplicates".equals(result.type)) {
-            msg = "हर duplicate hash group की पहली/original copy रखी जाएगी। केवल duplicate copies delete होंगी।";
+            msg = "हर duplicate hash group की पहली/original copy रखी जाएगी। Current databases/backups जैसे protected app files auto-delete नहीं होंगे।";
         } else if ("residual".equals(result.type)) {
-            msg = "केवल scan में मिले empty folders और non-personal old residual/temp candidates delete होंगे।";
+            msg = "केवल scan में मिले safe empty folders और non-personal old residual/temp candidates delete होंगे। Important app data protected रहेगा।";
         } else {
-            msg = "केवल safe junk/cache candidates delete होंगे। Personal photos, videos और documents नहीं हटेंगे।";
+            msg = "केवल safe junk/cache candidates delete होंगे। Personal media और important app database/backup protected रहेंगे।";
         }
+
+        int deletable = 0;
+        long bytes = 0;
+        for (ToolItem item : result.items) {
+            if (item.directory || !describeAppFile(item.file).protectedFile) {
+                deletable++;
+                bytes += item.bytes;
+            }
+        }
+        if (deletable == 0) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Nothing safe to clean")
+                    .setMessage("इस list में अभी सभी items protected/important हैं।")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle("Confirm Clean")
-                .setMessage(msg + "\n\nSelected: " + result.items.size() + " items • " + format(result.totalBytes))
+                .setMessage(msg + "\n\nSelected: " + deletable + " items • " + format(bytes))
                 .setNegativeButton("Cancel", null)
                 .setPositiveButton("CLEAN", (d,w) -> cleanToolResult(result))
                 .show();
@@ -633,6 +946,7 @@ public class MainActivity extends Activity {
             List<ToolItem> copy = new ArrayList<>(result.items);
             for (ToolItem item : copy) {
                 try {
+                    if (!item.directory && describeAppFile(item.file).protectedFile) continue;
                     long n = item.bytes;
                     boolean ok = item.file.delete();
                     if (ok) { freed += n; count++; }
@@ -658,6 +972,9 @@ public class MainActivity extends Activity {
                 hashDuplicateCandidates(bySize, out, cb);
             } else {
                 walkTool(root, seen, 0, out, cb);
+            }
+            if ("large".equals(type)) {
+                Collections.sort(out.items, (a,b) -> Long.compare(b.bytes, a.bytes));
             }
             cb.live("Scan complete", out.scannedFiles, out.scannedBytes, out.items.size(), out.totalBytes);
             cb.done(out);
@@ -1394,6 +1711,37 @@ public class MainActivity extends Activity {
         String[] u={"B","KB","MB","GB","TB"}; double v=bytes; int i=0;
         while(v>=1024 && i<u.length-1){v/=1024;i++;}
         return String.format(Locale.US, v>=100?"%.0f %s":v>=10?"%.1f %s":"%.2f %s",v,u[i]);
+    }
+
+    private static final class AppFileInfo {
+        final String appName;
+        final String packageName;
+        final String category;
+        final String status;
+        final int statusColor;
+        final int statusBg;
+        final String explanation;
+        final boolean protectedFile;
+        final boolean detailsOnly;
+
+        AppFileInfo(String appName, String packageName, String category, String status,
+                    int statusColor, int statusBg, String explanation,
+                    boolean protectedFile, boolean detailsOnly) {
+            this.appName = appName;
+            this.packageName = packageName;
+            this.category = category;
+            this.status = status;
+            this.statusColor = statusColor;
+            this.statusBg = statusBg;
+            this.explanation = explanation;
+            this.protectedFile = protectedFile;
+            this.detailsOnly = detailsOnly;
+        }
+
+        static AppFileInfo folder() {
+            return new AppFileInfo("Device Storage", null, "Folder", "FOLDER",
+                    PURPLE, Color.rgb(239,236,255), "Storage folder", false, true);
+        }
     }
 
     private static final class ToolItem {
