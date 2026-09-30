@@ -215,36 +215,50 @@ public class MainActivity extends Activity {
         loadStorageAnalytics(st[1], breakdown, analyticsRows, analyticsStatus);
 
         content.addView(section("Storage Tools"));
+
         LinearLayout row1 = row();
-        LinearLayout junkTool = toolCard("✦", "Junk & Cache", "Temporary files", TEAL);
+        LinearLayout junkTool = toolGridCard("✦", "Junk", "Cache", TEAL);
         junkTool.setOnClickListener(v -> openTool("junk"));
         row1.addView(junkTool, weight());
-        row1.addView(spaceH(12));
-        LinearLayout largeTool = toolCard("⬢", "Large Files", "Review first", AMBER);
+        row1.addView(spaceH(8));
+        LinearLayout largeTool = toolGridCard("⬢", "Large", "Files", AMBER);
         largeTool.setOnClickListener(v -> openTool("large"));
         row1.addView(largeTool, weight());
+        row1.addView(spaceH(8));
+        LinearLayout duplicateTool = toolGridCard("⧉", "Duplicate", "Hash", BLUE);
+        duplicateTool.setOnClickListener(v -> openTool("duplicates"));
+        row1.addView(duplicateTool, weight());
         content.addView(row1, matchWrap());
 
-        content.addView(space(12));
+        content.addView(space(8));
         LinearLayout row2 = row();
-        LinearLayout duplicateTool = toolCard("⧉", "Duplicates", "Hash finder", BLUE);
-        duplicateTool.setOnClickListener(v -> openTool("duplicates"));
-        row2.addView(duplicateTool, weight());
-        row2.addView(spaceH(12));
-        LinearLayout residualTool = toolCard("⌁", "Residual", "App leftovers", ROSE);
+        LinearLayout residualTool = toolGridCard("⌁", "Residual", "Leftovers", ROSE);
         residualTool.setOnClickListener(v -> openTool("residual"));
         row2.addView(residualTool, weight());
+        row2.addView(spaceH(8));
+        LinearLayout trashTool = toolGridCard("♻", "STS Trash", "7 days", Color.rgb(72,120,210));
+        trashTool.setOnClickListener(v -> showTrashScreen());
+        row2.addView(trashTool, weight());
+        row2.addView(spaceH(8));
+        LinearLayout systemTool = toolGridCard("◉", "Apps", "& System", Color.rgb(82,88,110));
+        systemTool.setOnClickListener(v -> openSystemAnalyzer());
+        row2.addView(systemTool, weight());
         content.addView(row2, matchWrap());
 
-        content.addView(space(12));
-        LinearLayout trashTool = toolCard("♻", "STS Trash", "Restore • 7 days", Color.rgb(72,120,210));
-        trashTool.setOnClickListener(v -> showTrashScreen());
-        content.addView(trashTool, matchWrap());
-
-        content.addView(space(12));
-        LinearLayout systemTool = toolCard("◉", "Apps & System", "Find hidden storage", Color.rgb(82,88,110));
-        systemTool.setOnClickListener(v -> openSystemAnalyzer());
-        content.addView(systemTool, matchWrap());
+        content.addView(space(8));
+        LinearLayout row3 = row();
+        LinearLayout mediaTool = toolGridCard("▶", "Media", "Photo/Video", Color.rgb(170,82,205));
+        mediaTool.setOnClickListener(v -> openTool("media"));
+        row3.addView(mediaTool, weight());
+        row3.addView(spaceH(8));
+        LinearLayout downloadsTool = toolGridCard("⇩", "Downloads", "Offline", Color.rgb(244,139,45));
+        downloadsTool.setOnClickListener(v -> openTool("downloads"));
+        row3.addView(downloadsTool, weight());
+        row3.addView(spaceH(8));
+        LinearLayout backupsTool = toolGridCard("⛃", "Backups", "Database", Color.rgb(139,93,210));
+        backupsTool.setOnClickListener(v -> openTool("backups"));
+        row3.addView(backupsTool, weight());
+        content.addView(row3, matchWrap());
 
         content.addView(space(22));
         TextView scan = actionButton("SMART SCAN", PURPLE);
@@ -482,6 +496,7 @@ public class MainActivity extends Activity {
         root.addView(space(20));
 
         ScanRing ring = new ScanRing(this);
+        ring.setLiveCount(0, "apps");
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(190), dp(190));
         rlp.gravity = Gravity.CENTER_HORIZONTAL;
         root.addView(ring, rlp);
@@ -489,10 +504,16 @@ public class MainActivity extends Activity {
         root.addView(space(18));
         LinearLayout live = card();
         live.setPadding(dp(18),dp(16),dp(18),dp(16));
+        TextView processed = text("Apps scanned: 0", 14, INK, true);
+        TextView current = text("Preparing…", 12, MUTED, false);
         TextView appCode = text("App code: …", 14, Color.rgb(82,88,110), true);
         TextView appData = text("App data: …", 14, PURPLE, true);
         TextView appCache = text("App cache: …", 14, TEAL, true);
-        TextView sys = text("Android/System: …", 14, MUTED, true);
+        TextView sys = text("Android/System: calculating…", 14, MUTED, true);
+        live.addView(processed);
+        live.addView(space(5));
+        live.addView(current);
+        live.addView(space(10));
         live.addView(appCode);
         live.addView(space(6));
         live.addView(appData);
@@ -514,9 +535,24 @@ public class MainActivity extends Activity {
         fadeIn(root);
 
         new Thread(() -> {
-            SystemStorageResult result = collectSystemStorageResult();
+            SystemStorageResult result = collectSystemStorageResult(new SystemAnalyzeCallback() {
+                @Override public void live(int done, int total, String appName,
+                                           long code, long data, long cache) {
+                    runOnUiThread(() -> {
+                        ring.setLiveCount(done, "apps");
+                        processed.setText("Apps scanned: " + done + " / " + total);
+                        current.setText(appName == null ? "Reading Android storage statistics…" :
+                                "Scanning: " + appName);
+                        appCode.setText("App code: " + format(code));
+                        appData.setText("App data: " + format(data));
+                        appCache.setText("App cache: " + format(cache));
+                    });
+                }
+            });
             runOnUiThread(() -> {
                 ring.setDone();
+                processed.setText("Apps scanned: " + result.apps.size());
+                current.setText("Analysis complete");
                 appCode.setText("App code: " + format(result.appCodeBytes));
                 appData.setText("App data: " + format(result.appDataBytes));
                 appCache.setText("App cache: " + format(result.appCacheBytes));
@@ -526,7 +562,7 @@ public class MainActivity extends Activity {
         }, "sts-system-analyzer").start();
     }
 
-    private SystemStorageResult collectSystemStorageResult() {
+    private SystemStorageResult collectSystemStorageResult(SystemAnalyzeCallback cb) {
         SystemStorageResult result = new SystemStorageResult();
         long[] st = storage();
         result.usedBytes = st[1];
@@ -539,37 +575,44 @@ public class MainActivity extends Activity {
             result.appCacheBytes = Math.max(0L,userStats.getCacheBytes());
         } catch (Exception ignored) {}
 
-        long visible = cachedAnalytics != null ? cachedAnalytics.visibleBytes : 0L;
-        if (visible <= 0) {
-            StorageAnalytics temp = new StorageAnalytics();
-            scanAnalytics(Environment.getExternalStorageDirectory(), new HashSet<>(), 0, temp);
-            visible = temp.visibleBytes;
-        }
-        result.visibleBytes = visible;
-        result.systemReservedBytes = Math.max(0L, result.usedBytes - visible -
-                result.appCodeBytes - result.appDataBytes - result.appCacheBytes);
-
         try {
             PackageManager pm = getPackageManager();
             StorageStatsManager mgr = (StorageStatsManager) getSystemService(STORAGE_STATS_SERVICE);
             List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            int total = apps.size();
+            int done = 0;
+            cb.live(0,total,"Starting app scan",result.appCodeBytes,result.appDataBytes,result.appCacheBytes);
+
             for (ApplicationInfo ai : apps) {
+                done++;
+                String labelText = ai.packageName;
                 try {
+                    CharSequence label = pm.getApplicationLabel(ai);
+                    if (label != null && label.length() > 0) labelText = label.toString();
+
                     StorageStats ss = mgr.queryStatsForPackage(StorageManager.UUID_DEFAULT,
                             ai.packageName, Process.myUserHandle());
                     long code = Math.max(0L,ss.getAppBytes());
                     long data = Math.max(0L,ss.getDataBytes());
                     long cache = Math.max(0L,ss.getCacheBytes());
-                    long total = code + data + cache;
-                    if (total <= 0) continue;
-                    CharSequence label = pm.getApplicationLabel(ai);
-                    boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-                    result.apps.add(new AppStorageEntry(
-                            label == null ? ai.packageName : label.toString(),
-                            ai.packageName, code, data, cache, total, system));
+                    long totalBytes = code + data + cache;
+                    if (totalBytes > 0) {
+                        boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+                        result.apps.add(new AppStorageEntry(
+                                labelText, ai.packageName, code, data, cache, totalBytes, system));
+                    }
                 } catch (Exception ignored) {}
+
+                if (done == total || done % 2 == 0) {
+                    cb.live(done,total,labelText,result.appCodeBytes,result.appDataBytes,result.appCacheBytes);
+                }
             }
         } catch (Exception ignored) {}
+
+        long visible = cachedAnalytics != null ? cachedAnalytics.visibleBytes : 0L;
+        result.visibleBytes = visible;
+        result.systemReservedBytes = Math.max(0L, result.usedBytes - visible -
+                result.appCodeBytes - result.appDataBytes - result.appCacheBytes);
 
         Collections.sort(result.apps, (a,b) -> Long.compare(b.totalBytes,a.totalBytes));
         return result;
@@ -856,10 +899,26 @@ public class MainActivity extends Activity {
                 "यह installed app/program files हैं। इन्हें manually delete नहीं करना चाहिए। Space चाहिए तो app uninstall करें।",
                 false,result.entry.packageName));
         root.addView(space(9));
-        root.addView(appStoragePart("Private app data",result.entry.dataBytes,
+        root.addView(appStoragePart("Private app data (total)",result.entry.dataBytes,
                 "IMPORTANT • REVIEW",AMBER,Color.rgb(255,247,230),
-                "Login, database, settings, offline content और app की private files इसमें हो सकती हैं। CLEAR STORAGE करने से app reset/login logout हो सकता है।",
+                "यह कुल private data है। नीचे Login/Session अलग समझाया गया है; Android normal mode में उसके exact bytes अलग नहीं देता। CLEAR STORAGE से पूरा app reset हो सकता है।",
                 true,result.entry.packageName));
+        root.addView(space(9));
+
+        LinearLayout loginPart = card();
+        loginPart.setPadding(dp(16),dp(14),dp(16),dp(14));
+        LinearLayout loginTop = row();
+        loginTop.setGravity(Gravity.CENTER_VERTICAL);
+        loginTop.addView(text("Login / Session",14,INK,true),
+                new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        loginTop.addView(text("Included in Data",12,ROSE,true));
+        loginPart.addView(loginTop,matchWrap());
+        loginPart.addView(space(7));
+        loginPart.addView(pill("PROTECTED • DO NOT CLEAR ALONE",ROSE,Color.rgb(255,238,243)));
+        loginPart.addView(space(7));
+        loginPart.addView(text("Account token, login session, account identity और authentication state private data में शामिल हो सकते हैं। Exact size Android अलग expose नहीं करता। Clear Storage करने पर login/logout और saved account state हट सकती है।",11,MUTED,false));
+        root.addView(loginPart,matchWrap());
+
         root.addView(space(9));
         root.addView(appStoragePart("App cache",result.entry.cacheBytes,
                 "SAFE TO CLEAN",Color.rgb(18,145,123),Color.rgb(228,252,248),
@@ -1108,14 +1167,22 @@ public class MainActivity extends Activity {
         if ("junk".equals(type)) return "Junk & Cache";
         if ("large".equals(type)) return "Large Files";
         if ("duplicates".equals(type)) return "Duplicates";
-        return "Residual";
+        if ("residual".equals(type)) return "Residual";
+        if ("media".equals(type)) return "Media";
+        if ("downloads".equals(type)) return "Downloads & Offline";
+        if ("backups".equals(type)) return "Backups & Databases";
+        return "Storage Tool";
     }
 
     private int toolAccent(String type) {
         if ("junk".equals(type)) return TEAL;
         if ("large".equals(type)) return AMBER;
         if ("duplicates".equals(type)) return BLUE;
-        return ROSE;
+        if ("residual".equals(type)) return ROSE;
+        if ("media".equals(type)) return Color.rgb(170,82,205);
+        if ("downloads".equals(type)) return Color.rgb(244,139,45);
+        if ("backups".equals(type)) return Color.rgb(139,93,210);
+        return PURPLE;
     }
 
     private void requestToolAccess(String type) {
@@ -1145,7 +1212,10 @@ public class MainActivity extends Activity {
         String explain = "junk".equals(type) ? "Safe temporary/cache files scan हो रहे हैं"
                 : "large".equals(type) ? "100 MB से बड़ी files scan हो रही हैं"
                 : "duplicates".equals(type) ? "Same-size files का SHA-256 hash compare हो रहा है"
-                : "Empty folders और old residual/temp candidates scan हो रहे हैं";
+                : "residual".equals(type) ? "Empty folders और old residual/temp candidates scan हो रहे हैं"
+                : "media".equals(type) ? "Photos, videos और audio files scan हो रही हैं"
+                : "downloads".equals(type) ? "Downloads और offline content scan हो रहा है"
+                : "Backups और database files scan हो रही हैं";
         root.addView(title);
         root.addView(space(5));
         root.addView(text(explain, 13, MUTED, false));
@@ -1236,7 +1306,9 @@ public class MainActivity extends Activity {
         summary.addView(space(5));
         summary.addView(text(format(result.totalBytes), 26, accent, true));
         summary.addView(space(4));
-        summary.addView(text("large".equals(result.type) ? "total size listed" : "potential reclaim", 12, MUTED, false));
+        boolean reviewOnlyTool = "large".equals(result.type) || "media".equals(result.type) ||
+                "downloads".equals(result.type) || "backups".equals(result.type);
+        summary.addView(text(reviewOnlyTool ? "total size listed" : "potential reclaim", 12, MUTED, false));
         root.addView(summary, matchWrap());
 
         if (result.items.isEmpty()) {
@@ -1314,7 +1386,9 @@ public class MainActivity extends Activity {
                     });
                     actions.addView(open, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-                    if ("large".equals(result.type) || "duplicates".equals(result.type)) {
+                    if ("large".equals(result.type) || "duplicates".equals(result.type) ||
+                            "media".equals(result.type) || "downloads".equals(result.type) ||
+                            "backups".equals(result.type)) {
                         actions.addView(spaceH(8));
                         if (info.protectedFile) {
                             TextView keep = pill("KEEP / PROTECTED", Color.rgb(18,145,123), Color.rgb(228,252,248));
@@ -2398,6 +2472,18 @@ public class MainActivity extends Activity {
                      name.endsWith(".dmp") || name.endsWith(".crash") ||
                      parent.contains("/temp") || parent.contains("/tmp") || parent.contains("/logs"));
             if (residual) addToolItem(out, new ToolItem(f, len, "Old non-personal residual candidate", false));
+        } else if ("media".equals(out.type)) {
+            if (isImageFile(f) || isVideoFile(f) || isAudioFile(name))
+                addToolItem(out, new ToolItem(f, len, "Media file • preview/play before delete", false));
+        } else if ("downloads".equals(out.type)) {
+            if (parent.contains("/download") || parent.contains("/downloads") ||
+                    parent.contains("/offline"))
+                addToolItem(out, new ToolItem(f, len, "Downloaded/offline file • review before delete", false));
+        } else if ("backups".equals(out.type)) {
+            if (isWhatsAppChatBackup(name, low) || isDatabaseLike(name, low) ||
+                    low.contains("/backup/") || low.contains("/backups/") ||
+                    name.contains("backup") || name.endsWith(".bak"))
+                addToolItem(out, new ToolItem(f, len, "Backup/database • current backups may be protected", false));
         }
 
         emitToolLive(out, cb, path, false);
@@ -2940,6 +3026,28 @@ public class MainActivity extends Activity {
                 n.endsWith(".xlsx") || n.endsWith(".ppt") || n.endsWith(".pptx") || n.endsWith(".zip");
     }
 
+    private LinearLayout toolGridCard(String icon, String title, String sub, int accent) {
+        LinearLayout c = card();
+        c.setGravity(Gravity.CENTER_HORIZONTAL);
+        c.setPadding(dp(7), dp(12), dp(7), dp(11));
+        TextView ic = text(icon, 21, accent, true);
+        ic.setGravity(Gravity.CENTER);
+        c.addView(ic);
+        c.addView(space(7));
+        TextView t = text(title, 12, INK, true);
+        t.setGravity(Gravity.CENTER);
+        t.setMaxLines(2);
+        c.addView(t, matchWrap());
+        c.addView(space(3));
+        TextView st = text(sub, 9, MUTED, false);
+        st.setGravity(Gravity.CENTER);
+        st.setMaxLines(1);
+        c.addView(st, matchWrap());
+        c.setMinimumHeight(dp(116));
+        touch(c);
+        return c;
+    }
+
     private LinearLayout toolCard(String icon, String title, String sub, int accent) {
         LinearLayout c = card();
         c.setPadding(dp(15), dp(16), dp(15), dp(16));
@@ -3254,6 +3362,10 @@ public class MainActivity extends Activity {
         int count(AppVisibleCategory c){return counts[c.ordinal()];}
     }
 
+    private interface SystemAnalyzeCallback {
+        void live(int done,int total,String appName,long code,long data,long cache);
+    }
+
     private static final class AppStorageEntry {
         final String appName;
         final String packageName;
@@ -3382,10 +3494,16 @@ public class MainActivity extends Activity {
 
     private static final class ScanRing extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private int liveFiles;
+        private int liveCount;
+        private String liveUnit = "files";
         private boolean done;
         ScanRing(Context c){super(c);}
-        void setLiveFiles(int n){liveFiles=Math.max(0,n);invalidate();}
+        void setLiveFiles(int n){setLiveCount(n,"files");}
+        void setLiveCount(int n,String unit){
+            liveCount=Math.max(0,n);
+            liveUnit=(unit==null||unit.length()==0)?"items":unit;
+            invalidate();
+        }
         void setDone(){done=true;invalidate();}
         @Override protected void onDraw(Canvas c){
             float cx=getWidth()/2f,cy=getHeight()/2f,r=Math.min(cx,cy)-26;
@@ -3418,7 +3536,7 @@ public class MainActivity extends Activity {
             p.setTypeface(Typeface.DEFAULT);
             p.setTextSize(13*getResources().getDisplayMetrics().scaledDensity);
             p.setColor(MUTED);
-            c.drawText(liveFiles+" files",cx,cy+29,p);
+            c.drawText(liveCount+" "+liveUnit,cx,cy+29,p);
         }
     }
 
