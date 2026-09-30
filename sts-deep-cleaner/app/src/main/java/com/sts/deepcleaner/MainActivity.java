@@ -3594,29 +3594,43 @@ public class MainActivity extends Activity {
             }
 
             long free=Math.max(0L,total-used);
-            float sd=getResources().getDisplayMetrics().scaledDensity;
+            float d=getResources().getDisplayMetrics().density;
+
             p.setStyle(Paint.Style.FILL);
             p.setTextAlign(Paint.Align.CENTER);
-            p.setColor(Color.WHITE);
+
+            // USED section
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(9*d);
+            p.setColor(Color.argb(205,255,255,255));
+            c.drawText("USED",cx,cy-47*d,p);
 
             p.setTypeface(Typeface.DEFAULT_BOLD);
-            p.setTextSize(23*sd);
-            c.drawText(formatStatic(used),cx,cy-17,p);
+            p.setTextSize(27*d);
+            p.setColor(Color.WHITE);
+            c.drawText(formatStatic(used),cx,cy-19*d,p);
 
-            p.setTypeface(Typeface.DEFAULT);
-            p.setTextSize(10*sd);
-            p.setColor(Color.argb(220,255,255,255));
-            c.drawText("USED",cx,cy+2,p);
+            // subtle divider keeps USED and FREE visually separate
+            p.setStrokeWidth(1*d);
+            p.setColor(Color.argb(90,255,255,255));
+            c.drawRect(cx-34*d,cy-2*d,cx+34*d,cy-1*d,p);
+
+            // FREE section
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(9*d);
+            p.setColor(Color.argb(205,255,255,255));
+            c.drawText("FREE",cx,cy+16*d,p);
 
             p.setTypeface(Typeface.DEFAULT_BOLD);
-            p.setTextSize(15*sd);
+            p.setTextSize(19*d);
             p.setColor(Color.WHITE);
-            c.drawText(formatStatic(free)+" FREE",cx,cy+27,p);
+            c.drawText(formatStatic(free),cx,cy+40*d,p);
 
+            // total stays small and clearly separated at the bottom
             p.setTypeface(Typeface.DEFAULT);
-            p.setTextSize(9*sd);
-            p.setColor(Color.argb(210,255,255,255));
-            c.drawText("TOTAL "+formatStatic(total),cx,cy+45,p);
+            p.setTextSize(9*d);
+            p.setColor(Color.argb(195,255,255,255));
+            c.drawText("TOTAL  "+formatStatic(total),cx,cy+61*d,p);
         }
     }
 
