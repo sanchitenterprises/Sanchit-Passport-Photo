@@ -84,6 +84,8 @@ public class MainActivity extends Activity {
     private ExoPlayer activePlayer = null;
     private PdfRenderer activePdfRenderer = null;
     private ParcelFileDescriptor activePdfFd = null;
+    private StorageAnalytics cachedAnalytics = null;
+    private long cachedAnalyticsAt = 0L;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -177,6 +179,24 @@ public class MainActivity extends Activity {
         modeCard.addView(mode);
         content.addView(modeCard, matchWrap());
 
+        content.addView(section("Storage by File Type"));
+        LinearLayout analyticsCard = card();
+        analyticsCard.setPadding(dp(16), dp(16), dp(16), dp(16));
+
+        TextView analyticsStatus = text("Analyzing visible files…", 12, MUTED, false);
+        analyticsCard.addView(analyticsStatus);
+
+        analyticsCard.addView(space(12));
+        StorageBreakdownView breakdown = new StorageBreakdownView(this);
+        analyticsCard.addView(breakdown, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28)));
+
+        analyticsCard.addView(space(12));
+        LinearLayout analyticsRows = column();
+        analyticsCard.addView(analyticsRows, matchWrap());
+        content.addView(analyticsCard, matchWrap());
+
+        loadStorageAnalytics(st[1], breakdown, analyticsRows, analyticsStatus);
+
         content.addView(section("Storage Tools"));
         LinearLayout row1 = row();
         LinearLayout junkTool = toolCard("✦", "Junk & Cache", "Temporary files", TEAL);
@@ -228,6 +248,140 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         fadeIn(root);
         popIn(logo);
+    }
+
+    private void loadStorageAnalytics(long usedStorage, StorageBreakdownView chart,
+                                      LinearLayout rows, TextView status) {
+        if (cachedAnalytics != null && System.currentTimeMillis() - cachedAnalyticsAt < 5L*60*1000) {
+            renderStorageAnalytics(cachedAnalytics, usedStorage, chart, rows, status);
+            return;
+        }
+
+        new Thread(() -> {
+            StorageAnalytics a = new StorageAnalytics();
+            File root = Environment.getExternalStorageDirectory();
+            Set<String> seen = new HashSet<>();
+            scanAnalytics(root, seen, 0, a);
+
+            long protectedBytes = Math.max(0L, usedStorage - a.visibleBytes);
+            a.add(StorageCategory.PROTECTED, protectedBytes, protectedBytes > 0 ? 1 : 0);
+            a.usedStorage = usedStorage;
+
+            cachedAnalytics = a;
+            cachedAnalyticsAt = System.currentTimeMillis();
+
+            runOnUiThread(() -> {
+                Object tag = getWindow().getDecorView().getTag();
+                if ("home".equals(tag)) renderStorageAnalytics(a, usedStorage, chart, rows, status);
+            });
+        }, "sts-storage-analytics").start();
+    }
+
+    private void scanAnalytics(File f, Set<String> seen, int depth, StorageAnalytics a) {
+        if (f == null || depth > 24) return;
+        String path;
+        try { path = f.getCanonicalPath(); } catch (Exception e) { path = f.getAbsolutePath(); }
+        if (!seen.add(path)) return;
+
+        String lowPath = path.toLowerCase(Locale.ROOT);
+        if (lowPath.contains("/android/data/") || lowPath.contains("/android/obb/") ||
+                lowPath.contains("/sts_trash/")) {
+            return;
+        }
+
+        if (f.isDirectory()) {
+            File[] children;
+            try { children = f.listFiles(); } catch (Exception e) { children = null; }
+            if (children == null) return;
+            for (File x : children) scanAnalytics(x, seen, depth+1, a);
+            return;
+        }
+
+        long len = Math.max(0L, f.length());
+        a.visibleBytes += len;
+        a.visibleFiles++;
+
+        StorageCategory cat = categoryForAnalytics(f, lowPath);
+        a.add(cat, len, 1);
+    }
+
+    private StorageCategory categoryForAnalytics(File f, String lowPath) {
+        String n = f.getName().toLowerCase(Locale.ROOT);
+
+        if (isImageFile(f)) return StorageCategory.PHOTOS;
+        if (isVideoFile(f)) return StorageCategory.VIDEOS;
+        if (isAudioFile(n)) return StorageCategory.AUDIO;
+
+        if (n.endsWith(".pdf") || n.endsWith(".doc") || n.endsWith(".docx") ||
+                n.endsWith(".xls") || n.endsWith(".xlsx") || n.endsWith(".ppt") ||
+                n.endsWith(".pptx") || n.endsWith(".txt") || n.endsWith(".rtf") ||
+                n.endsWith(".csv") || n.endsWith(".odt") || n.endsWith(".ods") ||
+                n.endsWith(".odp")) {
+            return StorageCategory.DOCUMENTS;
+        }
+
+        if (n.endsWith(".apk") || n.endsWith(".apks") || n.endsWith(".xapk") ||
+                n.endsWith(".aab")) {
+            return StorageCategory.APK;
+        }
+
+        if (isWhatsAppChatBackup(n, lowPath) || isDatabaseLike(n, lowPath) ||
+                lowPath.contains("/backup/") || lowPath.contains("/backups/") ||
+                n.contains("backup") || n.endsWith(".bak")) {
+            return StorageCategory.BACKUPS;
+        }
+
+        if (lowPath.contains("/cache/") || lowPath.contains("/.cache/") ||
+                lowPath.contains("/.thumbnails/") || lowPath.contains("/temp/") ||
+                lowPath.contains("/tmp/") || n.endsWith(".tmp") || n.endsWith(".temp") ||
+                n.endsWith(".log") || n.endsWith(".dmp") || n.endsWith(".crash")) {
+            return StorageCategory.JUNK;
+        }
+
+        return StorageCategory.OTHERS;
+    }
+
+    private void renderStorageAnalytics(StorageAnalytics a, long usedStorage,
+                                        StorageBreakdownView chart,
+                                        LinearLayout rows, TextView status) {
+        rows.removeAllViews();
+        chart.setAnalytics(a, Math.max(1L, usedStorage));
+
+        status.setText(format(a.visibleBytes) + " visible files scanned • " +
+                a.visibleFiles + " files • % of used storage");
+
+        for (StorageCategory cat : StorageCategory.values()) {
+            long bytes = a.bytes(cat);
+            int count = a.count(cat);
+            if (bytes <= 0 && cat != StorageCategory.PROTECTED) continue;
+
+            float pct = usedStorage <= 0 ? 0f : (bytes * 100f / usedStorage);
+            LinearLayout r = row();
+            r.setGravity(Gravity.CENTER_VERTICAL);
+            r.setPadding(0, dp(6), 0, dp(6));
+
+            TextView dot = text("●", 18, cat.color, true);
+            r.addView(dot, new LinearLayout.LayoutParams(dp(24), ViewGroup.LayoutParams.WRAP_CONTENT));
+
+            LinearLayout labels = column();
+            labels.addView(text(cat.label, 13, INK, true));
+            String countText = cat == StorageCategory.PROTECTED ? "not directly visible"
+                    : count + (count == 1 ? " file" : " files");
+            labels.addView(text(countText, 10, MUTED, false));
+            r.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView value = text(format(bytes) + "  •  " + percentText(pct), 12, cat.color, true);
+            value.setGravity(Gravity.END);
+            r.addView(value);
+
+            rows.addView(r, matchWrap());
+        }
+    }
+
+    private String percentText(float pct) {
+        if (pct > 0f && pct < 0.1f) return "<0.1%";
+        if (pct >= 10f) return String.format(Locale.US, "%.0f%%", pct);
+        return String.format(Locale.US, "%.1f%%", pct);
     }
 
     private void openTool(String type) {
@@ -2213,6 +2367,88 @@ public class MainActivity extends Activity {
         String[] u={"B","KB","MB","GB","TB"}; double v=bytes; int i=0;
         while(v>=1024 && i<u.length-1){v/=1024;i++;}
         return String.format(Locale.US, v>=100?"%.0f %s":v>=10?"%.1f %s":"%.2f %s",v,u[i]);
+    }
+
+    private enum StorageCategory {
+        PHOTOS("Photos", Color.rgb(231, 76, 120)),
+        VIDEOS("Videos", Color.rgb(108, 76, 230)),
+        AUDIO("Audio / Music", Color.rgb(35, 180, 155)),
+        DOCUMENTS("Documents / PDF", Color.rgb(61, 132, 224)),
+        APK("APK / Installers", Color.rgb(255, 159, 64)),
+        BACKUPS("Backups / Databases", Color.rgb(160, 94, 210)),
+        JUNK("Junk / Cache", Color.rgb(72, 196, 120)),
+        OTHERS("Other visible files", Color.rgb(124, 132, 150)),
+        PROTECTED("Apps / System / Protected", Color.rgb(70, 78, 100));
+
+        final String label;
+        final int color;
+        StorageCategory(String label, int color) {
+            this.label = label;
+            this.color = color;
+        }
+    }
+
+    private static final class StorageAnalytics {
+        final long[] bytes = new long[StorageCategory.values().length];
+        final int[] counts = new int[StorageCategory.values().length];
+        long visibleBytes;
+        int visibleFiles;
+        long usedStorage;
+
+        void add(StorageCategory c, long b, int count) {
+            bytes[c.ordinal()] += Math.max(0L, b);
+            counts[c.ordinal()] += Math.max(0, count);
+        }
+        long bytes(StorageCategory c) { return bytes[c.ordinal()]; }
+        int count(StorageCategory c) { return counts[c.ordinal()]; }
+    }
+
+    private static final class StorageBreakdownView extends View {
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private StorageAnalytics analytics;
+        private long denominator = 1L;
+
+        StorageBreakdownView(Context c) { super(c); }
+
+        void setAnalytics(StorageAnalytics a, long denominator) {
+            this.analytics = a;
+            this.denominator = Math.max(1L, denominator);
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            float left = 0f;
+            float top = 0f;
+            float right = getWidth();
+            float bottom = getHeight();
+            float radius = getHeight()/2f;
+
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(Color.rgb(232,234,243));
+            c.drawRoundRect(new RectF(left, top, right, bottom), radius, radius, p);
+
+            if (analytics == null) return;
+
+            float x = 0f;
+            StorageCategory[] cats = StorageCategory.values();
+            for (StorageCategory cat : cats) {
+                long b = analytics.bytes(cat);
+                if (b <= 0) continue;
+                float w = (float) getWidth() * ((float)b / (float)denominator);
+                if (w < 1f && b > 0) w = 1f;
+                float end = Math.min(getWidth(), x + w);
+                p.setColor(cat.color);
+                c.drawRect(x, top, end, bottom, p);
+                x = end;
+                if (x >= getWidth()) break;
+            }
+
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(1.5f);
+            p.setColor(Color.argb(45,0,0,0));
+            c.drawRoundRect(new RectF(left,top,right,bottom),radius,radius,p);
+        }
     }
 
     private static final class AppFileInfo {
