@@ -5,6 +5,9 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.AppOpsManager;
+import android.app.usage.StorageStats;
+import android.app.usage.StorageStatsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -25,7 +28,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
+import android.os.Process;
 import android.os.StatFs;
+import android.os.UserHandle;
+import android.os.storage.StorageManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.provider.Settings;
@@ -86,6 +92,7 @@ public class MainActivity extends Activity {
     private ParcelFileDescriptor activePdfFd = null;
     private StorageAnalytics cachedAnalytics = null;
     private long cachedAnalyticsAt = 0L;
+    private boolean pendingUsageAnalyzer = false;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -99,6 +106,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingUsageAnalyzer && hasUsageAccess()) {
+            pendingUsageAnalyzer = false;
+            cachedAnalytics = null;
+            cachedAnalyticsAt = 0L;
+            showSystemAnalyzer();
+            return;
+        }
         if (pendingToolAfterAccess != null && hasAllFilesAccess()) {
             String tool = pendingToolAfterAccess;
             pendingToolAfterAccess = null;
@@ -224,6 +238,11 @@ public class MainActivity extends Activity {
         trashTool.setOnClickListener(v -> showTrashScreen());
         content.addView(trashTool, matchWrap());
 
+        content.addView(space(12));
+        LinearLayout systemTool = toolCard("◉", "Apps & System", "Find hidden storage", Color.rgb(82,88,110));
+        systemTool.setOnClickListener(v -> openSystemAnalyzer());
+        content.addView(systemTool, matchWrap());
+
         content.addView(space(22));
         TextView scan = actionButton("SMART SCAN", PURPLE);
         touch(scan);
@@ -263,8 +282,12 @@ public class MainActivity extends Activity {
             Set<String> seen = new HashSet<>();
             scanAnalytics(root, seen, 0, a);
 
-            long protectedBytes = Math.max(0L, usedStorage - a.visibleBytes);
-            a.add(StorageCategory.PROTECTED, protectedBytes, protectedBytes > 0 ? 1 : 0);
+            if (hasUsageAccess()) {
+                fillPrivateStorageStats(a, usedStorage);
+            } else {
+                long hiddenBytes = Math.max(0L, usedStorage - a.visibleBytes);
+                a.add(StorageCategory.HIDDEN_UNCLASSIFIED, hiddenBytes, hiddenBytes > 0 ? 1 : 0);
+            }
             a.usedStorage = usedStorage;
 
             cachedAnalytics = a;
@@ -365,8 +388,13 @@ public class MainActivity extends Activity {
 
             LinearLayout labels = column();
             labels.addView(text(cat.label, 13, INK, true));
-            String countText = cat == StorageCategory.PROTECTED ? "not directly visible"
-                    : count + (count == 1 ? " file" : " files");
+            String countText;
+            if (cat == StorageCategory.SYSTEM_RESERVED) countText = "Android / reserved estimate";
+            else if (cat == StorageCategory.APP_CODE) countText = "installed app code";
+            else if (cat == StorageCategory.APP_DATA) countText = "private app data";
+            else if (cat == StorageCategory.APP_CACHE) countText = "reclaimable app cache";
+            else if (cat == StorageCategory.HIDDEN_UNCLASSIFIED) countText = "tap Apps & System to split";
+            else countText = count + (count == 1 ? " file" : " files");
             labels.addView(text(countText, 10, MUTED, false));
             r.addView(labels, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -382,6 +410,269 @@ public class MainActivity extends Activity {
         if (pct > 0f && pct < 0.1f) return "<0.1%";
         if (pct >= 10f) return String.format(Locale.US, "%.0f%%", pct);
         return String.format(Locale.US, "%.1f%%", pct);
+    }
+
+    private boolean hasUsageAccess() {
+        try {
+            AppOpsManager appOps = (AppOpsManager) getSystemService(APP_OPS_SERVICE);
+            int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(), getPackageName());
+            return mode == AppOpsManager.MODE_ALLOWED;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void fillPrivateStorageStats(StorageAnalytics a, long usedStorage) {
+        long appBytes = 0L;
+        long dataBytes = 0L;
+        long cacheBytes = 0L;
+        try {
+            StorageStatsManager mgr = (StorageStatsManager) getSystemService(STORAGE_STATS_SERVICE);
+            StorageStats stats = mgr.queryStatsForUser(StorageManager.UUID_DEFAULT, Process.myUserHandle());
+            appBytes = Math.max(0L, stats.getAppBytes());
+            dataBytes = Math.max(0L, stats.getDataBytes());
+            cacheBytes = Math.max(0L, stats.getCacheBytes());
+        } catch (Exception ignored) {}
+
+        a.add(StorageCategory.APP_CODE, appBytes, appBytes > 0 ? 1 : 0);
+        a.add(StorageCategory.APP_DATA, dataBytes, dataBytes > 0 ? 1 : 0);
+        a.add(StorageCategory.APP_CACHE, cacheBytes, cacheBytes > 0 ? 1 : 0);
+
+        long accounted = a.visibleBytes + appBytes + dataBytes + cacheBytes;
+        long systemReserved = Math.max(0L, usedStorage - accounted);
+        a.add(StorageCategory.SYSTEM_RESERVED, systemReserved, systemReserved > 0 ? 1 : 0);
+        a.privateStatsAvailable = true;
+    }
+
+    private void openSystemAnalyzer() {
+        haptic();
+        if (!hasUsageAccess()) {
+            pendingUsageAnalyzer = true;
+            new AlertDialog.Builder(this)
+                    .setTitle("Apps & System Analyzer")
+                    .setMessage("78 GB जैसे hidden/private हिस्से को Apps, App Data, Cache और System में अलग करने के लिए Android का Usage Access चाहिए। यह permission files delete नहीं करती; केवल storage statistics पढ़ने देती है।")
+                    .setNegativeButton("Cancel", (d,w) -> pendingUsageAnalyzer = false)
+                    .setPositiveButton("GRANT USAGE ACCESS", (d,w) -> {
+                        try {
+                            Intent i = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                            startActivity(i);
+                        } catch (Exception e) {
+                            pendingUsageAnalyzer = false;
+                        }
+                    }).show();
+            return;
+        }
+        showSystemAnalyzer();
+    }
+
+    private void showSystemAnalyzer() {
+        getWindow().getDecorView().setTag("systemAnalyzer");
+        LinearLayout root = column();
+        root.setPadding(dp(18), dp(24), dp(18), dp(28));
+        root.setBackgroundColor(BG);
+
+        root.addView(text("Apps & System Analyzer", 27, INK, true));
+        root.addView(space(5));
+        TextView status = text("Installed apps और private storage analyze हो रहा है…", 13, MUTED, false);
+        root.addView(status);
+        root.addView(space(20));
+
+        ScanRing ring = new ScanRing(this);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(190), dp(190));
+        rlp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(ring, rlp);
+
+        root.addView(space(18));
+        LinearLayout live = card();
+        live.setPadding(dp(18),dp(16),dp(18),dp(16));
+        TextView appCode = text("App code: …", 14, Color.rgb(82,88,110), true);
+        TextView appData = text("App data: …", 14, PURPLE, true);
+        TextView appCache = text("App cache: …", 14, TEAL, true);
+        TextView sys = text("Android/System: …", 14, MUTED, true);
+        live.addView(appCode);
+        live.addView(space(6));
+        live.addView(appData);
+        live.addView(space(6));
+        live.addView(appCache);
+        live.addView(space(6));
+        live.addView(sys);
+        root.addView(live, matchWrap());
+
+        Space flex = new Space(this);
+        root.addView(flex,new LinearLayout.LayoutParams(1,0,1f));
+        TextView back = actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        setContentView(root);
+        fadeIn(root);
+
+        new Thread(() -> {
+            SystemStorageResult result = collectSystemStorageResult();
+            runOnUiThread(() -> {
+                ring.setDone();
+                appCode.setText("App code: " + format(result.appCodeBytes));
+                appData.setText("App data: " + format(result.appDataBytes));
+                appCache.setText("App cache: " + format(result.appCacheBytes));
+                sys.setText("Android/System/Reserved: " + format(result.systemReservedBytes));
+                showSystemAnalyzerResult(result);
+            });
+        }, "sts-system-analyzer").start();
+    }
+
+    private SystemStorageResult collectSystemStorageResult() {
+        SystemStorageResult result = new SystemStorageResult();
+        long[] st = storage();
+        result.usedBytes = st[1];
+
+        try {
+            StorageStatsManager mgr = (StorageStatsManager) getSystemService(STORAGE_STATS_SERVICE);
+            StorageStats userStats = mgr.queryStatsForUser(StorageManager.UUID_DEFAULT, Process.myUserHandle());
+            result.appCodeBytes = Math.max(0L,userStats.getAppBytes());
+            result.appDataBytes = Math.max(0L,userStats.getDataBytes());
+            result.appCacheBytes = Math.max(0L,userStats.getCacheBytes());
+        } catch (Exception ignored) {}
+
+        long visible = cachedAnalytics != null ? cachedAnalytics.visibleBytes : 0L;
+        if (visible <= 0) {
+            StorageAnalytics temp = new StorageAnalytics();
+            scanAnalytics(Environment.getExternalStorageDirectory(), new HashSet<>(), 0, temp);
+            visible = temp.visibleBytes;
+        }
+        result.visibleBytes = visible;
+        result.systemReservedBytes = Math.max(0L, result.usedBytes - visible -
+                result.appCodeBytes - result.appDataBytes - result.appCacheBytes);
+
+        try {
+            PackageManager pm = getPackageManager();
+            StorageStatsManager mgr = (StorageStatsManager) getSystemService(STORAGE_STATS_SERVICE);
+            List<ApplicationInfo> apps = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            for (ApplicationInfo ai : apps) {
+                try {
+                    StorageStats ss = mgr.queryStatsForPackage(StorageManager.UUID_DEFAULT,
+                            ai.packageName, Process.myUserHandle());
+                    long code = Math.max(0L,ss.getAppBytes());
+                    long data = Math.max(0L,ss.getDataBytes());
+                    long cache = Math.max(0L,ss.getCacheBytes());
+                    long total = code + data + cache;
+                    if (total <= 0) continue;
+                    CharSequence label = pm.getApplicationLabel(ai);
+                    boolean system = (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+                    result.apps.add(new AppStorageEntry(
+                            label == null ? ai.packageName : label.toString(),
+                            ai.packageName, code, data, cache, total, system));
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception ignored) {}
+
+        Collections.sort(result.apps, (a,b) -> Long.compare(b.totalBytes,a.totalBytes));
+        return result;
+    }
+
+    private void showSystemAnalyzerResult(SystemStorageResult result) {
+        getWindow().getDecorView().setTag("systemAnalyzerResult");
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text("Apps & System",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("Hidden/private storage breakdown • Android-reported statistics",12,MUTED,false));
+        root.addView(space(16));
+
+        LinearLayout totals = card();
+        totals.setPadding(dp(18),dp(16),dp(18),dp(16));
+        totals.addView(systemRow("Installed app code", result.appCodeBytes, Color.rgb(82,88,110)));
+        totals.addView(space(7));
+        totals.addView(systemRow("Private app data", result.appDataBytes, PURPLE));
+        totals.addView(space(7));
+        totals.addView(systemRow("App cache", result.appCacheBytes, TEAL));
+        totals.addView(space(7));
+        totals.addView(systemRow("Android / System / Reserved", result.systemReservedBytes, ROSE));
+        totals.addView(space(9));
+        totals.addView(text("System/Reserved एक estimate है। Android कुछ OEM/reserved/snapshot storage को third-party apps से पूरी तरह अलग नहीं बताता।",11,MUTED,false));
+        root.addView(totals,matchWrap());
+
+        root.addView(space(14));
+        TextView systemSettings = actionButton("OPEN ANDROID STORAGE SETTINGS",PURPLE);
+        touch(systemSettings);
+        systemSettings.setOnClickListener(v -> {
+            try { startActivity(new Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS)); }
+            catch (Exception e) { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
+        });
+        root.addView(systemSettings,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(56)));
+
+        root.addView(section("Apps using most storage"));
+        int limit=Math.min(60,result.apps.size());
+        for(int i=0;i<limit;i++){
+            AppStorageEntry e=result.apps.get(i);
+            LinearLayout c=card();
+            c.setPadding(dp(15),dp(13),dp(15),dp(13));
+
+            LinearLayout top=row();
+            top.setGravity(Gravity.CENTER_VERTICAL);
+            try {
+                Drawable d=getPackageManager().getApplicationIcon(e.packageName);
+                ImageView iv=new ImageView(this);
+                iv.setImageDrawable(d);
+                top.addView(iv,new LinearLayout.LayoutParams(dp(38),dp(38)));
+                top.addView(spaceH(10));
+            } catch(Exception ignored){}
+            LinearLayout labels=column();
+            labels.addView(text(e.appName,14,INK,true));
+            labels.addView(text(e.systemApp ? "System app" : "User app",10,e.systemApp?MUTED:PURPLE,false));
+            top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            top.addView(text(format(e.totalBytes),14,PURPLE,true));
+            c.addView(top,matchWrap());
+
+            c.addView(space(9));
+            c.addView(text("App " + format(e.codeBytes) + "  •  Data " + format(e.dataBytes) +
+                    "  •  Cache " + format(e.cacheBytes),11,MUTED,false));
+
+            c.addView(space(9));
+            TextView manage=pill("OPEN APP STORAGE",PURPLE,Color.rgb(239,236,255));
+            touch(manage);
+            manage.setOnClickListener(v -> openAppStorageSettings(e.packageName));
+            c.addView(manage);
+            root.addView(c,matchWrap());
+            root.addView(space(9));
+        }
+
+        root.addView(space(10));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        fadeIn(root);
+    }
+
+    private LinearLayout systemRow(String label,long bytes,int color){
+        LinearLayout r=row();
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        TextView dot=text("●",18,color,true);
+        r.addView(dot,new LinearLayout.LayoutParams(dp(24),ViewGroup.LayoutParams.WRAP_CONTENT));
+        r.addView(text(label,13,INK,true),new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        r.addView(text(format(bytes),13,color,true));
+        return r;
+    }
+
+    private void openAppStorageSettings(String packageName){
+        try{
+            Intent i=new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:"+packageName));
+            startActivity(i);
+        }catch(Exception e){
+            try{ startActivity(new Intent(Settings.ACTION_SETTINGS)); }catch(Exception ignored){}
+        }
     }
 
     private void openTool(String type) {
@@ -2378,7 +2669,11 @@ public class MainActivity extends Activity {
         BACKUPS("Backups / Databases", Color.rgb(160, 94, 210)),
         JUNK("Junk / Cache", Color.rgb(72, 196, 120)),
         OTHERS("Other visible files", Color.rgb(124, 132, 150)),
-        PROTECTED("Apps / System / Protected", Color.rgb(70, 78, 100));
+        APP_CODE("Installed Apps", Color.rgb(86, 92, 118)),
+        APP_DATA("Private App Data", Color.rgb(122, 86, 214)),
+        APP_CACHE("App Cache", Color.rgb(38, 184, 150)),
+        SYSTEM_RESERVED("Android / System / Reserved", Color.rgb(217, 87, 101)),
+        HIDDEN_UNCLASSIFIED("Hidden / Private (not split yet)", Color.rgb(70, 78, 100));
 
         final String label;
         final int color;
@@ -2394,6 +2689,7 @@ public class MainActivity extends Activity {
         long visibleBytes;
         int visibleFiles;
         long usedStorage;
+        boolean privateStatsAvailable;
 
         void add(StorageCategory c, long b, int count) {
             bytes[c.ordinal()] += Math.max(0L, b);
@@ -2449,6 +2745,37 @@ public class MainActivity extends Activity {
             p.setColor(Color.argb(45,0,0,0));
             c.drawRoundRect(new RectF(left,top,right,bottom),radius,radius,p);
         }
+    }
+
+    private static final class AppStorageEntry {
+        final String appName;
+        final String packageName;
+        final long codeBytes;
+        final long dataBytes;
+        final long cacheBytes;
+        final long totalBytes;
+        final boolean systemApp;
+
+        AppStorageEntry(String appName,String packageName,long codeBytes,long dataBytes,
+                        long cacheBytes,long totalBytes,boolean systemApp){
+            this.appName=appName;
+            this.packageName=packageName;
+            this.codeBytes=codeBytes;
+            this.dataBytes=dataBytes;
+            this.cacheBytes=cacheBytes;
+            this.totalBytes=totalBytes;
+            this.systemApp=systemApp;
+        }
+    }
+
+    private static final class SystemStorageResult {
+        long usedBytes;
+        long visibleBytes;
+        long appCodeBytes;
+        long appDataBytes;
+        long appCacheBytes;
+        long systemReservedBytes;
+        final List<AppStorageEntry> apps=new ArrayList<>();
     }
 
     private static final class AppFileInfo {
