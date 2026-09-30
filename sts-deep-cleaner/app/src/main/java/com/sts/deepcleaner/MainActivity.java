@@ -93,6 +93,10 @@ public class MainActivity extends Activity {
     private StorageAnalytics cachedAnalytics = null;
     private long cachedAnalyticsAt = 0L;
     private boolean pendingUsageAnalyzer = false;
+
+    private final Map<String,Integer> scrollPositions = new HashMap<>();
+    private ScrollView currentScrollView = null;
+    private String currentScrollKey = null;
     private SystemStorageResult activeSystemResult = null;
     private AppDetailResult activeAppDetailResult = null;
     private AppVisibleCategory activeVisibleCategory = null;
@@ -136,6 +140,7 @@ public class MainActivity extends Activity {
     }
 
     private void showHome() {
+        rememberCurrentScroll();
         releasePreviewResources();
         purgeExpiredTrashAsync();
         getWindow().getDecorView().setTag("home");
@@ -175,26 +180,23 @@ public class MainActivity extends Activity {
         long[] st = storage();
         StorageRing ring = new StorageRing(this);
         ring.setStorage(st[0], st[1]);
-        LinearLayout.LayoutParams ringLp = new LinearLayout.LayoutParams(dp(196), dp(196));
+        LinearLayout.LayoutParams ringLp = new LinearLayout.LayoutParams(dp(210), dp(210));
         ringLp.gravity = Gravity.CENTER_HORIZONTAL;
         header.addView(ring, ringLp);
-        root.addView(header, matchWrap());
 
-        LinearLayout content = column();
-        content.setPadding(dp(16), dp(16), dp(16), 0);
-
-        LinearLayout modeCard = card();
-        modeCard.setPadding(dp(18), dp(16), dp(18), dp(16));
-        TextView free = text("Free storage", 14, MUTED, false);
-        TextView freeValue = text(format(st[0] - st[1]), 27, PURPLE, true);
+        header.addView(space(10));
         TextView mode = pill(hasAllFilesAccess() ? "Full storage access ON" : "Full scan access OFF",
                 hasAllFilesAccess() ? Color.rgb(18,145,123) : PURPLE,
                 hasAllFilesAccess() ? Color.rgb(228,252,248) : Color.rgb(244,240,255));
-        modeCard.addView(free);
-        modeCard.addView(freeValue);
-        modeCard.addView(space(8));
-        modeCard.addView(mode);
-        content.addView(modeCard, matchWrap());
+        LinearLayout.LayoutParams modeLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        modeLp.gravity = Gravity.CENTER_HORIZONTAL;
+        header.addView(mode, modeLp);
+
+        root.addView(header, matchWrap());
+
+        LinearLayout content = column();
+        content.setPadding(dp(16), dp(10), dp(16), 0);
 
         content.addView(section("Storage by File Type"));
         LinearLayout analyticsCard = card();
@@ -212,7 +214,7 @@ public class MainActivity extends Activity {
         analyticsCard.addView(analyticsRows, matchWrap());
         content.addView(analyticsCard, matchWrap());
 
-        loadStorageAnalytics(st[1], breakdown, analyticsRows, analyticsStatus);
+        loadStorageAnalytics(st[0], st[1], ring, breakdown, analyticsRows, analyticsStatus);
 
         content.addView(section("Storage Tools"));
 
@@ -282,13 +284,38 @@ public class MainActivity extends Activity {
         root.addView(content, matchWrap());
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("home", scroll);
         fadeIn(root);
         popIn(logo);
     }
 
-    private void loadStorageAnalytics(long usedStorage, StorageBreakdownView chart,
+    private void rememberCurrentScroll() {
+        if (currentScrollView == null || currentScrollKey == null) return;
+        int y = Math.max(0, currentScrollView.getScrollY());
+        scrollPositions.put(currentScrollKey, y);
+        getSharedPreferences("sts_scroll_positions", MODE_PRIVATE)
+                .edit().putInt(currentScrollKey, y).apply();
+    }
+
+    private void bindScrollPosition(String key, ScrollView scroll) {
+        currentScrollView = scroll;
+        currentScrollKey = key;
+        int y = scrollPositions.containsKey(key)
+                ? scrollPositions.get(key)
+                : getSharedPreferences("sts_scroll_positions", MODE_PRIVATE).getInt(key, 0);
+        scroll.post(() -> scroll.scrollTo(0, Math.max(0, y)));
+    }
+
+    private void clearCurrentScrollBinding() {
+        currentScrollView = null;
+        currentScrollKey = null;
+    }
+
+    private void loadStorageAnalytics(long totalStorage, long usedStorage, StorageRing ring,
+                                      StorageBreakdownView chart,
                                       LinearLayout rows, TextView status) {
         if (cachedAnalytics != null && System.currentTimeMillis() - cachedAnalyticsAt < 5L*60*1000) {
+            ring.setAnalytics(cachedAnalytics);
             renderStorageAnalytics(cachedAnalytics, usedStorage, chart, rows, status);
             return;
         }
@@ -312,7 +339,10 @@ public class MainActivity extends Activity {
 
             runOnUiThread(() -> {
                 Object tag = getWindow().getDecorView().getTag();
-                if ("home".equals(tag)) renderStorageAnalytics(a, usedStorage, chart, rows, status);
+                if ("home".equals(tag)) {
+                    ring.setAnalytics(a);
+                    renderStorageAnalytics(a, usedStorage, chart, rows, status);
+                }
             });
         }, "sts-storage-analytics").start();
     }
