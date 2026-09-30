@@ -35,10 +35,16 @@ import android.widget.Space;
 import android.widget.TextView;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends Activity {
@@ -55,6 +61,7 @@ public class MainActivity extends Activity {
     private ScanSummary lastSummary;
     private boolean pendingScanAfterAccess = false;
     private boolean pendingDeepAfterAccess = false;
+    private String pendingToolAfterAccess = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -68,6 +75,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingToolAfterAccess != null && hasAllFilesAccess()) {
+            String tool = pendingToolAfterAccess;
+            pendingToolAfterAccess = null;
+            openTool(tool);
+            return;
+        }
         if (pendingScanAfterAccess && hasAllFilesAccess()) {
             boolean deep = pendingDeepAfterAccess;
             pendingScanAfterAccess = false;
@@ -142,16 +155,24 @@ public class MainActivity extends Activity {
 
         content.addView(section("Storage Tools"));
         LinearLayout row1 = row();
-        row1.addView(toolCard("✦", "Junk & Cache", "Temporary files", TEAL), weight());
+        LinearLayout junkTool = toolCard("✦", "Junk & Cache", "Temporary files", TEAL);
+        junkTool.setOnClickListener(v -> openTool("junk"));
+        row1.addView(junkTool, weight());
         row1.addView(spaceH(12));
-        row1.addView(toolCard("⬢", "Large Files", "Review first", AMBER), weight());
+        LinearLayout largeTool = toolCard("⬢", "Large Files", "Review first", AMBER);
+        largeTool.setOnClickListener(v -> openTool("large"));
+        row1.addView(largeTool, weight());
         content.addView(row1, matchWrap());
 
         content.addView(space(12));
         LinearLayout row2 = row();
-        row2.addView(toolCard("⧉", "Duplicates", "Hash finder", BLUE), weight());
+        LinearLayout duplicateTool = toolCard("⧉", "Duplicates", "Hash finder", BLUE);
+        duplicateTool.setOnClickListener(v -> openTool("duplicates"));
+        row2.addView(duplicateTool, weight());
         row2.addView(spaceH(12));
-        row2.addView(toolCard("⌁", "Residual", "App leftovers", ROSE), weight());
+        LinearLayout residualTool = toolCard("⌁", "Residual", "App leftovers", ROSE);
+        residualTool.setOnClickListener(v -> openTool("residual"));
+        row2.addView(residualTool, weight());
         content.addView(row2, matchWrap());
 
         content.addView(space(22));
@@ -178,6 +199,448 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         fadeIn(root);
         popIn(logo);
+    }
+
+    private void openTool(String type) {
+        haptic();
+        if (Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) {
+            pendingToolAfterAccess = type;
+            requestToolAccess(type);
+            return;
+        }
+        showToolScan(type);
+    }
+
+    private String toolTitle(String type) {
+        if ("junk".equals(type)) return "Junk & Cache";
+        if ("large".equals(type)) return "Large Files";
+        if ("duplicates".equals(type)) return "Duplicates";
+        return "Residual";
+    }
+
+    private int toolAccent(String type) {
+        if ("junk".equals(type)) return TEAL;
+        if ("large".equals(type)) return AMBER;
+        if ("duplicates".equals(type)) return BLUE;
+        return ROSE;
+    }
+
+    private void requestToolAccess(String type) {
+        new AlertDialog.Builder(this)
+                .setTitle(toolTitle(type) + " Access")
+                .setMessage("इस tool को पूरे shared storage में real scan करने के लिए Full Storage Access चाहिए। Permission ON करके वापस आते ही यह tool अपने-आप scan शुरू करेगा।")
+                .setNegativeButton("Cancel", (d,w) -> pendingToolAfterAccess = null)
+                .setPositiveButton("ALLOW", (d,w) -> {
+                    try {
+                        Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:" + getPackageName()));
+                        startActivity(i);
+                    } catch (Exception e) {
+                        startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                    }
+                }).show();
+    }
+
+    private void showToolScan(String type) {
+        getWindow().getDecorView().setTag("toolScan");
+        LinearLayout root = column();
+        root.setPadding(dp(20), dp(26), dp(20), dp(28));
+        root.setBackgroundColor(BG);
+
+        int accent = toolAccent(type);
+        TextView title = text(toolTitle(type), 28, INK, true);
+        String explain = "junk".equals(type) ? "Safe temporary/cache files scan हो रहे हैं"
+                : "large".equals(type) ? "100 MB से बड़ी files scan हो रही हैं"
+                : "duplicates".equals(type) ? "Same-size files का SHA-256 hash compare हो रहा है"
+                : "Empty folders और old residual/temp candidates scan हो रहे हैं";
+        root.addView(title);
+        root.addView(space(5));
+        root.addView(text(explain, 13, MUTED, false));
+        root.addView(space(24));
+
+        ScanRing ring = new ScanRing(this);
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(205), dp(205));
+        rlp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(ring, rlp);
+
+        TextView path = text("Preparing…", 12, MUTED, false);
+        path.setGravity(Gravity.CENTER);
+        path.setMaxLines(2);
+        root.addView(space(9));
+        root.addView(path, matchWrap());
+
+        root.addView(space(18));
+        LinearLayout live = card();
+        live.setPadding(dp(18), dp(15), dp(18), dp(15));
+        TextView scanned = text("0 files scanned", 16, INK, true);
+        TextView analyzed = text("0 B analyzed", 13, MUTED, false);
+        TextView found = text("0 candidates", 14, accent, true);
+        TextView reclaim = text("0 B found", 13, MUTED, false);
+        live.addView(text("LIVE " + toolTitle(type).toUpperCase(Locale.ROOT), 12, accent, true));
+        live.addView(space(8));
+        live.addView(scanned);
+        live.addView(space(4));
+        live.addView(analyzed);
+        live.addView(space(8));
+        live.addView(found);
+        live.addView(space(4));
+        live.addView(reclaim);
+        root.addView(live, matchWrap());
+
+        Space flex = new Space(this);
+        root.addView(flex, new LinearLayout.LayoutParams(1, 0, 1f));
+        TextView back = actionButton("BACK", Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> handleBack());
+        root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        setContentView(root);
+        fadeIn(root);
+
+        scanTool(type, new ToolCallback() {
+            @Override public void live(String currentPath, int files, long bytes, int items, long itemBytes) {
+                runOnUiThread(() -> {
+                    ring.setLiveFiles(files);
+                    path.setText(shortPath(currentPath));
+                    scanned.setText(files + " files scanned");
+                    analyzed.setText(format(bytes) + " analyzed");
+                    found.setText(items + ("duplicates".equals(type) ? " duplicate copies" : " candidates"));
+                    reclaim.setText(format(itemBytes) + ("large".equals(type) ? " listed" : " reclaimable"));
+                });
+            }
+
+            @Override public void done(ToolResult result) {
+                runOnUiThread(() -> {
+                    ring.setDone();
+                    showToolResult(result);
+                });
+            }
+        });
+    }
+
+    private void showToolResult(ToolResult result) {
+        getWindow().getDecorView().setTag("toolResult");
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16), dp(24), dp(16), dp(28));
+
+        int accent = toolAccent(result.type);
+        root.addView(text(toolTitle(result.type), 28, INK, true));
+        root.addView(space(5));
+        String sub = "duplicates".equals(result.type)
+                ? result.groups + " duplicate groups • first copy हमेशा keep"
+                : result.scannedFiles + " files checked • " + format(result.scannedBytes) + " analyzed";
+        root.addView(text(sub, 13, MUTED, false));
+        root.addView(space(18));
+
+        LinearLayout summary = card();
+        summary.setPadding(dp(18), dp(16), dp(18), dp(16));
+        summary.addView(text(result.items.size() + " items found", 17, INK, true));
+        summary.addView(space(5));
+        summary.addView(text(format(result.totalBytes), 26, accent, true));
+        summary.addView(space(4));
+        summary.addView(text("large".equals(result.type) ? "total size listed" : "potential reclaim", 12, MUTED, false));
+        root.addView(summary, matchWrap());
+
+        if (result.items.isEmpty()) {
+            root.addView(space(18));
+            LinearLayout empty = card();
+            empty.setPadding(dp(18), dp(22), dp(18), dp(22));
+            empty.addView(centerText("✓", 38, TEAL, true));
+            empty.addView(space(8));
+            empty.addView(centerText("इस category में अभी कुछ नहीं मिला", 15, INK, true));
+            root.addView(empty, matchWrap());
+        } else {
+            root.addView(section("Found Items"));
+            int limit = Math.min(80, result.items.size());
+            for (int i=0; i<limit; i++) {
+                ToolItem item = result.items.get(i);
+                LinearLayout itemCard = card();
+                itemCard.setPadding(dp(15), dp(13), dp(15), dp(13));
+                itemCard.addView(text(item.file.getName().length() == 0 ? item.file.getAbsolutePath() : item.file.getName(), 14, INK, true));
+                itemCard.addView(space(3));
+                itemCard.addView(text(item.directory ? "Folder" : format(item.bytes), 12, accent, true));
+                itemCard.addView(space(3));
+                itemCard.addView(text(item.note, 11, MUTED, false));
+                itemCard.addView(space(3));
+                itemCard.addView(text(shortPath(item.file.getAbsolutePath()), 10, MUTED, false));
+
+                if ("large".equals(result.type) || "duplicates".equals(result.type)) {
+                    itemCard.addView(space(8));
+                    TextView del = pill("TAP TO REVIEW / DELETE", ROSE, Color.rgb(255,238,243));
+                    itemCard.addView(del);
+                    itemCard.setOnClickListener(v -> confirmDeleteToolItem(result, item));
+                    touch(itemCard);
+                }
+                root.addView(itemCard, matchWrap());
+                root.addView(space(9));
+            }
+            if (result.items.size() > limit) {
+                root.addView(text("+ " + (result.items.size()-limit) + " more items", 12, MUTED, false));
+            }
+        }
+
+        if (("junk".equals(result.type) || "residual".equals(result.type) || "duplicates".equals(result.type))
+                && !result.items.isEmpty()) {
+            root.addView(space(16));
+            String label = "duplicates".equals(result.type) ? "DELETE DUPLICATE COPIES"
+                    : "residual".equals(result.type) ? "CLEAN SAFE RESIDUAL"
+                    : "CLEAN JUNK & CACHE";
+            TextView clean = actionButton(label, accent);
+            touch(clean);
+            clean.setOnClickListener(v -> confirmCleanToolResult(result));
+            root.addView(clean, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62)));
+        }
+
+        root.addView(space(10));
+        TextView rescan = actionButton("RESCAN", Color.WHITE);
+        rescan.setTextColor(PURPLE);
+        touch(rescan);
+        rescan.setOnClickListener(v -> showToolScan(result.type));
+        root.addView(rescan, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        root.addView(space(9));
+        TextView back = actionButton("BACK", Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> handleBack());
+        root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        fadeIn(root);
+    }
+
+    private void confirmDeleteToolItem(ToolResult result, ToolItem item) {
+        String warning = "duplicates".equals(result.type)
+                ? "यह duplicate copy delete होगी। इसी hash group की एक original copy scan में keep की गई है।"
+                : "यह file permanently delete होगी। Large Files review-only हैं, इसलिए delete आपकी confirmation के बाद ही होगा।";
+        new AlertDialog.Builder(this)
+                .setTitle("Delete " + item.file.getName() + "?")
+                .setMessage(warning + "\n\n" + item.file.getAbsolutePath() + "\n" + format(item.bytes))
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("DELETE", (d,w) -> {
+                    boolean ok = false;
+                    try { ok = item.file.delete(); } catch (Exception ignored) {}
+                    if (ok) {
+                        result.items.remove(item);
+                        result.totalBytes = Math.max(0, result.totalBytes - item.bytes);
+                        showToolResult(result);
+                    } else {
+                        new AlertDialog.Builder(this).setTitle("Delete failed")
+                                .setMessage("Android ने इस item को delete करने की permission नहीं दी।")
+                                .setPositiveButton("OK", null).show();
+                    }
+                }).show();
+    }
+
+    private void confirmCleanToolResult(ToolResult result) {
+        String msg;
+        if ("duplicates".equals(result.type)) {
+            msg = "हर duplicate hash group की पहली/original copy रखी जाएगी। केवल duplicate copies delete होंगी।";
+        } else if ("residual".equals(result.type)) {
+            msg = "केवल scan में मिले empty folders और non-personal old residual/temp candidates delete होंगे।";
+        } else {
+            msg = "केवल safe junk/cache candidates delete होंगे। Personal photos, videos और documents नहीं हटेंगे।";
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Confirm Clean")
+                .setMessage(msg + "\n\nSelected: " + result.items.size() + " items • " + format(result.totalBytes))
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("CLEAN", (d,w) -> cleanToolResult(result))
+                .show();
+    }
+
+    private void cleanToolResult(ToolResult result) {
+        new Thread(() -> {
+            long freed = 0;
+            int count = 0;
+            int failed = 0;
+            List<ToolItem> copy = new ArrayList<>(result.items);
+            for (ToolItem item : copy) {
+                try {
+                    long n = item.bytes;
+                    boolean ok = item.file.delete();
+                    if (ok) { freed += n; count++; }
+                    else failed++;
+                } catch (Exception e) { failed++; }
+            }
+            long f = freed;
+            int c = count;
+            int x = failed;
+            runOnUiThread(() -> showCleanDone(f, c, x));
+        }, "sts-tool-clean").start();
+    }
+
+    private void scanTool(String type, ToolCallback cb) {
+        new Thread(() -> {
+            ToolResult out = new ToolResult(type);
+            File root = Environment.getExternalStorageDirectory();
+            Set<String> seen = new HashSet<>();
+
+            if ("duplicates".equals(type)) {
+                Map<Long,List<File>> bySize = new HashMap<>();
+                collectDuplicateCandidates(root, seen, 0, out, bySize, cb);
+                hashDuplicateCandidates(bySize, out, cb);
+            } else {
+                walkTool(root, seen, 0, out, cb);
+            }
+            cb.live("Scan complete", out.scannedFiles, out.scannedBytes, out.items.size(), out.totalBytes);
+            cb.done(out);
+        }, "sts-tool-"+type).start();
+    }
+
+    private void walkTool(File f, Set<String> seen, int depth, ToolResult out, ToolCallback cb) {
+        if (f == null || depth > 22) return;
+        String path;
+        try { path = f.getCanonicalPath(); } catch (Exception e) { path = f.getAbsolutePath(); }
+        if (!seen.add(path)) return;
+        String low = path.toLowerCase(Locale.ROOT);
+        if (isCritical(low)) return;
+
+        if (f.isDirectory()) {
+            File[] children;
+            try { children = f.listFiles(); } catch (Exception e) { children = null; }
+            if (children == null) return;
+
+            if ("residual".equals(out.type) && children.length == 0 && depth > 1 && safeResidualDirectory(f)) {
+                addToolItem(out, new ToolItem(f, 0, "Empty leftover folder", true));
+            }
+
+            for (File x : children) walkTool(x, seen, depth+1, out, cb);
+            emitToolLive(out, cb, path, false);
+            return;
+        }
+
+        long len = Math.max(0, f.length());
+        long age = System.currentTimeMillis() - Math.max(0, f.lastModified());
+        String name = f.getName().toLowerCase(Locale.ROOT);
+        String parent = f.getParent() == null ? "" : f.getParent().toLowerCase(Locale.ROOT);
+
+        out.scannedFiles++;
+        out.scannedBytes += len;
+
+        if ("junk".equals(out.type)) {
+            boolean junk = (name.endsWith(".tmp") || name.endsWith(".temp") || name.endsWith(".log") ||
+                    name.endsWith(".bak") || name.endsWith(".old") || name.endsWith(".dmp") ||
+                    name.endsWith(".crash") || ((parent.contains("/cache") || parent.contains("/.cache") ||
+                    parent.contains("/.thumbnails")) && !personal(name)));
+            if (junk && !personal(name)) addToolItem(out, new ToolItem(f, len, "Safe temporary/cache candidate", false));
+        } else if ("large".equals(out.type)) {
+            if (len >= 100L*1024*1024) addToolItem(out, new ToolItem(f, len, "Large file • review before delete", false));
+        } else if ("residual".equals(out.type)) {
+            boolean residual = !personal(name) && age > 7L*24*60*60*1000 &&
+                    (name.endsWith(".old") || name.endsWith(".bak") || name.endsWith(".log") ||
+                     name.endsWith(".dmp") || name.endsWith(".crash") ||
+                     parent.contains("/temp") || parent.contains("/tmp") || parent.contains("/logs"));
+            if (residual) addToolItem(out, new ToolItem(f, len, "Old non-personal residual candidate", false));
+        }
+
+        emitToolLive(out, cb, path, false);
+    }
+
+    private boolean safeResidualDirectory(File f) {
+        String p = f.getAbsolutePath().toLowerCase(Locale.ROOT);
+        String n = f.getName().toLowerCase(Locale.ROOT);
+        if (p.endsWith("/dcim") || p.endsWith("/pictures") || p.endsWith("/movies") ||
+                p.endsWith("/music") || p.endsWith("/documents") || p.endsWith("/download") ||
+                p.endsWith("/downloads") || p.endsWith("/android") || p.endsWith("/notifications") ||
+                p.endsWith("/ringtones") || p.endsWith("/podcasts") || p.endsWith("/alarms")) return false;
+        return n.equals("cache") || n.equals(".cache") || n.equals("temp") || n.equals("tmp") ||
+                n.equals("logs") || n.equals("crash") || n.startsWith(".tmp") || n.startsWith("temp_");
+    }
+
+    private void collectDuplicateCandidates(File f, Set<String> seen, int depth, ToolResult out,
+                                            Map<Long,List<File>> bySize, ToolCallback cb) {
+        if (f == null || depth > 22) return;
+        String path;
+        try { path = f.getCanonicalPath(); } catch (Exception e) { path = f.getAbsolutePath(); }
+        if (!seen.add(path)) return;
+        String low = path.toLowerCase(Locale.ROOT);
+        if (isCritical(low)) return;
+
+        if (f.isDirectory()) {
+            File[] children;
+            try { children = f.listFiles(); } catch (Exception e) { children = null; }
+            if (children == null) return;
+            for (File x : children) collectDuplicateCandidates(x, seen, depth+1, out, bySize, cb);
+            return;
+        }
+
+        long len = Math.max(0, f.length());
+        out.scannedFiles++;
+        out.scannedBytes += len;
+        if (len >= 256L*1024) {
+            List<File> list = bySize.get(len);
+            if (list == null) {
+                list = new ArrayList<>();
+                bySize.put(len, list);
+            }
+            list.add(f);
+        }
+        emitToolLive(out, cb, "Indexing: " + path, false);
+    }
+
+    private void hashDuplicateCandidates(Map<Long,List<File>> bySize, ToolResult out, ToolCallback cb) {
+        Map<String,List<File>> groups = new HashMap<>();
+        for (Map.Entry<Long,List<File>> e : bySize.entrySet()) {
+            if (e.getValue().size() < 2) continue;
+            for (File f : e.getValue()) {
+                String hash = sha256(f);
+                if (hash == null) continue;
+                String key = e.getKey() + ":" + hash;
+                List<File> group = groups.get(key);
+                if (group == null) {
+                    group = new ArrayList<>();
+                    groups.put(key, group);
+                }
+                group.add(f);
+                cb.live("Hashing: " + f.getAbsolutePath(), out.scannedFiles, out.scannedBytes,
+                        out.items.size(), out.totalBytes);
+            }
+        }
+
+        for (List<File> group : groups.values()) {
+            if (group.size() < 2) continue;
+            Collections.sort(group, Comparator.comparing(File::getAbsolutePath));
+            File keep = group.get(0);
+            out.groups++;
+            for (int i=1; i<group.size(); i++) {
+                File dup = group.get(i);
+                addToolItem(out, new ToolItem(dup, dup.length(),
+                        "Duplicate • keeping: " + keep.getName(), false));
+            }
+        }
+    }
+
+    private String sha256(File f) {
+        try (FileInputStream in = new FileInputStream(f)) {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] buf = new byte[64*1024];
+            int n;
+            while ((n = in.read(buf)) > 0) md.update(buf, 0, n);
+            byte[] digest = md.digest();
+            StringBuilder sb = new StringBuilder(digest.length*2);
+            for (byte b : digest) sb.append(String.format(Locale.US, "%02x", b & 0xff));
+            return sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void addToolItem(ToolResult out, ToolItem item) {
+        out.items.add(item);
+        out.totalBytes += Math.max(0, item.bytes);
+    }
+
+    private void emitToolLive(ToolResult out, ToolCallback cb, String path, boolean force) {
+        long now = System.currentTimeMillis();
+        if (!force && now - out.lastLiveUpdate < 100) return;
+        out.lastLiveUpdate = now;
+        cb.live(path, out.scannedFiles, out.scannedBytes, out.items.size(), out.totalBytes);
     }
 
     private void beginScan(boolean deep) {
@@ -758,6 +1221,35 @@ public class MainActivity extends Activity {
         String[] u={"B","KB","MB","GB","TB"}; double v=bytes; int i=0;
         while(v>=1024 && i<u.length-1){v/=1024;i++;}
         return String.format(Locale.US, v>=100?"%.0f %s":v>=10?"%.1f %s":"%.2f %s",v,u[i]);
+    }
+
+    private static final class ToolItem {
+        final File file;
+        final long bytes;
+        final String note;
+        final boolean directory;
+        ToolItem(File file, long bytes, String note, boolean directory) {
+            this.file = file;
+            this.bytes = bytes;
+            this.note = note;
+            this.directory = directory;
+        }
+    }
+
+    private static final class ToolResult {
+        final String type;
+        final List<ToolItem> items = new ArrayList<>();
+        int scannedFiles;
+        int groups;
+        long scannedBytes;
+        long totalBytes;
+        long lastLiveUpdate;
+        ToolResult(String type) { this.type = type; }
+    }
+
+    private interface ToolCallback {
+        void live(String currentPath, int files, long bytes, int items, long itemBytes);
+        void done(ToolResult result);
     }
 
     private static final class ScanItem {
