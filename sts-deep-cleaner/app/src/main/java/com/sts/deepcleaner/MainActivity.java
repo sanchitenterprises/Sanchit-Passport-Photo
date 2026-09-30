@@ -456,6 +456,13 @@ public class MainActivity extends Activity {
 
             rows.addView(r, matchWrap());
         }
+
+        if ("home".equals(currentScrollKey) && currentScrollView != null) {
+            int y = scrollPositions.containsKey("home")
+                    ? scrollPositions.get("home")
+                    : getSharedPreferences("sts_scroll_positions", MODE_PRIVATE).getInt("home", 0);
+            currentScrollView.postDelayed(() -> currentScrollView.scrollTo(0, Math.max(0, y)), 80);
+        }
     }
 
     private String percentText(float pct) {
