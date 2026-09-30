@@ -376,7 +376,7 @@ public class MainActivity extends Activity {
         for (StorageCategory cat : StorageCategory.values()) {
             long bytes = a.bytes(cat);
             int count = a.count(cat);
-            if (bytes <= 0 && cat != StorageCategory.PROTECTED) continue;
+            if (bytes <= 0) continue;
 
             float pct = usedStorage <= 0 ? 0f : (bytes * 100f / usedStorage);
             LinearLayout r = row();
