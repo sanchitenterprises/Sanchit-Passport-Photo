@@ -311,6 +311,11 @@ public class MainActivity extends Activity {
         currentScrollKey = null;
     }
 
+    private void beginNonScrollScreen() {
+        rememberCurrentScroll();
+        clearCurrentScrollBinding();
+    }
+
     private void loadStorageAnalytics(long totalStorage, long usedStorage, StorageRing ring,
                                       StorageBreakdownView chart,
                                       LinearLayout rows, TextView status) {
@@ -514,6 +519,7 @@ public class MainActivity extends Activity {
     }
 
     private void showSystemAnalyzer() {
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("systemAnalyzer");
         LinearLayout root = column();
         root.setPadding(dp(18), dp(24), dp(18), dp(28));
@@ -649,6 +655,7 @@ public class MainActivity extends Activity {
     }
 
     private void showSystemAnalyzerResult(SystemStorageResult result) {
+        rememberCurrentScroll();
         activeSystemResult = result;
         activeToolResult = null;
         activeAppDetailResult = null;
@@ -741,10 +748,12 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("systemResult", scroll);
         fadeIn(root);
     }
 
     private void showAppDetailLoading(AppStorageEntry entry){
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("appDetailLoading");
         LinearLayout root=column();
         root.setPadding(dp(18),dp(24),dp(18),dp(28));
@@ -896,6 +905,7 @@ public class MainActivity extends Activity {
     }
 
     private void showAppDetailResult(AppDetailResult result){
+        rememberCurrentScroll();
         activeAppDetailResult=result;
         activeVisibleCategory=null;
         activeToolResult=null;
@@ -1028,6 +1038,7 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("appDetail:" + result.entry.packageName, scroll);
         fadeIn(root);
     }
 
@@ -1065,6 +1076,7 @@ public class MainActivity extends Activity {
     }
 
     private void showAppVisibleFiles(AppDetailResult result,AppVisibleCategory cat){
+        rememberCurrentScroll();
         activeAppDetailResult=result;
         activeVisibleCategory=cat;
         activeToolResult=null;
@@ -1138,6 +1150,7 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("appFiles:" + result.entry.packageName + ":" + cat.name(), scroll);
         fadeIn(root);
     }
 
@@ -1232,6 +1245,7 @@ public class MainActivity extends Activity {
     }
 
     private void showToolScan(String type) {
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("toolScan");
         LinearLayout root = column();
         root.setPadding(dp(20), dp(26), dp(20), dp(28));
@@ -1313,6 +1327,7 @@ public class MainActivity extends Activity {
     }
 
     private void showToolResult(ToolResult result) {
+        rememberCurrentScroll();
         activeToolResult = result;
         getWindow().getDecorView().setTag("toolResult");
         ScrollView scroll = new ScrollView(this);
@@ -1468,6 +1483,7 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("toolResult:" + result.type, scroll);
         fadeIn(root);
     }
 
@@ -1761,6 +1777,7 @@ public class MainActivity extends Activity {
     }
 
     private void showPhotoPreview(File file) {
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("preview");
         LinearLayout root = column();
         root.setBackgroundColor(Color.rgb(12,14,20));
@@ -1802,6 +1819,7 @@ public class MainActivity extends Activity {
     }
 
     private void showMediaPreview(File file, boolean videoMode) {
+        beginNonScrollScreen();
         releasePreviewResources();
         getWindow().getDecorView().setTag("preview");
 
@@ -1895,6 +1913,7 @@ public class MainActivity extends Activity {
     }
 
     private void showPdfPreview(File file) {
+        beginNonScrollScreen();
         releasePreviewResources();
         getWindow().getDecorView().setTag("preview");
 
@@ -1979,6 +1998,7 @@ public class MainActivity extends Activity {
     }
 
     private void showTextPreview(File file) {
+        beginNonScrollScreen();
         releasePreviewResources();
         getWindow().getDecorView().setTag("preview");
         LinearLayout root = column();
@@ -2032,6 +2052,7 @@ public class MainActivity extends Activity {
     }
 
     private void showInternalFilePage(File file) {
+        beginNonScrollScreen();
         releasePreviewResources();
         getWindow().getDecorView().setTag("preview");
         AppFileInfo info = describeAppFile(file);
@@ -2278,6 +2299,7 @@ public class MainActivity extends Activity {
     }
 
     private void showTrashScreen() {
+        rememberCurrentScroll();
         releasePreviewResources();
         getWindow().getDecorView().setTag("trash");
         purgeExpiredTrash();
@@ -2357,6 +2379,7 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("trash", scroll);
         fadeIn(root);
     }
 
@@ -2403,6 +2426,7 @@ public class MainActivity extends Activity {
     }
 
     private void showTrashMovedDone(long bytes, int count, int failed) {
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("done");
         LinearLayout root = column();
         root.setPadding(dp(24),dp(48),dp(24),dp(36));
@@ -2632,6 +2656,7 @@ public class MainActivity extends Activity {
     }
 
     private void startScan(boolean deep) {
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("scan");
         LinearLayout root = column();
         root.setPadding(dp(22), dp(24), dp(22), dp(28));
@@ -2718,6 +2743,7 @@ public class MainActivity extends Activity {
     }
 
     private void showResult(ScanSummary s) {
+        rememberCurrentScroll();
         getWindow().getDecorView().setTag("result");
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -2786,6 +2812,7 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
+        bindScrollPosition("scanResult", scroll);
         fadeIn(root);
     }
 
@@ -2844,6 +2871,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCleanDone(long bytes, int count, int failed) {
+        beginNonScrollScreen();
         getWindow().getDecorView().setTag("done");
         LinearLayout root = column();
         root.setPadding(dp(24), dp(48), dp(24), dp(36));
