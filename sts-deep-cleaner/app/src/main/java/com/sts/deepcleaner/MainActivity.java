@@ -172,27 +172,47 @@ public class MainActivity extends Activity {
     private void startScan(boolean deep) {
         getWindow().getDecorView().setTag("scan");
         LinearLayout root = column();
-        root.setPadding(dp(22), dp(28), dp(22), dp(28));
+        root.setPadding(dp(22), dp(24), dp(22), dp(28));
         root.setBackgroundColor(BG);
 
         TextView title = text(deep ? "Deep Scan" : "Smart Scan", 28, INK, true);
-        TextView sub = text("Storage को safely analyze कर रहे हैं", 14, MUTED, false);
-        root.addView(title); root.addView(space(5)); root.addView(sub); root.addView(space(30));
+        TextView sub = text("Live storage analysis चल रहा है", 14, MUTED, false);
+        root.addView(title); root.addView(space(5)); root.addView(sub); root.addView(space(22));
 
         ScanRing ring = new ScanRing(this);
-        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(250), dp(250));
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(220), dp(220));
         rlp.gravity = Gravity.CENTER_HORIZONTAL;
         root.addView(ring, rlp);
-        TextView status = text("Preparing…", 14, MUTED, false);
-        status.setGravity(Gravity.CENTER);
-        root.addView(space(14)); root.addView(status, matchWrap());
 
-        root.addView(space(30));
+        TextView status = text("Preparing storage map…", 13, MUTED, false);
+        status.setGravity(Gravity.CENTER);
+        status.setMaxLines(2);
+        root.addView(space(10)); root.addView(status, matchWrap());
+
+        root.addView(space(18));
+        LinearLayout live = card();
+        live.setPadding(dp(18), dp(16), dp(18), dp(16));
+        TextView filesLive = text("0 files scanned", 16, INK, true);
+        TextView dataLive = text("0 B analyzed", 13, MUTED, false);
+        TextView safeLive = text("Safe junk: 0 • 0 B", 13, Color.rgb(18,145,123), true);
+        TextView reviewLive = text("Review: 0 items", 13, AMBER, true);
+        live.addView(text("LIVE SCAN", 12, PURPLE, true));
+        live.addView(space(8));
+        live.addView(filesLive);
+        live.addView(space(4));
+        live.addView(dataLive);
+        live.addView(space(8));
+        live.addView(safeLive);
+        live.addView(space(4));
+        live.addView(reviewLive);
+        root.addView(live, matchWrap());
+
+        root.addView(space(14));
         LinearLayout note = card();
-        note.setPadding(dp(18), dp(16), dp(18), dp(16));
-        note.addView(text("Safety lock active", 15, INK, true));
-        note.addView(space(5));
-        note.addView(text("Personal media review-only है। System-critical files scan-clean list में नहीं आएँगी।", 13, MUTED, false));
+        note.setPadding(dp(18), dp(14), dp(18), dp(14));
+        note.addView(text("Safety lock active", 14, INK, true));
+        note.addView(space(4));
+        note.addView(text("Personal media auto-delete नहीं होगा। System-critical files protected रहेंगी।", 12, MUTED, false));
         root.addView(note, matchWrap());
 
         Space flex = new Space(this);
@@ -208,13 +228,29 @@ public class MainActivity extends Activity {
         scanStorage(new ScanCallback() {
             @Override public void progress(int pct, String label) {
                 runOnUiThread(() -> {
-                    ring.setProgress(pct);
+                    if (pct >= 100) ring.setDone();
                     status.setText(label);
                 });
             }
+
+            @Override public void live(String currentPath, int files, long bytes,
+                                       int safeCount, long safeBytes, int reviewCount) {
+                runOnUiThread(() -> {
+                    ring.setLiveFiles(files);
+                    status.setText("Scanning: " + shortPath(currentPath));
+                    filesLive.setText(files + " files scanned");
+                    dataLive.setText(format(bytes) + " analyzed");
+                    safeLive.setText("Safe junk: " + safeCount + " • " + format(safeBytes));
+                    reviewLive.setText("Review: " + reviewCount + " items");
+                });
+            }
+
             @Override public void done(ScanSummary sum) {
                 lastSummary = sum;
-                runOnUiThread(() -> showResult(sum));
+                runOnUiThread(() -> {
+                    ring.setDone();
+                    showResult(sum);
+                });
             }
         });
     }
@@ -412,7 +448,7 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             ScanSummary out = new ScanSummary();
             out.fullAccess = hasAllFilesAccess();
-            cb.progress(4, "Storage map पढ़ रहे हैं…");
+            cb.progress(1, "Storage map तैयार कर रहे हैं…");
 
             List<File> roots = new ArrayList<>();
             if (out.fullAccess) {
@@ -425,21 +461,20 @@ public class MainActivity extends Activity {
             }
 
             Set<String> seen = new HashSet<>();
-            int idx = 0;
             for (File root : roots) {
                 if (root == null || !root.exists()) continue;
-                idx++;
-                cb.progress(Math.min(86, 8 + idx * 24), "Scanning: " + root.getAbsolutePath());
-                walk(root, out, seen, 0);
+                emitLive(out, cb, root.getAbsolutePath(), true);
+                walk(root, out, seen, 0, cb);
             }
 
-            cb.progress(92, "Junk / large / old files verify कर रहे हैं…");
+            emitLive(out, cb, "Final verification", true);
+            cb.progress(98, "Junk / large / old files verify कर रहे हैं…");
             cb.progress(100, "Scan complete • " + out.scannedFiles + " files");
             cb.done(out);
         }, "sts-scan").start();
     }
 
-    private void walk(File f, ScanSummary out, Set<String> seen, int depth) {
+    private void walk(File f, ScanSummary out, Set<String> seen, int depth, ScanCallback cb) {
         if (f == null || depth > 22) return;
         String path;
         try { path = f.getCanonicalPath(); } catch (Exception e) { path = f.getAbsolutePath(); }
@@ -448,17 +483,20 @@ public class MainActivity extends Activity {
 
         if (isCritical(low)) {
             out.restrictedCount++;
+            emitLive(out, cb, path, false);
             return;
         }
 
         if (f.isDirectory()) {
+            emitLive(out, cb, path, false);
             File[] children;
             try { children = f.listFiles(); } catch (Exception e) { children = null; }
             if (children == null) {
                 out.restrictedCount++;
+                emitLive(out, cb, path, true);
                 return;
             }
-            for (File x : children) walk(x, out, seen, depth + 1);
+            for (File x : children) walk(x, out, seen, depth + 1, cb);
             return;
         }
 
@@ -506,6 +544,15 @@ public class MainActivity extends Activity {
             out.reviewBytes += len;
             out.reviewCount++;
         }
+
+        emitLive(out, cb, path, false);
+    }
+
+    private void emitLive(ScanSummary out, ScanCallback cb, String path, boolean force) {
+        long now = System.currentTimeMillis();
+        if (!force && now - out.lastLiveUpdate < 90) return;
+        out.lastLiveUpdate = now;
+        cb.live(path, out.scannedFiles, out.scannedBytes, out.safeCount, out.safeBytes, out.reviewCount);
     }
 
     private boolean isCritical(String p) {
@@ -663,6 +710,12 @@ public class MainActivity extends Activity {
     private LinearLayout.LayoutParams weight() { return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f); }
     private int dp(float n) { return Math.round(n * getResources().getDisplayMetrics().density); }
 
+    private String shortPath(String path) {
+        if (path == null || path.length() == 0) return "";
+        if (path.length() <= 68) return path;
+        return "…" + path.substring(path.length() - 67);
+    }
+
     private String format(long bytes) {
         if (bytes <= 0) return "0 B";
         String[] u={"B","KB","MB","GB","TB"}; double v=bytes; int i=0;
@@ -675,13 +728,14 @@ public class MainActivity extends Activity {
         ScanItem(File f,long b,boolean s){file=f;bytes=b;safe=s;}
     }
     private static final class ScanSummary {
-        long safeBytes, reviewBytes, scannedBytes, personalBytes;
+        long safeBytes, reviewBytes, scannedBytes, personalBytes, lastLiveUpdate;
         int safeCount, reviewCount, restrictedCount, scannedFiles, personalCount;
         boolean fullAccess;
         final List<ScanItem> items = new ArrayList<>();
     }
     private interface ScanCallback {
         void progress(int pct,String label);
+        void live(String currentPath, int files, long bytes, int safeCount, long safeBytes, int reviewCount);
         void done(ScanSummary sum);
     }
 
@@ -706,17 +760,43 @@ public class MainActivity extends Activity {
 
     private static final class ScanRing extends View {
         private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private int pct;
+        private int liveFiles;
+        private boolean done;
         ScanRing(Context c){super(c);}
-        void setProgress(int n){pct=Math.max(0,Math.min(100,n));invalidate();}
+        void setLiveFiles(int n){liveFiles=Math.max(0,n);invalidate();}
+        void setDone(){done=true;invalidate();}
         @Override protected void onDraw(Canvas c){
             float cx=getWidth()/2f,cy=getHeight()/2f,r=Math.min(cx,cy)-26;
-            p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(18);p.setStrokeCap(Paint.Cap.ROUND);
-            p.setColor(Color.rgb(229,232,246));c.drawCircle(cx,cy,r,p);
-            p.setColor(PURPLE);c.drawArc(new RectF(cx-r,cy-r,cx+r,cy+r),-90,3.6f*pct,false,p);
-            p.setStyle(Paint.Style.FILL);p.setTextAlign(Paint.Align.CENTER);p.setColor(INK);
-            p.setTypeface(Typeface.DEFAULT_BOLD);p.setTextSize(38*getResources().getDisplayMetrics().scaledDensity);
-            c.drawText(pct+"%",cx,cy+13,p);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(18);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(Color.rgb(229,232,246));
+            c.drawCircle(cx,cy,r,p);
+
+            if (done) {
+                p.setColor(TEAL);
+                c.drawArc(new RectF(cx-r,cy-r,cx+r,cy+r),-90,360,false,p);
+            } else {
+                long t = System.currentTimeMillis() % 1600L;
+                float start = -90f + (t / 1600f) * 360f;
+                p.setColor(PURPLE);
+                c.drawArc(new RectF(cx-r,cy-r,cx+r,cy+r),start,105,false,p);
+                p.setStrokeWidth(8);
+                p.setColor(TEAL);
+                c.drawArc(new RectF(cx-r+24,cy-r+24,cx+r-24,cy+r-24),start-65,55,false,p);
+                postInvalidateDelayed(16);
+            }
+
+            p.setStyle(Paint.Style.FILL);
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setColor(INK);
+            p.setTypeface(Typeface.DEFAULT_BOLD);
+            p.setTextSize(31*getResources().getDisplayMetrics().scaledDensity);
+            c.drawText(done ? "DONE" : "LIVE",cx,cy-2,p);
+            p.setTypeface(Typeface.DEFAULT);
+            p.setTextSize(13*getResources().getDisplayMetrics().scaledDensity);
+            p.setColor(MUTED);
+            c.drawText(liveFiles+" files",cx,cy+29,p);
         }
     }
 
