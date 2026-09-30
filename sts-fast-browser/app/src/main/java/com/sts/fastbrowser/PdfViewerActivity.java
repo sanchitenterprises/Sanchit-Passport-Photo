@@ -11,6 +11,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.drawable.GradientDrawable;
@@ -379,8 +380,6 @@ public class PdfViewerActivity extends Activity {
     private void renderAllPages() throws Exception {
         runOnUiThread(() -> pages.removeAllViews());
 
-        int screen = getResources().getDisplayMetrics().widthPixels;
-        int targetW = Math.min(Math.max(640, screen - dp(12)), 1200);
         int count;
         synchronized (this) {
             count = pdfRenderer.getPageCount();
@@ -388,8 +387,18 @@ public class PdfViewerActivity extends Activity {
 
         for (int i = 0; i < count && !destroyed; i++) {
             final int pageIndex = i;
-            Bitmap bmp = renderPageBitmap(pageIndex, targetW);
-            runOnUiThread(() -> addPageView(pageIndex, bmp));
+            final float aspect = getPageAspectRatio(pageIndex);
+            runOnUiThread(() -> addPageView(pageIndex, aspect));
+        }
+    }
+
+    private synchronized float getPageAspectRatio(int pageIndex) throws Exception {
+        if (pdfRenderer == null) throw new IllegalStateException("PDF renderer unavailable");
+        PdfRenderer.Page page = pdfRenderer.openPage(pageIndex);
+        try {
+            return page.getHeight() / (float) Math.max(1, page.getWidth());
+        } finally {
+            page.close();
         }
     }
 
@@ -400,28 +409,43 @@ public class PdfViewerActivity extends Activity {
             int targetH = Math.max(1, Math.round(targetW * (page.getHeight() / (float) page.getWidth())));
             Bitmap bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
             bmp.eraseColor(Color.WHITE);
-            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT);
             return bmp;
         } finally {
             page.close();
         }
     }
 
-    private void addPageView(int pageIndex, Bitmap bitmap) {
-        if (destroyed) {
-            bitmap.recycle();
-            return;
+    private synchronized Bitmap renderPageViewport(int pageIndex, int viewW, int viewH,
+                                                    float zoom, float offsetX, float offsetY) throws Exception {
+        if (pdfRenderer == null) throw new IllegalStateException("PDF renderer unavailable");
+        PdfRenderer.Page page = pdfRenderer.openPage(pageIndex);
+        try {
+            Bitmap bmp = Bitmap.createBitmap(Math.max(1, viewW), Math.max(1, viewH), Bitmap.Config.ARGB_8888);
+            bmp.eraseColor(Color.WHITE);
+
+            float fitScale = viewW / (float) Math.max(1, page.getWidth());
+            Matrix transform = new Matrix();
+            transform.postScale(fitScale * zoom, fitScale * zoom);
+            transform.postTranslate(offsetX, offsetY);
+            page.render(bmp, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+            return bmp;
+        } finally {
+            page.close();
         }
+    }
+
+    private void addPageView(int pageIndex, float aspect) {
+        if (destroyed) return;
 
         ZoomPageView iv = new ZoomPageView(this, pageIndex);
-        iv.setImageBitmap(bitmap);
         iv.setBackgroundColor(Color.WHITE);
         iv.setContentDescription("PDF page " + (pageIndex + 1));
 
+        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(12));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                Math.max(dp(120), Math.round((getResources().getDisplayMetrics().widthPixels - dp(12)) *
-                        (bitmap.getHeight() / (float) bitmap.getWidth())))
+                Math.max(dp(120), Math.round(pageWidth * aspect))
         );
         lp.setMargins(0, 0, 0, dp(7));
         pages.addView(iv, lp);
@@ -511,7 +535,7 @@ public class PdfViewerActivity extends Activity {
         new Thread(() -> {
             Bitmap bmp = null;
             try {
-                int width = 2000;
+                int width = 3000;
                 bmp = renderPageBitmap(pageIndex, width);
                 String base = fileName.toLowerCase(Locale.ROOT).endsWith(".pdf")
                         ? fileName.substring(0, fileName.length() - 4)
@@ -522,7 +546,7 @@ public class PdfViewerActivity extends Activity {
                 String mime = png ? "image/png" : "image/jpeg";
                 String outName = sanitize(base) + "_Page_" + (pageIndex + 1) + ext;
                 Bitmap.CompressFormat compressFormat = png ? Bitmap.CompressFormat.PNG : Bitmap.CompressFormat.JPEG;
-                int quality = png ? 100 : 95;
+                int quality = 100;
 
                 if (android.os.Build.VERSION.SDK_INT >= 29) {
                     ContentValues v = new ContentValues();
@@ -788,26 +812,36 @@ public class PdfViewerActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        if (pages != null) {
+            for (int i = 0; i < pages.getChildCount(); i++) {
+                View child = pages.getChildAt(i);
+                if (child instanceof ZoomPageView) ((ZoomPageView) child).releaseBitmap();
+            }
+        }
         closePdfResources();
         super.onDestroy();
     }
 
-    private class ZoomPageView extends ImageView {
-        private final Matrix drawMatrix = new Matrix();
+    private class ZoomPageView extends View {
         private final ScaleGestureDetector scaleDetector;
         private final GestureDetector gestureDetector;
-        private final float[] matrixValues = new float[9];
+        private final int pageIndex;
+
+        private Bitmap renderedBitmap;
+        private float renderedScale = 1f;
+        private float renderedOffsetX = 0f;
+        private float renderedOffsetY = 0f;
 
         private float currentScale = 1f;
-        private float baseScale = 1f;
+        private float offsetX = 0f;
+        private float offsetY = 0f;
         private float lastX;
         private float lastY;
-        private final int pageIndex;
+        private int renderGeneration = 0;
 
         ZoomPageView(Context context, int pageIndex) {
             super(context);
             this.pageIndex = pageIndex;
-            setScaleType(ScaleType.MATRIX);
             setClickable(true);
             setLongClickable(true);
 
@@ -827,20 +861,23 @@ public class PdfViewerActivity extends Activity {
                     float applied = next / currentScale;
                     currentScale = next;
 
-                    drawMatrix.postScale(applied, applied, detector.getFocusX(), detector.getFocusY());
-                    clampMatrix();
-                    setImageMatrix(drawMatrix);
+                    float focusX = detector.getFocusX();
+                    float focusY = detector.getFocusY();
+                    offsetX = focusX - ((focusX - offsetX) * applied);
+                    offsetY = focusY - ((focusY - offsetY) * applied);
+                    clampOffsets();
+                    invalidate();
                     return true;
                 }
 
                 @Override
                 public void onScaleEnd(ScaleGestureDetector detector) {
-                    if (currentScale <= 1.02f) {
-                        resetMatrix();
-                    } else {
-                        clampMatrix();
-                        setImageMatrix(drawMatrix);
+                    if (currentScale <= 1.02f) resetZoom();
+                    else {
+                        clampOffsets();
+                        requestSharpRender();
                     }
+                    getParent().requestDisallowInterceptTouchEvent(currentScale > 1.02f);
                 }
             });
 
@@ -866,97 +903,139 @@ public class PdfViewerActivity extends Activity {
                 @Override
                 public boolean onDoubleTap(MotionEvent e) {
                     if (currentScale > 1.05f) {
-                        resetMatrix();
+                        resetZoom();
                     } else {
+                        float applied = 2f / currentScale;
                         currentScale = 2f;
-                        drawMatrix.postScale(2f, 2f, e.getX(), e.getY());
-                        clampMatrix();
-                        setImageMatrix(drawMatrix);
+                        offsetX = e.getX() - ((e.getX() - offsetX) * applied);
+                        offsetY = e.getY() - ((e.getY() - offsetY) * applied);
+                        clampOffsets();
+                        invalidate();
+                        requestSharpRender();
                     }
                     return true;
                 }
             });
         }
 
-        private String findLinkAt(float viewX, float viewY) {
-            List<PdfLink> links = pageLinks.get(pageIndex);
-            if (links == null || links.isEmpty() || getDrawable() == null) return null;
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            if (w <= 0 || h <= 0) return;
+            if (oldw != w || oldh != h) {
+                currentScale = 1f;
+                offsetX = 0f;
+                offsetY = 0f;
+                requestSharpRender();
+            }
+        }
 
-            Matrix inverse = new Matrix();
-            if (!drawMatrix.invert(inverse)) return null;
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            canvas.drawColor(Color.WHITE);
+            Bitmap bmp = renderedBitmap;
+            if (bmp == null || bmp.isRecycled()) return;
 
-            float[] point = new float[]{viewX, viewY};
-            inverse.mapPoints(point);
+            float safeRenderedScale = Math.max(0.0001f, renderedScale);
+            float ratio = currentScale / safeRenderedScale;
+            float translateX = offsetX - (renderedOffsetX * ratio);
+            float translateY = offsetY - (renderedOffsetY * ratio);
 
-            float drawableW = getDrawable().getIntrinsicWidth();
-            float drawableH = getDrawable().getIntrinsicHeight();
-            if (drawableW <= 0f || drawableH <= 0f) return null;
-            if (point[0] < 0f || point[1] < 0f || point[0] > drawableW || point[1] > drawableH) {
-                return null;
+            canvas.save();
+            canvas.translate(translateX, translateY);
+            canvas.scale(ratio, ratio);
+            canvas.drawBitmap(bmp, 0f, 0f, null);
+            canvas.restore();
+        }
+
+        private void requestSharpRender() {
+            if (destroyed || getWidth() <= 0 || getHeight() <= 0) return;
+
+            final int generation = ++renderGeneration;
+            final int width = getWidth();
+            final int height = getHeight();
+            final float scale = currentScale;
+            final float tx = offsetX;
+            final float ty = offsetY;
+
+            new Thread(() -> {
+                Bitmap fresh = null;
+                try {
+                    fresh = renderPageViewport(pageIndex, width, height, scale, tx, ty);
+                    final Bitmap result = fresh;
+                    runOnUiThread(() -> {
+                        if (destroyed || generation != renderGeneration || getWidth() != width || getHeight() != height) {
+                            if (!result.isRecycled()) result.recycle();
+                            return;
+                        }
+
+                        Bitmap old = renderedBitmap;
+                        renderedBitmap = result;
+                        renderedScale = scale;
+                        renderedOffsetX = tx;
+                        renderedOffsetY = ty;
+                        invalidate();
+                        if (old != null && old != result && !old.isRecycled()) old.recycle();
+                    });
+                } catch (Exception e) {
+                    if (fresh != null && !fresh.isRecycled()) fresh.recycle();
+                }
+            }, "SFB-PDF-Render-" + pageIndex + "-" + generation).start();
+        }
+
+        private void resetZoom() {
+            currentScale = 1f;
+            offsetX = 0f;
+            offsetY = 0f;
+            clampOffsets();
+            invalidate();
+            requestSharpRender();
+            getParent().requestDisallowInterceptTouchEvent(false);
+        }
+
+        private void clampOffsets() {
+            if (getWidth() <= 0 || getHeight() <= 0) return;
+
+            float contentW = getWidth() * currentScale;
+            float contentH = getHeight() * currentScale;
+
+            if (contentW <= getWidth()) {
+                offsetX = (getWidth() - contentW) * 0.5f;
+            } else {
+                float minX = getWidth() - contentW;
+                offsetX = Math.max(minX, Math.min(0f, offsetX));
             }
 
+            if (contentH <= getHeight()) {
+                offsetY = (getHeight() - contentH) * 0.5f;
+            } else {
+                float minY = getHeight() - contentH;
+                offsetY = Math.max(minY, Math.min(0f, offsetY));
+            }
+        }
+
+        private String findLinkAt(float viewX, float viewY) {
+            List<PdfLink> links = pageLinks.get(pageIndex);
+            if (links == null || links.isEmpty() || getWidth() <= 0 || getHeight() <= 0) return null;
+
+            float contentX = (viewX - offsetX) / currentScale;
+            float contentY = (viewY - offsetY) / currentScale;
+            if (contentX < 0f || contentY < 0f || contentX > getWidth() || contentY > getHeight()) return null;
+
             for (PdfLink link : links) {
-                float pdfX = (point[0] / drawableW) * link.pageWidth;
-                float pdfY = link.pageHeight - ((point[1] / drawableH) * link.pageHeight);
+                float pdfX = (contentX / getWidth()) * link.pageWidth;
+                float pdfY = link.pageHeight - ((contentY / getHeight()) * link.pageHeight);
                 if (link.contains(pdfX, pdfY)) return link.url;
             }
             return null;
         }
 
-        @Override
-        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
-            super.onSizeChanged(w, h, oldw, oldh);
-            resetMatrix();
-        }
-
-        private void resetMatrix() {
-            if (getDrawable() == null || getWidth() <= 0 || getHeight() <= 0) return;
-
-            float dw = getDrawable().getIntrinsicWidth();
-            float dh = getDrawable().getIntrinsicHeight();
-            if (dw <= 0 || dh <= 0) return;
-
-            baseScale = Math.min(getWidth() / dw, getHeight() / dh);
-            float dx = (getWidth() - dw * baseScale) * 0.5f;
-            float dy = (getHeight() - dh * baseScale) * 0.5f;
-
-            drawMatrix.reset();
-            drawMatrix.postScale(baseScale, baseScale);
-            drawMatrix.postTranslate(dx, dy);
-            currentScale = 1f;
-            setImageMatrix(drawMatrix);
-            getParent().requestDisallowInterceptTouchEvent(false);
-        }
-
-        private void clampMatrix() {
-            if (getDrawable() == null || getWidth() <= 0 || getHeight() <= 0) return;
-
-            drawMatrix.getValues(matrixValues);
-            float scaleX = matrixValues[Matrix.MSCALE_X];
-            float scaleY = matrixValues[Matrix.MSCALE_Y];
-            float transX = matrixValues[Matrix.MTRANS_X];
-            float transY = matrixValues[Matrix.MTRANS_Y];
-
-            float contentW = getDrawable().getIntrinsicWidth() * scaleX;
-            float contentH = getDrawable().getIntrinsicHeight() * scaleY;
-
-            float targetX;
-            if (contentW <= getWidth()) {
-                targetX = (getWidth() - contentW) * 0.5f;
-            } else {
-                float minX = getWidth() - contentW;
-                targetX = Math.max(minX, Math.min(0f, transX));
-            }
-
-            float targetY;
-            if (contentH <= getHeight()) {
-                targetY = (getHeight() - contentH) * 0.5f;
-            } else {
-                float minY = getHeight() - contentH;
-                targetY = Math.max(minY, Math.min(0f, transY));
-            }
-
-            drawMatrix.postTranslate(targetX - transX, targetY - transY);
+        void releaseBitmap() {
+            renderGeneration++;
+            Bitmap bmp = renderedBitmap;
+            renderedBitmap = null;
+            if (bmp != null && !bmp.isRecycled()) bmp.recycle();
         }
 
         @Override
@@ -968,18 +1047,17 @@ public class PdfViewerActivity extends Activity {
                 case MotionEvent.ACTION_DOWN:
                     lastX = event.getX();
                     lastY = event.getY();
-                    if (currentScale > 1.02f) {
-                        getParent().requestDisallowInterceptTouchEvent(true);
-                    }
+                    if (currentScale > 1.02f) getParent().requestDisallowInterceptTouchEvent(true);
                     break;
 
                 case MotionEvent.ACTION_MOVE:
                     if (!scaleDetector.isInProgress() && currentScale > 1.02f) {
                         float dx = event.getX() - lastX;
                         float dy = event.getY() - lastY;
-                        drawMatrix.postTranslate(dx, dy);
-                        clampMatrix();
-                        setImageMatrix(drawMatrix);
+                        offsetX += dx;
+                        offsetY += dy;
+                        clampOffsets();
+                        invalidate();
                         getParent().requestDisallowInterceptTouchEvent(true);
                     }
                     lastX = event.getX();
@@ -987,17 +1065,19 @@ public class PdfViewerActivity extends Activity {
                     break;
 
                 case MotionEvent.ACTION_POINTER_UP:
-                    clampMatrix();
-                    setImageMatrix(drawMatrix);
+                    clampOffsets();
+                    invalidate();
                     break;
 
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     if (currentScale <= 1.02f) {
-                        resetMatrix();
+                        if (currentScale != 1f || offsetX != 0f || offsetY != 0f) resetZoom();
+                        else getParent().requestDisallowInterceptTouchEvent(false);
                     } else {
-                        clampMatrix();
-                        setImageMatrix(drawMatrix);
+                        clampOffsets();
+                        invalidate();
+                        requestSharpRender();
                     }
                     break;
             }
