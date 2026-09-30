@@ -28,6 +28,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Space;
@@ -84,32 +85,52 @@ public class MainActivity extends Activity {
         getWindow().getDecorView().setTag("home");
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
         scroll.setBackgroundColor(BG);
+
         LinearLayout root = column();
-        root.setPadding(dp(18), 0, dp(18), dp(26));
+        root.setPadding(0, 0, 0, dp(24));
 
         LinearLayout header = column();
-        header.setPadding(dp(20), dp(24), dp(20), dp(24));
+        header.setPadding(dp(20), dp(22), dp(20), dp(26));
         header.setBackground(gradient(PURPLE, PURPLE2, 0, 0, 0, 0));
-        TextView title = text("STS Deep Cleaner", 29, Color.WHITE, true);
+
+        LinearLayout brandRow = row();
+        brandRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(com.sts.deepcleaner.R.drawable.ic_launcher);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(58), dp(58));
+        brandRow.addView(logo, logoLp);
+
+        LinearLayout brandText = column();
+        brandText.setPadding(dp(12), 0, 0, 0);
+        TextView title = text("STS Deep Cleaner", 27, Color.WHITE, true);
         TextView sub = text("Safe • Smart • Deep", 14, Color.argb(220,255,255,255), false);
-        header.addView(title);
-        header.addView(space(4));
-        header.addView(sub);
+        brandText.addView(title);
+        brandText.addView(space(3));
+        brandText.addView(sub);
+        brandRow.addView(brandText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        header.addView(brandRow, matchWrap());
         header.addView(space(18));
 
-        long[] s = storage();
+        long[] st = storage();
         StorageRing ring = new StorageRing(this);
-        ring.setStorage(s[0], s[1]);
-        LinearLayout.LayoutParams ringLp = new LinearLayout.LayoutParams(dp(190), dp(190));
+        ring.setStorage(st[0], st[1]);
+        LinearLayout.LayoutParams ringLp = new LinearLayout.LayoutParams(dp(196), dp(196));
         ringLp.gravity = Gravity.CENTER_HORIZONTAL;
         header.addView(ring, ringLp);
         root.addView(header, matchWrap());
 
+        LinearLayout content = column();
+        content.setPadding(dp(16), dp(16), dp(16), 0);
+
         LinearLayout modeCard = card();
         modeCard.setPadding(dp(18), dp(16), dp(18), dp(16));
         TextView free = text("Free storage", 14, MUTED, false);
-        TextView freeValue = text(format(s[0] - s[1]), 27, PURPLE, true);
+        TextView freeValue = text(format(st[0] - st[1]), 27, PURPLE, true);
         TextView mode = pill(hasAllFilesAccess() ? "Full storage access ON" : "Full scan access OFF",
                 hasAllFilesAccess() ? Color.rgb(18,145,123) : PURPLE,
                 hasAllFilesAccess() ? Color.rgb(228,252,248) : Color.rgb(244,240,255));
@@ -117,45 +138,46 @@ public class MainActivity extends Activity {
         modeCard.addView(freeValue);
         modeCard.addView(space(8));
         modeCard.addView(mode);
-        root.addView(space(16));
-        root.addView(modeCard, matchWrap());
+        content.addView(modeCard, matchWrap());
 
-        root.addView(section("Storage Tools"));
+        content.addView(section("Storage Tools"));
         LinearLayout row1 = row();
         row1.addView(toolCard("✦", "Junk & Cache", "Temporary files", TEAL), weight());
         row1.addView(spaceH(12));
         row1.addView(toolCard("⬢", "Large Files", "Review first", AMBER), weight());
-        root.addView(row1, matchWrap());
+        content.addView(row1, matchWrap());
 
-        root.addView(space(12));
+        content.addView(space(12));
         LinearLayout row2 = row();
         row2.addView(toolCard("⧉", "Duplicates", "Hash finder", BLUE), weight());
         row2.addView(spaceH(12));
         row2.addView(toolCard("⌁", "Residual", "App leftovers", ROSE), weight());
-        root.addView(row2, matchWrap());
+        content.addView(row2, matchWrap());
 
-        root.addView(space(22));
+        content.addView(space(22));
         TextView scan = actionButton("SMART SCAN", PURPLE);
         touch(scan);
         scan.setOnClickListener(v -> beginScan(false));
-        root.addView(scan, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
+        content.addView(scan, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(66)));
 
-        root.addView(space(10));
+        content.addView(space(10));
         TextView deep = actionButton(hasAllFilesAccess() ? "DEEP SCAN • ACCESS ON" : "DEEP SCAN • ENABLE ACCESS",
                 Color.rgb(236,233,255));
         deep.setTextColor(PURPLE);
         touch(deep);
         deep.setOnClickListener(v -> beginScan(true));
-        root.addView(deep, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        content.addView(deep, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
 
-        root.addView(space(16));
+        content.addView(space(16));
         TextView safety = text("✓ Personal photos, videos और documents auto-delete नहीं होंगे\n✓ System-critical paths हमेशा protected रहेंगे", 13, MUTED, false);
         safety.setLineSpacing(dp(3), 1f);
-        root.addView(safety);
+        content.addView(safety);
 
+        root.addView(content, matchWrap());
         scroll.addView(root);
         setContentView(scroll);
         fadeIn(root);
+        popIn(logo);
     }
 
     private void beginScan(boolean deep) {
@@ -220,7 +242,7 @@ public class MainActivity extends Activity {
         TextView back = actionButton("BACK", Color.WHITE);
         back.setTextColor(PURPLE);
         touch(back);
-        back.setOnClickListener(v -> showHome());
+        back.setOnClickListener(v -> handleBack());
         root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
         setContentView(root);
         fadeIn(root);
@@ -319,7 +341,7 @@ public class MainActivity extends Activity {
         TextView back = actionButton("BACK", Color.WHITE);
         back.setTextColor(PURPLE);
         touch(back);
-        back.setOnClickListener(v -> showHome());
+        back.setOnClickListener(v -> handleBack());
         root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
 
         scroll.addView(root);
@@ -414,6 +436,21 @@ public class MainActivity extends Activity {
         root.addView(done, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(64)));
         setContentView(root);
         popIn(check);
+    }
+
+    @Override
+    public void onBackPressed() {
+        handleBack();
+    }
+
+    private void handleBack() {
+        Object tag = getWindow().getDecorView().getTag();
+        if (tag == null || "home".equals(tag)) {
+            moveTaskToBack(true);
+        } else {
+            haptic();
+            showHome();
+        }
     }
 
     private void requestAllFiles(boolean deep) {
