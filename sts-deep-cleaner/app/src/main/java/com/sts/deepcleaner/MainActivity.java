@@ -14,6 +14,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.pdf.PdfRenderer;
@@ -23,6 +24,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.media.ThumbnailUtils;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -34,12 +36,14 @@ import android.os.UserHandle;
 import android.os.storage.StorageManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -62,6 +66,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import android.webkit.MimeTypeMap;
 import androidx.core.content.FileProvider;
@@ -96,6 +102,8 @@ public class MainActivity extends Activity {
 
     private final Map<String,Integer> scrollPositions = new HashMap<>();
     private final Map<String,Integer> sortModes = new HashMap<>();
+    private final Map<String,Set<String>> selections = new HashMap<>();
+    private final ExecutorService thumbnailExecutor = Executors.newFixedThreadPool(3);
     private ScrollView currentScrollView = null;
     private String currentScrollKey = null;
     private SystemStorageResult activeSystemResult = null;
@@ -288,6 +296,314 @@ public class MainActivity extends Activity {
         bindScrollPosition("home", scroll);
         fadeIn(root);
         popIn(logo);
+    }
+
+    private int galleryColumns() {
+        int n = getSharedPreferences("sts_view", MODE_PRIVATE).getInt("gallery_columns", 3);
+        return Math.max(2, Math.min(5, n));
+    }
+
+    private void setGalleryColumns(int n) {
+        getSharedPreferences("sts_view", MODE_PRIVATE)
+                .edit().putInt("gallery_columns", Math.max(2, Math.min(5, n))).apply();
+    }
+
+    private TextView viewControl(Runnable refresh) {
+        TextView v = pill("VIEW  •  " + galleryColumns() + " COLUMNS", PURPLE, Color.rgb(239,236,255));
+        touch(v);
+        v.setOnClickListener(x -> {
+            String[] options = {"2 Columns", "3 Columns", "4 Columns", "5 Columns"};
+            int current = galleryColumns() - 2;
+            new AlertDialog.Builder(this)
+                    .setTitle("Preview Grid")
+                    .setSingleChoiceItems(options, current, (d, which) -> {
+                        setGalleryColumns(which + 2);
+                        d.dismiss();
+                        refresh.run();
+                    })
+                    .setNegativeButton("CANCEL", null)
+                    .show();
+        });
+        return v;
+    }
+
+    private Set<String> selectionSet(String key) {
+        Set<String> set = selections.get(key);
+        if (set == null) {
+            set = new HashSet<>();
+            selections.put(key, set);
+        }
+        return set;
+    }
+
+    private void toggleSelected(String key, File file) {
+        if (file == null) return;
+        Set<String> set = selectionSet(key);
+        String p = file.getAbsolutePath();
+        if (set.contains(p)) set.remove(p);
+        else set.add(p);
+    }
+
+    private boolean selected(String key, File file) {
+        return file != null && selectionSet(key).contains(file.getAbsolutePath());
+    }
+
+    private void selectAllFiles(String key, List<File> files) {
+        Set<String> set = selectionSet(key);
+        set.clear();
+        for (File f : files) if (f != null && f.exists()) set.add(f.getAbsolutePath());
+    }
+
+    private void clearSelection(String key) {
+        selectionSet(key).clear();
+    }
+
+    private long selectedBytes(String key, List<File> files) {
+        Set<String> set = selectionSet(key);
+        long total = 0L;
+        for (File f : files) if (f != null && set.contains(f.getAbsolutePath())) total += Math.max(0L, f.length());
+        return total;
+    }
+
+    private List<File> selectedFiles(String key, List<File> files) {
+        Set<String> set = selectionSet(key);
+        List<File> out = new ArrayList<>();
+        for (File f : files) if (f != null && set.contains(f.getAbsolutePath())) out.add(f);
+        return out;
+    }
+
+    private LinearLayout galleryControls(String selectionKey, List<File> selectableFiles,
+                                         Runnable refresh, String selectedActionLabel,
+                                         Runnable selectedAction) {
+        LinearLayout box = column();
+
+        LinearLayout top = row();
+        TextView view = viewControl(refresh);
+        TextView all = pill("SELECT ALL", Color.rgb(18,145,123), Color.rgb(228,252,248));
+        TextView clear = pill("CLEAR", ROSE, Color.rgb(255,238,243));
+        touch(all); touch(clear);
+        all.setOnClickListener(v -> { selectAllFiles(selectionKey, selectableFiles); refresh.run(); });
+        clear.setOnClickListener(v -> { clearSelection(selectionKey); refresh.run(); });
+        top.addView(view, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.2f));
+        top.addView(spaceH(6));
+        top.addView(all, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, .9f));
+        top.addView(spaceH(6));
+        top.addView(clear, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, .7f));
+        box.addView(top, matchWrap());
+
+        box.addView(space(8));
+        Set<String> set = selectionSet(selectionKey);
+        int count = 0;
+        long bytes = 0L;
+        for (File file : selectableFiles) {
+            if (file != null && set.contains(file.getAbsolutePath())) {
+                count++;
+                bytes += Math.max(0L, file.length());
+            }
+        }
+        TextView selectedInfo = centerText(count + " selected  •  " + format(bytes), 12,
+                count > 0 ? PURPLE : MUTED, true);
+        box.addView(selectedInfo, matchWrap());
+
+        if (count > 0 && selectedActionLabel != null && selectedAction != null) {
+            box.addView(space(8));
+            TextView action = actionButton(selectedActionLabel, PURPLE);
+            touch(action);
+            action.setOnClickListener(v -> selectedAction.run());
+            box.addView(action, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
+        }
+        return box;
+    }
+
+    private int previewHeightDp() {
+        switch (galleryColumns()) {
+            case 2: return 150;
+            case 4: return 82;
+            case 5: return 66;
+            case 3:
+            default: return 108;
+        }
+    }
+
+    private LinearLayout galleryFileCard(File file, long bytes, String selectionKey,
+                                         boolean selectable, AppFileInfo info, int accent,
+                                         Runnable refresh) {
+        boolean isSelected = selectable && selected(selectionKey, file);
+
+        LinearLayout card = column();
+        card.setPadding(dp(5), dp(5), dp(5), dp(7));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(isSelected ? Color.rgb(244,240,255) : Color.WHITE);
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(dp(isSelected ? 2 : 1), isSelected ? PURPLE : Color.rgb(228,230,238));
+        card.setBackground(bg);
+        card.setElevation(dp(2));
+
+        FrameLayout preview = new FrameLayout(this);
+        preview.setBackgroundColor(Color.rgb(238,240,247));
+
+        ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setBackgroundColor(Color.rgb(238,240,247));
+        preview.addView(image, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        TextView fallback = centerText(fileIcon(file), galleryColumns() >= 4 ? 20 : 28, MUTED, true);
+        preview.addView(fallback, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        if (isVideoFile(file)) {
+            TextView play = centerText("▶", galleryColumns() >= 4 ? 20 : 30, Color.WHITE, true);
+            GradientDrawable pd = new GradientDrawable();
+            pd.setColor(Color.argb(120, 0, 0, 0));
+            pd.setShape(GradientDrawable.OVAL);
+            play.setBackground(pd);
+            FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER);
+            preview.addView(play, pp);
+        }
+
+        if (selectable) {
+            TextView check = centerText(isSelected ? "✓" : "○", 16,
+                    isSelected ? Color.WHITE : PURPLE, true);
+            GradientDrawable cd = new GradientDrawable();
+            cd.setShape(GradientDrawable.OVAL);
+            cd.setColor(isSelected ? PURPLE : Color.argb(225,255,255,255));
+            check.setBackground(cd);
+            FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(dp(30), dp(30),
+                    Gravity.TOP | Gravity.END);
+            cp.setMargins(0, dp(5), dp(5), 0);
+            preview.addView(check, cp);
+            touch(check);
+            check.setOnClickListener(v -> {
+                toggleSelected(selectionKey, file);
+                refresh.run();
+            });
+        }
+
+        touch(preview);
+        preview.setOnClickListener(v -> openFoundFile(file));
+        card.addView(preview, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(previewHeightDp())));
+
+        card.addView(space(6));
+        TextView name = text(file.getName(), galleryColumns() >= 4 ? 9 : 11, INK, true);
+        name.setMaxLines(2);
+        card.addView(name, matchWrap());
+
+        card.addView(space(2));
+        card.addView(text(format(bytes), galleryColumns() >= 4 ? 8 : 10, accent, true));
+
+        if (info != null && galleryColumns() <= 3) {
+            card.addView(space(3));
+            TextView status = text(info.status, 8, info.statusColor, true);
+            status.setMaxLines(1);
+            card.addView(status, matchWrap());
+        }
+
+        card.setOnLongClickListener(v -> {
+            if (!selectable) return false;
+            toggleSelected(selectionKey, file);
+            refresh.run();
+            return true;
+        });
+
+        loadThumbnail(image, fallback, file);
+        return card;
+    }
+
+    private String fileIcon(File file) {
+        String n = file.getName().toLowerCase(Locale.ROOT);
+        if (isImageFile(file)) return "▧";
+        if (isVideoFile(file)) return "▶";
+        if (isAudioFile(n)) return "♪";
+        if (isPdfFile(file)) return "PDF";
+        if (n.endsWith(".apk")) return "APK";
+        if (isArchiveFile(n)) return "ZIP";
+        if (isTextFile(file)) return "TXT";
+        return "FILE";
+    }
+
+    private void loadThumbnail(ImageView image, TextView fallback, File file) {
+        String path = file.getAbsolutePath();
+        image.setTag(path);
+        thumbnailExecutor.execute(() -> {
+            Bitmap bm = createThumbnail(file, Math.max(dp(140), dp(previewHeightDp())));
+            if (bm == null) return;
+            runOnUiThread(() -> {
+                Object tag = image.getTag();
+                if (tag != null && path.equals(tag.toString())) {
+                    image.setImageBitmap(bm);
+                    fallback.setVisibility(View.GONE);
+                }
+            });
+        });
+    }
+
+    private Bitmap createThumbnail(File file, int targetPx) {
+        try {
+            if (isImageFile(file)) {
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+                int sample = 1;
+                while (bounds.outWidth / sample > targetPx * 2 ||
+                        bounds.outHeight / sample > targetPx * 2) sample *= 2;
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inSampleSize = Math.max(1, sample);
+                Bitmap src = BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+                if (src == null) return null;
+                return ThumbnailUtils.extractThumbnail(src, targetPx, targetPx,
+                        ThumbnailUtils.OPTIONS_RECYCLE_INPUT);
+            }
+            if (isVideoFile(file)) {
+                Bitmap src = ThumbnailUtils.createVideoThumbnail(file.getAbsolutePath(),
+                        MediaStore.Video.Thumbnails.MINI_KIND);
+                if (src == null) return null;
+                return ThumbnailUtils.extractThumbnail(src, targetPx, targetPx,
+                        ThumbnailUtils.OPTIONS_RECYCLE_INPUT);
+            }
+            if (isPdfFile(file)) {
+                try (ParcelFileDescriptor fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);
+                     PdfRenderer renderer = new PdfRenderer(fd)) {
+                    if (renderer.getPageCount() <= 0) return null;
+                    PdfRenderer.Page page = renderer.openPage(0);
+                    int w = targetPx;
+                    int h = Math.max(1, Math.round(targetPx * (float) page.getHeight() /
+                            Math.max(1, page.getWidth())));
+                    Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    bitmap.eraseColor(Color.WHITE);
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                    page.close();
+                    return bitmap;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private void addGalleryCells(LinearLayout gallery, List<LinearLayout> cells) {
+        int cols = galleryColumns();
+        LinearLayout row = null;
+        int inRow = 0;
+        for (LinearLayout cell : cells) {
+            if (row == null || inRow == cols) {
+                row = row();
+                gallery.addView(row, matchWrap());
+                if (gallery.getChildCount() > 1) gallery.addView(space(7));
+                inRow = 0;
+            }
+            if (inRow > 0) row.addView(spaceH(7));
+            row.addView(cell, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            inRow++;
+        }
+        if (row != null && inRow < cols) {
+            while (inRow < cols) {
+                if (inRow > 0) row.addView(spaceH(7));
+                Space filler = new Space(this);
+                row.addView(filler, new LinearLayout.LayoutParams(0, 1, 1f));
+                inRow++;
+            }
+        }
     }
 
     private static final String[] FILE_SORT_OPTIONS = new String[]{
