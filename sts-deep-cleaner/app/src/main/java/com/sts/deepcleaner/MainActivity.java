@@ -226,50 +226,10 @@ public class MainActivity extends Activity {
         loadStorageAnalytics(st[0], st[1], ring, breakdown, analyticsRows, analyticsStatus);
 
         content.addView(section("Storage Tools"));
-
-        LinearLayout row1 = row();
-        LinearLayout junkTool = toolGridCard("✦", "Junk", "Cache", TEAL);
-        junkTool.setOnClickListener(v -> openTool("junk"));
-        row1.addView(junkTool, weight());
-        row1.addView(spaceH(8));
-        LinearLayout largeTool = toolGridCard("⬢", "Large", "Files", AMBER);
-        largeTool.setOnClickListener(v -> openTool("large"));
-        row1.addView(largeTool, weight());
-        row1.addView(spaceH(8));
-        LinearLayout duplicateTool = toolGridCard("⧉", "Duplicate", "Hash", BLUE);
-        duplicateTool.setOnClickListener(v -> openTool("duplicates"));
-        row1.addView(duplicateTool, weight());
-        content.addView(row1, matchWrap());
-
-        content.addView(space(8));
-        LinearLayout row2 = row();
-        LinearLayout residualTool = toolGridCard("⌁", "Residual", "Leftovers", ROSE);
-        residualTool.setOnClickListener(v -> openTool("residual"));
-        row2.addView(residualTool, weight());
-        row2.addView(spaceH(8));
-        LinearLayout trashTool = toolGridCard("♻", "STS Trash", "7 days", Color.rgb(72,120,210));
-        trashTool.setOnClickListener(v -> showTrashScreen());
-        row2.addView(trashTool, weight());
-        row2.addView(spaceH(8));
-        LinearLayout systemTool = toolGridCard("◉", "Apps", "& System", Color.rgb(82,88,110));
-        systemTool.setOnClickListener(v -> openSystemAnalyzer());
-        row2.addView(systemTool, weight());
-        content.addView(row2, matchWrap());
-
-        content.addView(space(8));
-        LinearLayout row3 = row();
-        LinearLayout mediaTool = toolGridCard("▶", "Media", "Photo/Video", Color.rgb(170,82,205));
-        mediaTool.setOnClickListener(v -> openTool("media"));
-        row3.addView(mediaTool, weight());
-        row3.addView(spaceH(8));
-        LinearLayout downloadsTool = toolGridCard("⇩", "Downloads", "Offline", Color.rgb(244,139,45));
-        downloadsTool.setOnClickListener(v -> openTool("downloads"));
-        row3.addView(downloadsTool, weight());
-        row3.addView(spaceH(8));
-        LinearLayout backupsTool = toolGridCard("⛃", "Backups", "Database", Color.rgb(139,93,210));
-        backupsTool.setOnClickListener(v -> openTool("backups"));
-        row3.addView(backupsTool, weight());
-        content.addView(row3, matchWrap());
+        TextView homeView = viewControl(this::showHome);
+        content.addView(homeView, matchWrap());
+        content.addView(space(10));
+        addHomeToolGrid(content);
 
         content.addView(space(22));
         TextView scan = actionButton("SMART SCAN", PURPLE);
@@ -3668,6 +3628,47 @@ public class MainActivity extends Activity {
                 n.endsWith(".xlsx") || n.endsWith(".ppt") || n.endsWith(".pptx") || n.endsWith(".zip");
     }
 
+    private void addHomeToolGrid(LinearLayout parent) {
+        HomeToolSpec[] tools = new HomeToolSpec[]{
+                new HomeToolSpec("✦","Junk","Cache",TEAL,"junk"),
+                new HomeToolSpec("⬢","Large","Files",AMBER,"large"),
+                new HomeToolSpec("⧉","Duplicate","Hash",BLUE,"duplicates"),
+                new HomeToolSpec("⌁","Residual","Leftovers",ROSE,"residual"),
+                new HomeToolSpec("♻","STS Trash","7 days",Color.rgb(72,120,210),"trash"),
+                new HomeToolSpec("◉","Apps","& System",Color.rgb(82,88,110),"system"),
+                new HomeToolSpec("▶","Media","Photo/Video",Color.rgb(170,82,205),"media"),
+                new HomeToolSpec("⇩","Downloads","Offline",Color.rgb(244,139,45),"downloads"),
+                new HomeToolSpec("⛃","Backups","Database",Color.rgb(139,93,210),"backups")
+        };
+        int cols = galleryColumns();
+        LinearLayout row = null;
+        int inRow = 0;
+        for (HomeToolSpec spec : tools) {
+            if (row == null || inRow == cols) {
+                if (row != null) parent.addView(space(8));
+                row = row();
+                parent.addView(row, matchWrap());
+                inRow = 0;
+            }
+            if (inRow > 0) row.addView(spaceH(8));
+            LinearLayout card = toolGridCard(spec.icon, spec.title, spec.sub, spec.accent);
+            card.setOnClickListener(v -> {
+                if ("trash".equals(spec.id)) showTrashScreen();
+                else if ("system".equals(spec.id)) openSystemAnalyzer();
+                else openTool(spec.id);
+            });
+            row.addView(card, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            inRow++;
+        }
+        if (row != null && inRow < cols) {
+            while (inRow < cols) {
+                row.addView(spaceH(8));
+                row.addView(new Space(this), new LinearLayout.LayoutParams(0, 1, 1f));
+                inRow++;
+            }
+        }
+    }
+
     private LinearLayout toolGridCard(String icon, String title, String sub, int accent) {
         LinearLayout c = card();
         c.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -4067,6 +4068,14 @@ public class MainActivity extends Activity {
         static AppFileInfo folder() {
             return new AppFileInfo("Device Storage", null, "Folder", "FOLDER",
                     PURPLE, Color.rgb(239,236,255), "Storage folder", false, true);
+        }
+    }
+
+    private static final class HomeToolSpec {
+        final String icon,title,sub,id;
+        final int accent;
+        HomeToolSpec(String icon,String title,String sub,int accent,String id){
+            this.icon=icon;this.title=title;this.sub=sub;this.accent=accent;this.id=id;
         }
     }
 
