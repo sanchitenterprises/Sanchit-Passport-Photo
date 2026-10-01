@@ -445,6 +445,12 @@ public class MainActivity extends Activity {
 
         touch(preview);
         preview.setOnClickListener(v -> openFoundFile(file));
+        preview.setOnLongClickListener(v -> {
+            if (!selectable) return false;
+            toggleSelected(selectionKey, file);
+            refresh.run();
+            return true;
+        });
         card.addView(preview, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(previewHeightDp())));
 
@@ -3949,20 +3955,20 @@ public class MainActivity extends Activity {
         LinearLayout c = card();
         c.setGravity(Gravity.CENTER_HORIZONTAL);
         c.setPadding(dp(7), dp(12), dp(7), dp(11));
-        TextView ic = text(icon, 21, accent, true);
+        TextView ic = text(icon, galleryColumns() >= 4 ? 18 : 21, accent, true);
         ic.setGravity(Gravity.CENTER);
         c.addView(ic);
         c.addView(space(7));
-        TextView t = text(title, 12, INK, true);
+        TextView t = text(title, galleryColumns() >= 4 ? 9 : 12, INK, true);
         t.setGravity(Gravity.CENTER);
         t.setMaxLines(2);
         c.addView(t, matchWrap());
         c.addView(space(3));
-        TextView st = text(sub, 9, MUTED, false);
+        TextView st = text(sub, galleryColumns() >= 4 ? 7 : 9, MUTED, false);
         st.setGravity(Gravity.CENTER);
         st.setMaxLines(1);
         c.addView(st, matchWrap());
-        c.setMinimumHeight(dp(116));
+        c.setMinimumHeight(dp(galleryColumns() >= 4 ? 96 : 116));
         touch(c);
         return c;
     }
