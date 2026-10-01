@@ -1588,69 +1588,56 @@ public class MainActivity extends Activity {
         LinearLayout root=column();
         root.setPadding(dp(16),dp(22),dp(16),dp(28));
 
+        String scrollKey="appFiles:" + result.entry.packageName + ":" + cat.name();
+        String sortKey="sort:" + scrollKey;
+        String selectionKey="sel:" + scrollKey;
+
         root.addView(text(result.entry.appName+" • "+cat.label,24,INK,true));
         root.addView(space(5));
         root.addView(text(result.count(cat)+" files • "+format(result.bytes(cat)),12,cat.color,true));
-        root.addView(space(12));
+        root.addView(space(10));
 
-        String appFileSortKey = "sort:appFiles:" + result.entry.packageName + ":" + cat.name();
-        sortAppVisibleFiles(result, sortMode(appFileSortKey, 0));
-        TextView fileSort = sortControl(appFileSortKey, FILE_SORT_OPTIONS, 0, () -> {
-            resetSavedScroll("appFiles:" + result.entry.packageName + ":" + cat.name());
+        sortAppVisibleFiles(result, sortMode(sortKey, 0));
+        TextView fileSort = sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
+            resetSavedScroll(scrollKey);
             showAppVisibleFiles(result, cat);
         });
         root.addView(fileSort, matchWrap());
-        root.addView(space(16));
 
-        int shown=0;
+        List<File> selectableFiles=new ArrayList<>();
         for(AppVisibleFile vf:result.files){
-            if(vf.category!=cat) continue;
-            if(shown>=100) break;
-            shown++;
-
-            AppFileInfo info=vf.info;
-            LinearLayout c=card();
-            c.setPadding(dp(14),dp(12),dp(14),dp(12));
-            c.addView(text(vf.file.getName(),13,INK,true));
-            c.addView(space(3));
-            c.addView(text(format(vf.bytes),12,cat.color,true));
-            c.addView(space(6));
-            c.addView(pill(info.status,info.statusColor,info.statusBg));
-            c.addView(space(6));
-            c.addView(text(info.explanation,10,MUTED,false));
-            c.addView(space(5));
-            c.addView(text(shortPath(vf.file.getAbsolutePath()),9,MUTED,false));
-            c.addView(space(9));
-
-            LinearLayout actions=row();
-            String openLabel=info.detailsOnly?"DETAILS":isImageFile(vf.file)?"PREVIEW":isVideoFile(vf.file)?"PLAY":"OPEN";
-            TextView open=pill(openLabel,PURPLE,Color.rgb(239,236,255));
-            touch(open);
-            open.setOnClickListener(v -> {
-                if(info.detailsOnly) showFileDetails(vf.file,info);
-                else openFoundFile(vf.file);
-            });
-            actions.addView(open,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-            actions.addView(spaceH(8));
-
-            if(info.protectedFile){
-                TextView keep=pill("KEEP / PROTECTED",Color.rgb(18,145,123),Color.rgb(228,252,248));
-                actions.addView(keep,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-            }else{
-                TextView del=pill("MOVE TO TRASH",ROSE,Color.rgb(255,238,243));
-                touch(del);
-                del.setOnClickListener(v -> confirmAppVisibleTrash(result,cat,vf));
-                actions.addView(del,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-            }
-            c.addView(actions,matchWrap());
-            root.addView(c,matchWrap());
-            root.addView(space(8));
+            if(vf.category==cat && !vf.info.protectedFile) selectableFiles.add(vf.file);
         }
 
-        if(result.count(cat)>shown)
-            root.addView(text("+ "+(result.count(cat)-shown)+" more files",11,MUTED,false));
+        root.addView(space(8));
+        root.addView(galleryControls(selectionKey, selectableFiles,
+                () -> showAppVisibleFiles(result,cat),
+                "MOVE SELECTED TO STS TRASH",
+                () -> moveSelectedAppFilesToTrash(result,cat,selectionKey)), matchWrap());
 
-        root.addView(space(10));
+        root.addView(section("Preview Grid"));
+        LinearLayout gallery=column();
+        List<LinearLayout> cells=new ArrayList<>();
+        int shown=0;
+        int limit=160;
+        for(AppVisibleFile vf:result.files){
+            if(vf.category!=cat) continue;
+            if(shown>=limit) break;
+            shown++;
+            cells.add(galleryFileCard(vf.file,vf.bytes,selectionKey,
+                    !vf.info.protectedFile,vf.info,cat.color,
+                    () -> showAppVisibleFiles(result,cat)));
+        }
+        addGalleryCells(gallery,cells);
+        root.addView(gallery,matchWrap());
+
+        if(result.count(cat)>shown){
+            root.addView(space(10));
+            root.addView(centerText("Showing first "+shown+" of "+result.count(cat)+
+                    " • Select All applies to all selectable files",10,MUTED,false));
+        }
+
+        root.addView(space(12));
         TextView back=actionButton("BACK",Color.WHITE);
         back.setTextColor(PURPLE);
         touch(back);
@@ -1659,8 +1646,45 @@ public class MainActivity extends Activity {
 
         scroll.addView(root);
         setContentView(scroll);
-        bindScrollPosition("appFiles:" + result.entry.packageName + ":" + cat.name(), scroll);
+        bindScrollPosition(scrollKey, scroll);
         fadeIn(root);
+    }
+
+    private void moveSelectedAppFilesToTrash(AppDetailResult result,AppVisibleCategory cat,String selectionKey){
+        Set<String> selected=new HashSet<>(selectionSet(selectionKey));
+        List<AppVisibleFile> targets=new ArrayList<>();
+        long bytes=0L;
+        for(AppVisibleFile vf:result.files){
+            if(vf.category!=cat || !selected.contains(vf.file.getAbsolutePath()) || vf.info.protectedFile) continue;
+            targets.add(vf);
+            bytes+=vf.bytes;
+        }
+        if(targets.isEmpty()) return;
+
+        long total=bytes;
+        new AlertDialog.Builder(this)
+                .setTitle("Move selected to STS Trash?")
+                .setMessage(targets.size()+" files • "+format(total)+
+                        "\n\n7 दिन तक Restore किया जा सकता है। Protected/current backup selected नहीं होंगे।")
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton("MOVE TO TRASH",(d,w)->{
+                    List<AppVisibleFile> done=new ArrayList<>();
+                    long moved=0L;
+                    for(AppVisibleFile vf:targets){
+                        if(moveToTrash(vf.file)){
+                            done.add(vf);
+                            moved+=vf.bytes;
+                        }
+                    }
+                    for(AppVisibleFile vf:done) result.remove(vf);
+                    clearSelection(selectionKey);
+                    long finalMoved=moved;
+                    new AlertDialog.Builder(this)
+                            .setTitle("Moved to STS Trash")
+                            .setMessage(done.size()+" files • "+format(finalMoved))
+                            .setPositiveButton("OK",(x,y)->showAppVisibleFiles(result,cat))
+                            .show();
+                }).show();
     }
 
     private void confirmAppVisibleTrash(AppDetailResult result,AppVisibleCategory cat,AppVisibleFile vf){
