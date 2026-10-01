@@ -2846,27 +2846,60 @@ public class MainActivity extends Activity {
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BG);
         LinearLayout root = column();
-        root.setPadding(dp(16),dp(24),dp(16),dp(28));
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
 
         root.addView(text("STS Trash",28,INK,true));
         root.addView(space(5));
-        root.addView(text("Deleted user files 7 दिन तक restore की जा सकती हैं",13,MUTED,false));
-        root.addView(space(18));
+        root.addView(text("Preview • Select • Restore • Delete Forever • 7 days",13,MUTED,false));
+        root.addView(space(14));
 
         File dir = trashDir();
         File[] metas = dir.listFiles((d,n) -> n.endsWith(".stsmeta"));
         if (metas == null) metas = new File[0];
 
-        String trashSortKey = "sort:trash";
-        sortTrashMeta(metas, sortMode(trashSortKey, 0));
+        String sortKey = "sort:trash";
+        String selectionKey = "sel:trash";
+        sortTrashMeta(metas, sortMode(sortKey, 0));
+
+        List<File> trashFiles = new ArrayList<>();
+        for(File meta:metas){
+            File data=trashDataFile(meta);
+            if(data.exists()) trashFiles.add(data);
+        }
 
         if (metas.length > 0) {
-            TextView trashSort = sortControl(trashSortKey, TRASH_SORT_OPTIONS, 0, () -> {
+            TextView trashSort = sortControl(sortKey, TRASH_SORT_OPTIONS, 0, () -> {
                 resetSavedScroll("trash");
                 showTrashScreen();
             });
             root.addView(trashSort, matchWrap());
-            root.addView(space(12));
+            root.addView(space(8));
+
+            root.addView(galleryControls(selectionKey, trashFiles, this::showTrashScreen,
+                    null, null), matchWrap());
+
+            int selectedCount=0;
+            long selectedSize=0L;
+            Set<String> sel=selectionSet(selectionKey);
+            for(File file:trashFiles){
+                if(sel.contains(file.getAbsolutePath())){
+                    selectedCount++;
+                    selectedSize+=file.length();
+                }
+            }
+            if(selectedCount>0){
+                root.addView(space(8));
+                LinearLayout actions=row();
+                TextView restore=pill("RESTORE SELECTED",Color.rgb(18,145,123),Color.rgb(228,252,248));
+                TextView forever=pill("DELETE SELECTED FOREVER",ROSE,Color.rgb(255,238,243));
+                touch(restore); touch(forever);
+                restore.setOnClickListener(v->restoreSelectedTrash(selectionKey));
+                forever.setOnClickListener(v->deleteSelectedTrashForever(selectionKey));
+                actions.addView(restore,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+                actions.addView(spaceH(7));
+                actions.addView(forever,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1.15f));
+                root.addView(actions,matchWrap());
+            }
         }
 
         if (metas.length == 0) {
@@ -2877,45 +2910,28 @@ public class MainActivity extends Activity {
             empty.addView(centerText("STS Trash खाली है",16,INK,true));
             root.addView(empty,matchWrap());
         } else {
-            for (File meta : metas) {
-                String baseName = meta.getName().substring(0,meta.getName().length()-8);
-                File data = new File(dir,baseName);
-                if (!data.exists()) { meta.delete(); continue; }
-                String[] md = readTrashMeta(meta);
-                String original = md[0];
-
-                LinearLayout c = card();
-                c.setPadding(dp(15),dp(13),dp(15),dp(13));
-                c.addView(text(data.getName().replaceFirst("^\\d+_",""),14,INK,true));
-                c.addView(space(4));
-                c.addView(text(format(data.length()),12,PURPLE,true));
-                c.addView(space(4));
-                c.addView(text("Original: " + shortPath(original),10,MUTED,false));
-
-                LinearLayout actions = row();
-                actions.setPadding(0,dp(10),0,0);
-                TextView restore = pill("RESTORE",Color.rgb(18,145,123),Color.rgb(228,252,248));
-                TextView del = pill("DELETE FOREVER",ROSE,Color.rgb(255,238,243));
-                touch(restore); touch(del);
-                restore.setOnClickListener(v -> {
-                    if (restoreTrashItem(data,meta,original)) showTrashScreen();
-                    else new AlertDialog.Builder(this).setTitle("Restore failed")
-                            .setMessage("Original location पर file restore नहीं हो सकी।")
-                            .setPositiveButton("OK",null).show();
-                });
-                del.setOnClickListener(v -> new AlertDialog.Builder(this)
-                        .setTitle("Delete permanently?")
-                        .setMessage("यह file STS Trash से भी हमेशा के लिए delete हो जाएगी।")
-                        .setNegativeButton("Cancel",null)
-                        .setPositiveButton("DELETE",(d,w) -> {
-                            data.delete(); meta.delete(); showTrashScreen();
-                        }).show());
-                actions.addView(restore,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-                actions.addView(spaceH(8));
-                actions.addView(del,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-                c.addView(actions,matchWrap());
-                root.addView(c,matchWrap());
-                root.addView(space(9));
+            root.addView(section("Trash Preview"));
+            LinearLayout gallery=column();
+            List<LinearLayout> cells=new ArrayList<>();
+            int shown=0;
+            int limit=160;
+            for(File meta:metas){
+                File data=trashDataFile(meta);
+                if(!data.exists()){meta.delete();continue;}
+                if(shown>=limit) break;
+                shown++;
+                AppFileInfo info=new AppFileInfo("STS Trash",null,"Deleted File","RESTORABLE • 7 DAYS",
+                        Color.rgb(72,120,210),Color.rgb(235,245,255),
+                        "Tap preview to inspect. Select to restore or permanently delete.",false,false);
+                cells.add(galleryFileCard(data,data.length(),selectionKey,true,info,
+                        Color.rgb(72,120,210),this::showTrashScreen));
+            }
+            addGalleryCells(gallery,cells);
+            root.addView(gallery,matchWrap());
+            if(trashFiles.size()>shown){
+                root.addView(space(10));
+                root.addView(centerText("Showing first "+shown+" of "+trashFiles.size()+
+                        " • Select All applies to all trash items",10,MUTED,false));
             }
         }
 
@@ -2930,6 +2946,67 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         bindScrollPosition("trash", scroll);
         fadeIn(root);
+    }
+
+    private void restoreSelectedTrash(String selectionKey){
+        Set<String> sel=new HashSet<>(selectionSet(selectionKey));
+        File[] metas=trashDir().listFiles((d,n)->n.endsWith(".stsmeta"));
+        if(metas==null) return;
+        int count=0;
+        long bytes=0L;
+        for(File meta:metas){
+            File data=trashDataFile(meta);
+            if(!sel.contains(data.getAbsolutePath())) continue;
+            String[] md=readTrashMeta(meta);
+            long n=data.length();
+            if(restoreTrashItem(data,meta,md[0])){
+                count++;
+                bytes+=n;
+            }
+        }
+        clearSelection(selectionKey);
+        int restored=count;
+        long restoredBytes=bytes;
+        new AlertDialog.Builder(this)
+                .setTitle("Restore complete")
+                .setMessage(restored+" files • "+format(restoredBytes))
+                .setPositiveButton("OK",(d,w)->showTrashScreen())
+                .show();
+    }
+
+    private void deleteSelectedTrashForever(String selectionKey){
+        Set<String> sel=new HashSet<>(selectionSet(selectionKey));
+        if(sel.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Delete selected forever?")
+                .setMessage(sel.size()+" selected items STS Trash से permanently delete होंगे। यह वापस restore नहीं होंगे।")
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton("DELETE FOREVER",(d,w)->{
+                    File[] metas=trashDir().listFiles((x,n)->n.endsWith(".stsmeta"));
+                    int count=0;
+                    long bytes=0L;
+                    if(metas!=null){
+                        for(File meta:metas){
+                            File data=trashDataFile(meta);
+                            if(!sel.contains(data.getAbsolutePath())) continue;
+                            long n=data.length();
+                            boolean ok=!data.exists() || data.delete();
+                            if(ok){
+                                meta.delete();
+                                count++;
+                                bytes+=n;
+                            }
+                        }
+                    }
+                    clearSelection(selectionKey);
+                    int deleted=count;
+                    long deletedBytes=bytes;
+                    new AlertDialog.Builder(this)
+                            .setTitle("Deleted forever")
+                            .setMessage(deleted+" files • "+format(deletedBytes))
+                            .setPositiveButton("OK",(x,y)->showTrashScreen())
+                            .show();
+                }).show();
     }
 
     private boolean restoreTrashItem(File data, File meta, String originalPath) {
