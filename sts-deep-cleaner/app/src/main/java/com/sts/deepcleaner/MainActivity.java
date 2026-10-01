@@ -43,6 +43,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -2432,16 +2433,39 @@ public class MainActivity extends Activity {
             activePlayer = new ExoPlayer.Builder(this).build();
             playerView.setPlayer(activePlayer);
             activePlayer.addListener(new Player.Listener() {
+                private void syncScreenAwake() {
+                    if (!videoMode || activePlayer == null) {
+                        setVideoScreenAwake(false, playerView);
+                        return;
+                    }
+                    int state = activePlayer.getPlaybackState();
+                    boolean keepAwake = activePlayer.getPlayWhenReady() &&
+                            (state == Player.STATE_READY || state == Player.STATE_BUFFERING);
+                    setVideoScreenAwake(keepAwake, playerView);
+                }
+
                 @Override public void onPlaybackStateChanged(int state) {
+                    syncScreenAwake();
                     if (state == Player.STATE_READY) {
                         status.setText((videoMode ? "VIDEO READY" : "AUDIO READY") + " • " + format(file.length()));
                     } else if (state == Player.STATE_BUFFERING) {
                         status.setText("Buffering… • " + format(file.length()));
                     } else if (state == Player.STATE_ENDED) {
+                        setVideoScreenAwake(false, playerView);
                         status.setText("Playback complete • " + format(file.length()));
                     }
                 }
+
+                @Override public void onPlayWhenReadyChanged(boolean playWhenReady, int reason) {
+                    syncScreenAwake();
+                }
+
+                @Override public void onIsPlayingChanged(boolean isPlaying) {
+                    syncScreenAwake();
+                }
+
                 @Override public void onPlayerError(PlaybackException error) {
+                    setVideoScreenAwake(false, playerView);
                     status.setText("इस codec को device/player decode नहीं कर पा रहा • Other Player try करें");
                 }
             });
@@ -2693,7 +2717,19 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void setVideoScreenAwake(boolean keepAwake, View playerView) {
+        try {
+            if (playerView != null) playerView.setKeepScreenOn(keepAwake);
+            if (keepAwake) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void releasePreviewResources() {
+        setVideoScreenAwake(false, null);
         try {
             if (activePlayer != null) {
                 activePlayer.stop();
