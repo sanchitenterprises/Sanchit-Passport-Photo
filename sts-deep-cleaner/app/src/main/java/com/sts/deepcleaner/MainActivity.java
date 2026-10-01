@@ -1839,43 +1839,35 @@ public class MainActivity extends Activity {
         rememberCurrentScroll();
         activeToolResult = result;
         getWindow().getDecorView().setTag("toolResult");
+
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BG);
         LinearLayout root = column();
-        root.setPadding(dp(16), dp(24), dp(16), dp(28));
+        root.setPadding(dp(16), dp(22), dp(16), dp(28));
 
         int accent = toolAccent(result.type);
         String sortKey = "sort:tool:" + result.type;
+        String selectionKey = "sel:tool:" + result.type;
+        String scrollKey = "toolResult:" + result.type;
         sortToolItems(result, sortMode(sortKey, 0));
 
         root.addView(text(toolTitle(result.type), 28, INK, true));
         root.addView(space(5));
         String sub = "duplicates".equals(result.type)
-                ? result.groups + " duplicate groups • first copy हमेशा keep"
+                ? result.groups + " duplicate groups • original/keep protected"
                 : result.scannedFiles + " files checked • " + format(result.scannedBytes) + " analyzed";
         root.addView(text(sub, 13, MUTED, false));
-        root.addView(space(18));
+        root.addView(space(14));
 
         LinearLayout summary = card();
-        summary.setPadding(dp(18), dp(16), dp(18), dp(16));
-        summary.addView(text(result.items.size() + " items found", 17, INK, true));
-        summary.addView(space(5));
-        summary.addView(text(format(result.totalBytes), 26, accent, true));
+        summary.setPadding(dp(16), dp(14), dp(16), dp(14));
+        summary.addView(text(result.items.size() + " items found", 16, INK, true));
         summary.addView(space(4));
-        boolean reviewOnlyTool = "large".equals(result.type) || "media".equals(result.type) ||
-                "downloads".equals(result.type) || "backups".equals(result.type);
-        summary.addView(text(reviewOnlyTool ? "total size listed" : "potential reclaim", 12, MUTED, false));
+        summary.addView(text(format(result.totalBytes), 24, accent, true));
+        summary.addView(space(3));
+        summary.addView(text("Tap preview to open • tap ○/✓ or long-press to select", 10, MUTED, false));
         root.addView(summary, matchWrap());
-
-        if (!result.items.isEmpty()) {
-            root.addView(space(10));
-            TextView sort = sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
-                resetSavedScroll("toolResult:" + result.type);
-                showToolResult(result);
-            });
-            root.addView(sort, matchWrap());
-        }
 
         if (result.items.isEmpty()) {
             root.addView(space(18));
@@ -1886,106 +1878,57 @@ public class MainActivity extends Activity {
             empty.addView(centerText("इस category में अभी कुछ नहीं मिला", 15, INK, true));
             root.addView(empty, matchWrap());
         } else {
-            root.addView(section("Found Items"));
-            int limit = Math.min(80, result.items.size());
+            root.addView(space(10));
+            TextView sort = sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
+                resetSavedScroll(scrollKey);
+                showToolResult(result);
+            });
+            root.addView(sort, matchWrap());
+
+            List<File> selectableFiles = new ArrayList<>();
+            for (ToolItem item : result.items) {
+                AppFileInfo info = item.directory ? AppFileInfo.folder() : describeAppFile(item.file);
+                if (!info.protectedFile) selectableFiles.add(item.file);
+            }
+
+            root.addView(space(8));
+            String actionLabel = ("junk".equals(result.type) || "residual".equals(result.type))
+                    ? "CLEAN SELECTED"
+                    : "MOVE SELECTED TO STS TRASH";
+            root.addView(galleryControls(selectionKey, selectableFiles, () -> showToolResult(result),
+                    actionLabel, () -> performSelectedToolAction(result, selectionKey)), matchWrap());
+
+            root.addView(section("Preview Grid"));
+            LinearLayout gallery = column();
+            List<LinearLayout> cells = new ArrayList<>();
+            int limit = Math.min(160, result.items.size());
             for (int i=0; i<limit; i++) {
                 ToolItem item = result.items.get(i);
                 AppFileInfo info = item.directory ? AppFileInfo.folder() : describeAppFile(item.file);
-
-                LinearLayout itemCard = card();
-                itemCard.setPadding(dp(15), dp(13), dp(15), dp(13));
-
-                if (!item.directory) {
-                    LinearLayout appRow = row();
-                    appRow.setGravity(Gravity.CENTER_VERTICAL);
-                    Drawable appIcon = appIcon(info.packageName);
-                    if (appIcon != null) {
-                        ImageView iv = new ImageView(this);
-                        iv.setImageDrawable(appIcon);
-                        iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                        appRow.addView(iv, new LinearLayout.LayoutParams(dp(34), dp(34)));
-                        appRow.addView(spaceH(9));
-                    }
-                    LinearLayout appText = column();
-                    appText.addView(text(info.appName, 13, INK, true));
-                    if (info.packageName != null && info.packageName.length() > 0) {
-                        appText.addView(text(info.packageName, 9, MUTED, false));
-                    }
-                    appRow.addView(appText, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    itemCard.addView(appRow, matchWrap());
-                    itemCard.addView(space(9));
-                }
-
-                itemCard.addView(text(item.file.getName().length() == 0 ? item.file.getAbsolutePath() : item.file.getName(), 14, INK, true));
-                itemCard.addView(space(3));
-                itemCard.addView(text(item.directory ? "Folder" : format(item.bytes), 12, accent, true));
-
-                if (!item.directory) {
-                    itemCard.addView(space(7));
-                    itemCard.addView(text(info.category, 12, INK, true));
-                    itemCard.addView(space(5));
-                    TextView risk = pill(info.status, info.statusColor, info.statusBg);
-                    itemCard.addView(risk);
-                    itemCard.addView(space(6));
-                    itemCard.addView(text(info.explanation, 11, MUTED, false));
-                } else {
-                    itemCard.addView(space(4));
-                    itemCard.addView(text(item.note, 11, MUTED, false));
-                }
-
-                itemCard.addView(space(6));
-                itemCard.addView(text(shortPath(item.file.getAbsolutePath()), 10, MUTED, false));
-
-                if (!item.directory) {
-                    itemCard.addView(space(10));
-                    LinearLayout actions = row();
-
-                    String openLabel = info.detailsOnly ? "DETAILS"
-                            : isImageFile(item.file) ? "PREVIEW"
-                            : isVideoFile(item.file) ? "PLAY"
-                            : "OPEN";
-                    TextView open = pill(openLabel, PURPLE, Color.rgb(239,236,255));
-                    touch(open);
-                    open.setOnClickListener(v -> {
-                        if (info.detailsOnly) showFileDetails(item.file, info);
-                        else openFoundFile(item.file);
-                    });
-                    actions.addView(open, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                    if ("large".equals(result.type) || "duplicates".equals(result.type) ||
-                            "media".equals(result.type) || "downloads".equals(result.type) ||
-                            "backups".equals(result.type)) {
-                        actions.addView(spaceH(8));
-                        if (info.protectedFile) {
-                            TextView keep = pill("KEEP / PROTECTED", Color.rgb(18,145,123), Color.rgb(228,252,248));
-                            actions.addView(keep, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                        } else {
-                            TextView del = pill("DELETE", ROSE, Color.rgb(255,238,243));
-                            touch(del);
-                            del.setOnClickListener(v -> confirmDeleteToolItem(result, item));
-                            actions.addView(del, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                        }
-                    }
-                    itemCard.addView(actions, matchWrap());
-                }
-                root.addView(itemCard, matchWrap());
-                root.addView(space(9));
+                boolean selectable = !info.protectedFile;
+                cells.add(galleryFileCard(item.file, item.bytes, selectionKey,
+                        selectable, info, accent, () -> showToolResult(result)));
             }
+            addGalleryCells(gallery, cells);
+            root.addView(gallery, matchWrap());
+
             if (result.items.size() > limit) {
-                root.addView(text("+ " + (result.items.size()-limit) + " more items", 12, MUTED, false));
+                root.addView(space(10));
+                root.addView(centerText("Showing first " + limit + " of " + result.items.size() +
+                        " • Select All applies to all safe/selectable items", 10, MUTED, false));
             }
         }
 
         if (("junk".equals(result.type) || "residual".equals(result.type) || "duplicates".equals(result.type))
                 && !result.items.isEmpty()) {
             root.addView(space(16));
-            String label = "duplicates".equals(result.type) ? "DELETE DUPLICATE COPIES"
-                    : "residual".equals(result.type) ? "CLEAN SAFE RESIDUAL"
-                    : "CLEAN JUNK & CACHE";
+            String label = "duplicates".equals(result.type) ? "MOVE ALL DUPLICATE COPIES"
+                    : "residual".equals(result.type) ? "CLEAN ALL SAFE RESIDUAL"
+                    : "CLEAN ALL SAFE JUNK";
             TextView clean = actionButton(label, accent);
             touch(clean);
             clean.setOnClickListener(v -> confirmCleanToolResult(result));
-            root.addView(clean, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62)));
+            root.addView(clean, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
         }
 
         root.addView(space(10));
@@ -1993,19 +1936,69 @@ public class MainActivity extends Activity {
         rescan.setTextColor(PURPLE);
         touch(rescan);
         rescan.setOnClickListener(v -> showToolScan(result.type));
-        root.addView(rescan, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        root.addView(rescan, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
-        root.addView(space(9));
+        root.addView(space(8));
         TextView back = actionButton("BACK", Color.WHITE);
         back.setTextColor(PURPLE);
         touch(back);
         back.setOnClickListener(v -> handleBack());
-        root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+        root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
 
         scroll.addView(root);
         setContentView(scroll);
-        bindScrollPosition("toolResult:" + result.type, scroll);
+        bindScrollPosition(scrollKey, scroll);
         fadeIn(root);
+    }
+
+    private void performSelectedToolAction(ToolResult result, String selectionKey) {
+        Set<String> selected = new HashSet<>(selectionSet(selectionKey));
+        List<ToolItem> targets = new ArrayList<>();
+        long bytes = 0L;
+        for (ToolItem item : result.items) {
+            if (!selected.contains(item.file.getAbsolutePath())) continue;
+            AppFileInfo info = item.directory ? AppFileInfo.folder() : describeAppFile(item.file);
+            if (info.protectedFile) continue;
+            targets.add(item);
+            bytes += Math.max(0L, item.bytes);
+        }
+        if (targets.isEmpty()) return;
+
+        boolean directClean = "junk".equals(result.type) || "residual".equals(result.type);
+        String message = directClean
+                ? "Selected safe junk/residual items permanently clean होंगे।"
+                : "Selected files STS Trash में जाएँगी और 7 दिन तक Restore की जा सकेंगी।";
+        long totalBytes = bytes;
+        new AlertDialog.Builder(this)
+                .setTitle(directClean ? "Clean selected?" : "Move selected to STS Trash?")
+                .setMessage(targets.size() + " items • " + format(totalBytes) + "\n\n" + message)
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton(directClean ? "CLEAN" : "MOVE TO TRASH", (d,w) -> {
+                    int ok = 0;
+                    long freed = 0L;
+                    List<ToolItem> done = new ArrayList<>();
+                    for (ToolItem item : targets) {
+                        boolean success;
+                        try {
+                            success = directClean ? item.file.delete() : moveToTrash(item.file);
+                        } catch (Exception e) {
+                            success = false;
+                        }
+                        if (success) {
+                            ok++;
+                            freed += item.bytes;
+                            done.add(item);
+                        }
+                    }
+                    result.items.removeAll(done);
+                    result.totalBytes = Math.max(0L, result.totalBytes - freed);
+                    clearSelection(selectionKey);
+                    new AlertDialog.Builder(this)
+                            .setTitle(directClean ? "Clean complete" : "Moved to STS Trash")
+                            .setMessage(ok + " items • " + format(freed))
+                            .setPositiveButton("OK", (x,y) -> showToolResult(result))
+                            .show();
+                }).show();
     }
 
     private AppFileInfo describeAppFile(File file) {
