@@ -3397,19 +3397,22 @@ public class MainActivity extends Activity {
         root.addView(scanned, matchWrap());
         root.addView(space(14));
 
-        LinearLayout safeCard = resultCard("Safe Junk", s.safeCount, s.safeBytes, TEAL, "AUTO-SAFE");
-        safeCard.setOnClickListener(v -> showItemDetails(s, true));
+        LinearLayout safeCard = resultCard("Safe Junk", s.safeCount, s.safeBytes, TEAL, "PREVIEW / SELECT");
+        safeCard.setOnClickListener(v -> showScanItemsGallery(s, 0));
         touch(safeCard);
         root.addView(safeCard, matchWrap());
         root.addView(space(12));
 
-        LinearLayout reviewCard = resultCard("Review Before Delete", s.reviewCount, s.reviewBytes, AMBER, "TAP TO VIEW");
-        reviewCard.setOnClickListener(v -> showItemDetails(s, false));
+        LinearLayout reviewCard = resultCard("Review Before Delete", s.reviewCount, s.reviewBytes, AMBER, "PREVIEW / SELECT");
+        reviewCard.setOnClickListener(v -> showScanItemsGallery(s, 1));
         touch(reviewCard);
         root.addView(reviewCard, matchWrap());
         root.addView(space(12));
 
-        root.addView(resultCard("Personal Files (Protected)", s.personalCount, s.personalBytes, BLUE, "NEVER AUTO"));
+        LinearLayout personalCard = resultCard("Personal Files (Protected)", s.personalCount, s.personalBytes, BLUE, "PREVIEW ONLY");
+        personalCard.setOnClickListener(v -> showScanItemsGallery(s, 2));
+        touch(personalCard);
+        root.addView(personalCard);
         root.addView(space(12));
         root.addView(resultCard("Restricted Android Area", s.restrictedCount, 0, ROSE, "PROTECTED"));
         root.addView(space(18));
@@ -3440,6 +3443,153 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         bindScrollPosition("scanResult", scroll);
         fadeIn(root);
+    }
+
+    private void showScanItemsGallery(ScanSummary summary, int mode) {
+        rememberCurrentScroll();
+        getWindow().getDecorView().setTag("scanGallery");
+
+        String label = mode == 0 ? "Safe Junk" : mode == 1 ? "Review Before Delete" : "Personal Files • Protected";
+        int accent = mode == 0 ? TEAL : mode == 1 ? AMBER : BLUE;
+        String scrollKey = "scanGallery:" + mode;
+        String sortKey = "sort:" + scrollKey;
+        String selectionKey = "sel:" + scrollKey;
+
+        List<ScanItem> list = new ArrayList<>();
+        if (mode == 2) {
+            list.addAll(summary.personalItems);
+        } else {
+            for (ScanItem item : summary.items) {
+                if ((mode == 0 && item.safe) || (mode == 1 && !item.safe)) list.add(item);
+            }
+        }
+        sortScanItems(list, sortMode(sortKey, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16), dp(22), dp(16), dp(28));
+
+        long totalBytes = 0L;
+        for (ScanItem item : list) totalBytes += item.bytes;
+        root.addView(text(label, 26, INK, true));
+        root.addView(space(5));
+        root.addView(text(list.size() + " files • " + format(totalBytes), 12, accent, true));
+        root.addView(space(10));
+
+        if (!list.isEmpty()) {
+            root.addView(sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
+                resetSavedScroll(scrollKey);
+                showScanItemsGallery(summary, mode);
+            }), matchWrap());
+
+            List<File> selectableFiles = new ArrayList<>();
+            if (mode != 2) {
+                for (ScanItem item : list) {
+                    AppFileInfo info = describeAppFile(item.file);
+                    if (!info.protectedFile) selectableFiles.add(item.file);
+                }
+                root.addView(space(8));
+                String action = mode == 0 ? "CLEAN SELECTED" : "MOVE SELECTED TO STS TRASH";
+                root.addView(galleryControls(selectionKey, selectableFiles,
+                        () -> showScanItemsGallery(summary, mode),
+                        action, () -> performSelectedScanAction(summary, mode, selectionKey)), matchWrap());
+            } else {
+                root.addView(space(8));
+                LinearLayout notice = card();
+                notice.setPadding(dp(14),dp(12),dp(14),dp(12));
+                notice.addView(text("PROTECTED PREVIEW",12,BLUE,true));
+                notice.addView(space(4));
+                notice.addView(text("Personal files यहाँ preview/open हो सकती हैं, लेकिन auto-select/delete नहीं होंगी।",10,MUTED,false));
+                root.addView(notice,matchWrap());
+                root.addView(space(8));
+                root.addView(viewControl(() -> showScanItemsGallery(summary, mode)), matchWrap());
+            }
+
+            root.addView(section("Preview Grid"));
+            LinearLayout gallery = column();
+            List<LinearLayout> cells = new ArrayList<>();
+            int limit = Math.min(160, list.size());
+            for (int i=0;i<limit;i++) {
+                ScanItem item = list.get(i);
+                AppFileInfo info = describeAppFile(item.file);
+                boolean selectable = mode != 2 && !info.protectedFile;
+                cells.add(galleryFileCard(item.file,item.bytes,selectionKey,
+                        selectable,info,accent,() -> showScanItemsGallery(summary,mode)));
+            }
+            addGalleryCells(gallery,cells);
+            root.addView(gallery,matchWrap());
+
+            if (list.size()>limit) {
+                root.addView(space(10));
+                root.addView(centerText("Showing first "+limit+" of "+list.size()+
+                        (mode==2 ? "" : " • Select All applies to all selectable files"),10,MUTED,false));
+            }
+        } else {
+            LinearLayout empty=card();
+            empty.setPadding(dp(18),dp(24),dp(18),dp(24));
+            empty.addView(centerText("No files",15,MUTED,true));
+            root.addView(empty,matchWrap());
+        }
+
+        root.addView(space(14));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showResult(summary));
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition(scrollKey,scroll);
+        fadeIn(root);
+    }
+
+    private void performSelectedScanAction(ScanSummary summary,int mode,String selectionKey){
+        if(mode==2) return;
+        Set<String> selected=new HashSet<>(selectionSet(selectionKey));
+        List<ScanItem> targets=new ArrayList<>();
+        long bytes=0L;
+        for(ScanItem item:summary.items){
+            if((mode==0 && !item.safe)||(mode==1 && item.safe)) continue;
+            if(!selected.contains(item.file.getAbsolutePath())) continue;
+            if(describeAppFile(item.file).protectedFile) continue;
+            targets.add(item);
+            bytes+=item.bytes;
+        }
+        if(targets.isEmpty()) return;
+
+        boolean direct=mode==0;
+        long total=bytes;
+        new AlertDialog.Builder(this)
+                .setTitle(direct?"Clean selected safe junk?":"Move selected to STS Trash?")
+                .setMessage(targets.size()+" files • "+format(total))
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton(direct?"CLEAN":"MOVE TO TRASH",(d,w)->{
+                    List<ScanItem> done=new ArrayList<>();
+                    long freed=0L;
+                    for(ScanItem item:targets){
+                        boolean ok;
+                        try{ok=direct?item.file.delete():moveToTrash(item.file);}catch(Exception e){ok=false;}
+                        if(ok){done.add(item);freed+=item.bytes;}
+                    }
+                    summary.items.removeAll(done);
+                    if(mode==0){
+                        summary.safeCount=Math.max(0,summary.safeCount-done.size());
+                        summary.safeBytes=Math.max(0L,summary.safeBytes-freed);
+                    }else{
+                        summary.reviewCount=Math.max(0,summary.reviewCount-done.size());
+                        summary.reviewBytes=Math.max(0L,summary.reviewBytes-freed);
+                    }
+                    clearSelection(selectionKey);
+                    long finalFreed=freed;
+                    new AlertDialog.Builder(this)
+                            .setTitle(direct?"Clean complete":"Moved to STS Trash")
+                            .setMessage(done.size()+" files • "+format(finalFreed))
+                            .setPositiveButton("OK",(x,y)->showScanItemsGallery(summary,mode))
+                            .show();
+                }).show();
     }
 
     private void showItemDetails(ScanSummary s, boolean safeOnly) {
@@ -3666,6 +3816,7 @@ public class MainActivity extends Activity {
         if (isPersonal) {
             out.personalCount++;
             out.personalBytes += len;
+            out.personalItems.add(new ScanItem(f, len, false));
         }
 
         boolean safe = false;
@@ -4211,6 +4362,7 @@ public class MainActivity extends Activity {
         int safeCount, reviewCount, restrictedCount, scannedFiles, personalCount;
         boolean fullAccess;
         final List<ScanItem> items = new ArrayList<>();
+        final List<ScanItem> personalItems = new ArrayList<>();
     }
     private interface ScanCallback {
         void progress(int pct,String label);
