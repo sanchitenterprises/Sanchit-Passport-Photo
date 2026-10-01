@@ -109,6 +109,9 @@ public class MainActivity extends Activity {
     private SystemStorageResult activeSystemResult = null;
     private AppDetailResult activeAppDetailResult = null;
     private AppVisibleCategory activeVisibleCategory = null;
+    private ScanSummary activeScanSummary = null;
+    private int activeScanGalleryMode = -1;
+    private String previewReturnTag = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -340,7 +343,7 @@ public class MainActivity extends Activity {
         LinearLayout top = row();
         TextView view = viewControl(refresh);
         TextView all = pill("SELECT ALL", Color.rgb(18,145,123), Color.rgb(228,252,248));
-        TextView clear = pill("CLEAR", ROSE, Color.rgb(255,238,243));
+        TextView clear = pill("CLEAR ALL", ROSE, Color.rgb(255,238,243));
         touch(all); touch(clear);
         all.setOnClickListener(v -> { selectAllFiles(selectionKey, selectableFiles); refresh.run(); });
         clear.setOnClickListener(v -> { clearSelection(selectionKey); refresh.run(); });
@@ -547,9 +550,9 @@ public class MainActivity extends Activity {
         int inRow = 0;
         for (LinearLayout cell : cells) {
             if (row == null || inRow == cols) {
+                if (gallery.getChildCount() > 0) gallery.addView(space(7));
                 row = row();
                 gallery.addView(row, matchWrap());
-                if (gallery.getChildCount() > 1) gallery.addView(space(7));
                 inRow = 0;
             }
             if (inRow > 0) row.addView(spaceH(7));
@@ -1577,6 +1580,8 @@ public class MainActivity extends Activity {
 
     private void showAppVisibleFiles(AppDetailResult result,AppVisibleCategory cat){
         rememberCurrentScroll();
+        activeScanSummary = null;
+        activeScanGalleryMode = -1;
         activeAppDetailResult=result;
         activeVisibleCategory=cat;
         activeToolResult=null;
@@ -1861,6 +1866,8 @@ public class MainActivity extends Activity {
 
     private void showToolResult(ToolResult result) {
         rememberCurrentScroll();
+        activeScanSummary = null;
+        activeScanGalleryMode = -1;
         activeToolResult = result;
         getWindow().getDecorView().setTag("toolResult");
 
@@ -2294,6 +2301,8 @@ public class MainActivity extends Activity {
 
     private void openFoundFile(File file) {
         haptic();
+        Object returnTag = getWindow().getDecorView().getTag();
+        previewReturnTag = returnTag == null ? null : returnTag.toString();
         if (!file.exists()) {
             new AlertDialog.Builder(this)
                     .setTitle("File not found")
@@ -2654,10 +2663,23 @@ public class MainActivity extends Activity {
     private void returnFromPreview() {
         haptic();
         releasePreviewResources();
-        if (activeVisibleCategory != null && activeAppDetailResult != null) {
+        String target = previewReturnTag;
+        previewReturnTag = null;
+
+        if ("trash".equals(target)) {
+            showTrashScreen();
+        } else if ("scanGallery".equals(target) && activeScanSummary != null && activeScanGalleryMode >= 0) {
+            showScanItemsGallery(activeScanSummary, activeScanGalleryMode);
+        } else if ("appVisibleFiles".equals(target) && activeVisibleCategory != null && activeAppDetailResult != null) {
+            showAppVisibleFiles(activeAppDetailResult, activeVisibleCategory);
+        } else if ("toolResult".equals(target) && activeToolResult != null) {
+            showToolResult(activeToolResult);
+        } else if (activeVisibleCategory != null && activeAppDetailResult != null) {
             showAppVisibleFiles(activeAppDetailResult, activeVisibleCategory);
         } else if (activeToolResult != null) {
             showToolResult(activeToolResult);
+        } else if (activeScanSummary != null && activeScanGalleryMode >= 0) {
+            showScanItemsGallery(activeScanSummary, activeScanGalleryMode);
         } else if (activeAppDetailResult != null) {
             showAppDetailResult(activeAppDetailResult);
         } else {
@@ -2838,6 +2860,8 @@ public class MainActivity extends Activity {
 
     private void showTrashScreen() {
         rememberCurrentScroll();
+        activeScanSummary = null;
+        activeScanGalleryMode = -1;
         releasePreviewResources();
         getWindow().getDecorView().setTag("trash");
         purgeExpiredTrash();
@@ -3370,6 +3394,8 @@ public class MainActivity extends Activity {
 
     private void showResult(ScanSummary s) {
         rememberCurrentScroll();
+        activeScanSummary = s;
+        activeScanGalleryMode = -1;
         getWindow().getDecorView().setTag("result");
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -3447,6 +3473,8 @@ public class MainActivity extends Activity {
 
     private void showScanItemsGallery(ScanSummary summary, int mode) {
         rememberCurrentScroll();
+        activeScanSummary = summary;
+        activeScanGalleryMode = mode;
         getWindow().getDecorView().setTag("scanGallery");
 
         String label = mode == 0 ? "Safe Junk" : mode == 1 ? "Review Before Delete" : "Personal Files • Protected";
@@ -3703,6 +3731,9 @@ public class MainActivity extends Activity {
         Object tag = getWindow().getDecorView().getTag();
         if ("preview".equals(tag)) {
             returnFromPreview();
+        } else if ("scanGallery".equals(tag) && activeScanSummary != null) {
+            haptic();
+            showResult(activeScanSummary);
         } else if ("appVisibleFiles".equals(tag) && activeAppDetailResult != null) {
             haptic();
             showAppDetailResult(activeAppDetailResult);
