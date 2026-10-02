@@ -1,4 +1,4 @@
-name: Build STS Deep Cleaner APK
+name: Build STS Smart Cleaner APK
 
 on:
   push:
@@ -41,13 +41,13 @@ jobs:
         run: gradle -p sts-deep-cleaner :app:assembleRelease --no-daemon --stacktrace
 
       - name: Align APK
-        run: /usr/local/lib/android/sdk/build-tools/35.0.0/zipalign -f -p 4 sts-deep-cleaner/app/build/outputs/apk/release/app-release-unsigned.apk STS-Deep-Cleaner-v0.3.1-aligned-unsigned.apk
+        run: /usr/local/lib/android/sdk/build-tools/35.0.0/zipalign -f -p 4 sts-deep-cleaner/app/build/outputs/apk/release/app-release-unsigned.apk STS-Smart-Cleaner-v0.4.0-aligned-unsigned.apk
 
       - name: Upload unsigned APK and signer
         uses: actions/upload-artifact@v4
         with:
-          name: STS-Deep-Cleaner-v0.3.1-unsigned
+          name: STS-Smart-Cleaner-v0.4.0-unsigned
           path: |
-            STS-Deep-Cleaner-v0.3.1-aligned-unsigned.apk
+            STS-Smart-Cleaner-v0.4.0-aligned-unsigned.apk
             /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar
           if-no-files-found: error
