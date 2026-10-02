@@ -3105,7 +3105,7 @@ public class MainActivity extends Activity {
             labels.addView(text(impact.appName,13,INK,true));
             labels.addView(space(2));
             labels.addView(text(formatUsageDuration(impact.foregroundMs)+" active • "+
-                    String.format(Locale.US,"%.1f%% activity share"),10,MUTED,false));
+                    String.format(Locale.US,"%.1f%% activity share",impact.activityShare),10,MUTED,false));
             top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
 
             int impactColor="HIGH".equals(impact.impact)?ROSE:"MEDIUM".equals(impact.impact)?AMBER:TEAL;
@@ -6150,6 +6150,27 @@ public class MainActivity extends Activity {
         static AppFileInfo folder() {
             return new AppFileInfo("Device Storage", null, "Folder", "FOLDER",
                     PURPLE, Color.rgb(239,236,255), "Storage folder", false, true);
+        }
+    }
+
+    private static final class BatteryAppImpact {
+        final String appName;
+        final String packageName;
+        final long foregroundMs;
+        final long lastTimeUsed;
+        final float activityShare;
+        final String impact;
+        final boolean systemApp;
+
+        BatteryAppImpact(String appName,String packageName,long foregroundMs,long lastTimeUsed,
+                         float activityShare,String impact,boolean systemApp){
+            this.appName=appName;
+            this.packageName=packageName;
+            this.foregroundMs=foregroundMs;
+            this.lastTimeUsed=lastTimeUsed;
+            this.activityShare=activityShare;
+            this.impact=impact;
+            this.systemApp=systemApp;
         }
     }
 
