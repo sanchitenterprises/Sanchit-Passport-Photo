@@ -924,7 +924,7 @@ public class MainActivity extends Activity {
         a.visibleFiles++;
 
         StorageCategory cat = categoryForAnalytics(f, lowPath);
-        a.add(cat, len, 1);
+        a.addFile(cat, f, len);
     }
 
     private StorageCategory categoryForAnalytics(File f, String lowPath) {
@@ -1000,7 +1000,12 @@ public class MainActivity extends Activity {
             TextView value = text(format(bytes) + "  •  " + percentText(pct), 12, cat.color, true);
             value.setGravity(Gravity.END);
             r.addView(value);
+            TextView arrow = text("›", 20, Color.rgb(120,126,145), true);
+            arrow.setPadding(dp(7),0,0,0);
+            r.addView(arrow);
 
+            touch(r);
+            r.setOnClickListener(v -> openStorageCategory(cat));
             rows.addView(r, matchWrap());
         }
 
@@ -1792,6 +1797,182 @@ public class MainActivity extends Activity {
         }catch(Exception e){
             try{ startActivity(new Intent(Settings.ACTION_SETTINGS)); }catch(Exception ignored){}
         }
+    }
+
+    private boolean isVisibleStorageCategory(StorageCategory cat) {
+        return cat == StorageCategory.PHOTOS || cat == StorageCategory.VIDEOS ||
+                cat == StorageCategory.AUDIO || cat == StorageCategory.DOCUMENTS ||
+                cat == StorageCategory.APK || cat == StorageCategory.BACKUPS ||
+                cat == StorageCategory.JUNK || cat == StorageCategory.OTHERS;
+    }
+
+    private void openStorageCategory(StorageCategory cat) {
+        haptic();
+        if (isVisibleStorageCategory(cat)) {
+            List<File> files = cachedAnalytics == null ? new ArrayList<>() : cachedAnalytics.files(cat);
+            showStorageCategoryFiles(cat, files);
+            return;
+        }
+
+        activeSystemCategory = cat;
+        if (cat == StorageCategory.SYSTEM_RESERVED) {
+            openSystemAnalyzer();
+        } else if (cat == StorageCategory.HIDDEN_UNCLASSIFIED) {
+            openSystemAnalyzer();
+        } else {
+            openSystemAnalyzer();
+        }
+    }
+
+    private void sortFiles(List<File> files, int mode) {
+        Comparator<File> cmp;
+        switch (mode) {
+            case 1: cmp = Comparator.comparingLong(File::length); break;
+            case 2: cmp = (a,b) -> Long.compare(b.lastModified(), a.lastModified()); break;
+            case 3: cmp = Comparator.comparingLong(File::lastModified); break;
+            case 4: cmp = Comparator.comparing(a -> a.getName().toLowerCase(Locale.ROOT)); break;
+            case 5: cmp = (a,b) -> b.getName().compareToIgnoreCase(a.getName()); break;
+            case 0:
+            default: cmp = (a,b) -> Long.compare(b.length(), a.length()); break;
+        }
+        Collections.sort(files, cmp);
+    }
+
+    private void showStorageCategoryFiles(StorageCategory cat, List<File> sourceFiles) {
+        rememberCurrentScroll();
+        activeStorageCategory = cat;
+        activeStorageCategoryFiles = new ArrayList<>(sourceFiles);
+        activeToolResult = null;
+        activeAppDetailResult = null;
+        activeVisibleCategory = null;
+        getWindow().getDecorView().setTag("storageCategory");
+
+        String scrollKey = "storageCategory:" + cat.name();
+        String sortKey = "sort:" + scrollKey;
+        String selectionKey = "sel:" + scrollKey;
+
+        List<File> files = new ArrayList<>();
+        for (File file : sourceFiles) if (file != null && file.exists()) files.add(file);
+        sortFiles(files, sortMode(sortKey, 0));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        long total = 0L;
+        for (File file : files) total += Math.max(0L,file.length());
+
+        root.addView(text(cat.label,26,INK,true));
+        root.addView(space(5));
+        root.addView(text(files.size()+" files • "+format(total),12,cat.color,true));
+        root.addView(space(10));
+
+        if (!files.isEmpty()) {
+            root.addView(sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
+                resetSavedScroll(scrollKey);
+                showStorageCategoryFiles(cat, sourceFiles);
+            }), matchWrap());
+            root.addView(space(8));
+
+            List<File> selectable = new ArrayList<>();
+            for (File file : files) {
+                AppFileInfo info = describeAppFile(file);
+                if (!info.protectedFile) selectable.add(file);
+            }
+
+            String actionLabel = cat == StorageCategory.JUNK ? "CLEAN SELECTED" : "MOVE SELECTED TO STS TRASH";
+            root.addView(galleryControls(selectionKey, selectable,
+                    () -> showStorageCategoryFiles(cat, sourceFiles),
+                    actionLabel,
+                    () -> performStorageCategoryAction(cat, sourceFiles, selectionKey)), matchWrap());
+
+            root.addView(section("Preview"));
+            LinearLayout gallery = column();
+            List<LinearLayout> cells = new ArrayList<>();
+            int limit = Math.min(220, files.size());
+            for (int i=0;i<limit;i++) {
+                File file = files.get(i);
+                AppFileInfo info = describeAppFile(file);
+                cells.add(galleryFileCard(file,file.length(),selectionKey,
+                        !info.protectedFile,info,cat.color,
+                        () -> showStorageCategoryFiles(cat, sourceFiles)));
+            }
+            addGalleryCells(gallery,cells);
+            root.addView(gallery,matchWrap());
+
+            if (files.size() > limit) {
+                root.addView(space(10));
+                root.addView(centerText("Showing first "+limit+" of "+files.size()+
+                        " • Select All applies to all selectable files",10,MUTED,false));
+            }
+        } else {
+            LinearLayout empty = card();
+            empty.setPadding(dp(18),dp(22),dp(18),dp(22));
+            empty.addView(centerText("No files found",15,MUTED,true));
+            root.addView(empty,matchWrap());
+        }
+
+        root.addView(space(14));
+        TextView back = actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition(scrollKey,scroll);
+        fadeIn(root);
+    }
+
+    private void performStorageCategoryAction(StorageCategory cat,List<File> sourceFiles,String selectionKey) {
+        List<File> selected = selectedFiles(selectionKey, sourceFiles);
+        if (selected.isEmpty()) return;
+
+        List<File> targets = new ArrayList<>();
+        long bytes = 0L;
+        for (File file : selected) {
+            AppFileInfo info = describeAppFile(file);
+            if (info.protectedFile) continue;
+            targets.add(file);
+            bytes += Math.max(0L,file.length());
+        }
+        if (targets.isEmpty()) return;
+
+        boolean direct = cat == StorageCategory.JUNK;
+        long total = bytes;
+        new AlertDialog.Builder(this)
+                .setTitle(direct ? "Clean selected?" : "Move selected to STS Trash?")
+                .setMessage(targets.size()+" files • "+format(total))
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton(direct ? "CLEAN" : "MOVE TO TRASH",(d,w)->{
+                    int count=0;
+                    long changed=0L;
+                    for (File file : new ArrayList<>(targets)) {
+                        long len=file.length();
+                        boolean ok;
+                        try { ok = direct ? file.delete() : moveToTrash(file); }
+                        catch(Exception e){ ok=false; }
+                        if(ok){
+                            count++;
+                            changed+=len;
+                            sourceFiles.remove(file);
+                            if (activeStorageCategoryFiles != null) activeStorageCategoryFiles.remove(file);
+                        }
+                    }
+                    clearSelection(selectionKey);
+                    cachedAnalytics = null;
+                    cachedAnalyticsAt = 0L;
+                    int finalCount=count;
+                    long finalChanged=changed;
+                    new AlertDialog.Builder(this)
+                            .setTitle(direct ? "Clean complete" : "Moved to STS Trash")
+                            .setMessage(finalCount+" files • "+format(finalChanged))
+                            .setPositiveButton("OK",(x,y)->showStorageCategoryFiles(cat,sourceFiles))
+                            .show();
+                }).show();
     }
 
     private void openTool(String type) {
@@ -2751,6 +2932,8 @@ public class MainActivity extends Activity {
 
         if ("trash".equals(target)) {
             showTrashScreen();
+        } else if ("storageCategory".equals(target) && activeStorageCategory != null && activeStorageCategoryFiles != null) {
+            showStorageCategoryFiles(activeStorageCategory, activeStorageCategoryFiles);
         } else if ("scanGallery".equals(target) && activeScanSummary != null && activeScanGalleryMode >= 0) {
             showScanItemsGallery(activeScanSummary, activeScanGalleryMode);
         } else if ("appVisibleFiles".equals(target) && activeVisibleCategory != null && activeAppDetailResult != null) {
@@ -3826,6 +4009,9 @@ public class MainActivity extends Activity {
         Object tag = getWindow().getDecorView().getTag();
         if ("preview".equals(tag)) {
             returnFromPreview();
+        } else if ("storageCategory".equals(tag)) {
+            haptic();
+            showHome();
         } else if ("scanGallery".equals(tag) && activeScanSummary != null) {
             haptic();
             showResult(activeScanSummary);
@@ -4011,7 +4197,7 @@ public class MainActivity extends Activity {
                 new HomeToolSpec("⇩","Downloads","Offline",Color.rgb(244,139,45),"downloads"),
                 new HomeToolSpec("⛃","Backups","Database",Color.rgb(139,93,210),"backups")
         };
-        int cols = galleryColumns();
+        int cols = galleryListMode() ? 1 : galleryColumns();
         LinearLayout row = null;
         int inRow = 0;
         for (HomeToolSpec spec : tools) {
@@ -4025,7 +4211,7 @@ public class MainActivity extends Activity {
             LinearLayout card = toolGridCard(spec.icon, spec.title, spec.sub, spec.accent);
             card.setOnClickListener(v -> {
                 if ("trash".equals(spec.id)) showTrashScreen();
-                else if ("system".equals(spec.id)) openSystemAnalyzer();
+                else if ("system".equals(spec.id)) { activeSystemCategory = null; openSystemAnalyzer(); }
                 else openTool(spec.id);
             });
             row.addView(card, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -4243,6 +4429,7 @@ public class MainActivity extends Activity {
     private static final class StorageAnalytics {
         final long[] bytes = new long[StorageCategory.values().length];
         final int[] counts = new int[StorageCategory.values().length];
+        final Map<StorageCategory,List<File>> files = new HashMap<>();
         long visibleBytes;
         int visibleFiles;
         long usedStorage;
@@ -4252,8 +4439,23 @@ public class MainActivity extends Activity {
             bytes[c.ordinal()] += Math.max(0L, b);
             counts[c.ordinal()] += Math.max(0, count);
         }
+
+        void addFile(StorageCategory c, File file, long b) {
+            add(c, b, 1);
+            List<File> list = files.get(c);
+            if (list == null) {
+                list = new ArrayList<>();
+                files.put(c, list);
+            }
+            list.add(file);
+        }
+
         long bytes(StorageCategory c) { return bytes[c.ordinal()]; }
         int count(StorageCategory c) { return counts[c.ordinal()]; }
+        List<File> files(StorageCategory c) {
+            List<File> list = files.get(c);
+            return list == null ? new ArrayList<>() : new ArrayList<>(list);
+        }
     }
 
     private static final class StorageBreakdownView extends View {
