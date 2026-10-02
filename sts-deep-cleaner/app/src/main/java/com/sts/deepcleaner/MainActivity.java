@@ -81,13 +81,13 @@ import androidx.media3.ui.PlayerView;
 public class MainActivity extends Activity {
     private static final int PURPLE = Color.rgb(90,74,227);
     private static final int PURPLE2 = Color.rgb(117,92,255);
-    private static final int TEAL = Color.rgb(41,214,194);
-    private static final int AMBER = Color.rgb(255,179,71);
-    private static final int ROSE = Color.rgb(255,103,137);
-    private static final int BLUE = Color.rgb(73,144,226);
+    private static final int TEAL = Color.rgb(15,139,123);
+    private static final int AMBER = Color.rgb(190,100,0);
+    private static final int ROSE = Color.rgb(196,43,74);
+    private static final int BLUE = Color.rgb(37,99,235);
     private static final int BG = Color.rgb(247,248,255);
     private static final int INK = Color.rgb(22,27,40);
-    private static final int MUTED = Color.rgb(102,108,128);
+    private static final int MUTED = Color.rgb(82,89,107);
 
     private ScanSummary lastSummary;
     private boolean pendingScanAfterAccess = false;
@@ -1887,10 +1887,10 @@ public class MainActivity extends Activity {
         Comparator<File> cmp;
         switch (mode) {
             case 1: cmp = Comparator.comparingLong(File::length); break;
-            case 2: cmp = (a,b) -> Long.compare(b.lastModified(), a.lastModified()); break;
-            case 3: cmp = Comparator.comparingLong(File::lastModified); break;
-            case 4: cmp = Comparator.comparing(a -> a.getName().toLowerCase(Locale.ROOT)); break;
-            case 5: cmp = (a,b) -> b.getName().compareToIgnoreCase(a.getName()); break;
+            case 2: cmp = Comparator.comparing(a -> a.getName().toLowerCase(Locale.ROOT)); break;
+            case 3: cmp = (a,b) -> b.getName().compareToIgnoreCase(a.getName()); break;
+            case 4: cmp = (a,b) -> Long.compare(b.lastModified(), a.lastModified()); break;
+            case 5: cmp = Comparator.comparingLong(File::lastModified); break;
             case 0:
             default: cmp = (a,b) -> Long.compare(b.length(), a.length()); break;
         }
