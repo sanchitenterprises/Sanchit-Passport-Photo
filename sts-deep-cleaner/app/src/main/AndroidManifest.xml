@@ -14,7 +14,7 @@
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
         android:logo="@drawable/ic_launcher"
-        android:label="STS Deep Cleaner"
+        android:label="STS Smart Cleaner"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
