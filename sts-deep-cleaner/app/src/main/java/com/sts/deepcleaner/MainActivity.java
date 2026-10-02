@@ -123,6 +123,7 @@ public class MainActivity extends Activity {
     private String previewReturnTag = null;
     private StorageCategory activeStorageCategory = null;
     private List<File> activeStorageCategoryFiles = null;
+    private long activeStorageCategoryBytes = 0L;
     private StorageCategory activeSystemCategory = null;
 
     @Override
@@ -2035,20 +2036,42 @@ public class MainActivity extends Activity {
 
     private void showStorageCategoryFiles(StorageCategory cat, List<File> sourceFiles) {
         rememberCurrentScroll();
-        activeStorageCategory = cat;
-        activeStorageCategoryFiles = new ArrayList<>(sourceFiles);
-        activeToolResult = null;
-        activeAppDetailResult = null;
-        activeVisibleCategory = null;
+        showCategoryLoading(cat, sourceFiles == null ? 0 : sourceFiles.size());
+
+        new Thread(() -> {
+            List<File> files = new ArrayList<>();
+            long total = 0L;
+            try {
+                if (sourceFiles != null) {
+                    for (File file : sourceFiles) {
+                        if (file == null || !file.exists()) continue;
+                        files.add(file);
+                        total += Math.max(0L, file.length());
+                    }
+                }
+                sortFiles(files, sortMode("sort:storageCategory:" + cat.name(), 0));
+            } catch (Throwable ignored) {}
+
+            long totalBytes = total;
+            runOnUiThread(() -> {
+                activeStorageCategory = cat;
+                activeStorageCategoryFiles = files;
+                activeStorageCategoryBytes = totalBytes;
+                activeToolResult = null;
+                activeAppDetailResult = null;
+                activeVisibleCategory = null;
+                resetVisibleLimit("storageCategory:" + cat.name());
+                renderStorageCategoryFiles(cat, files);
+            });
+        }, "sts-category-" + cat.name()).start();
+    }
+
+    private void renderStorageCategoryFiles(StorageCategory cat, List<File> files) {
         getWindow().getDecorView().setTag("storageCategory");
 
         String scrollKey = "storageCategory:" + cat.name();
         String sortKey = "sort:" + scrollKey;
         String selectionKey = "sel:" + scrollKey;
-
-        List<File> files = new ArrayList<>();
-        for (File file : sourceFiles) if (file != null && file.exists()) files.add(file);
-        sortFiles(files, sortMode(sortKey, 0));
 
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
@@ -2056,51 +2079,47 @@ public class MainActivity extends Activity {
         LinearLayout root = column();
         root.setPadding(dp(16),dp(22),dp(16),dp(28));
 
-        long total = 0L;
-        for (File file : files) total += Math.max(0L,file.length());
-
         root.addView(text(cat.label,26,INK,true));
         root.addView(space(5));
-        root.addView(text(files.size()+" files • "+format(total),12,cat.color,true));
+        root.addView(text(files.size()+" files • "+format(activeStorageCategoryBytes),12,cat.color,true));
         root.addView(space(10));
 
         if (!files.isEmpty()) {
             root.addView(sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
                 resetSavedScroll(scrollKey);
-                showStorageCategoryFiles(cat, sourceFiles);
+                resetVisibleLimit(scrollKey);
+                showStorageCategoryFiles(cat, files);
             }), matchWrap());
             root.addView(space(8));
 
-            List<File> selectable = new ArrayList<>();
-            for (File file : files) {
-                AppFileInfo info = describeAppFile(file);
-                if (!info.protectedFile) selectable.add(file);
-            }
-
             String actionLabel = cat == StorageCategory.JUNK ? "CLEAN SELECTED" : "MOVE SELECTED TO STS TRASH";
-            root.addView(galleryControls(selectionKey, selectable,
-                    () -> showStorageCategoryFiles(cat, sourceFiles),
+            root.addView(galleryControls(selectionKey, files,
+                    () -> renderStorageCategoryFiles(cat, files),
                     actionLabel,
-                    () -> performStorageCategoryAction(cat, sourceFiles, selectionKey)), matchWrap());
+                    () -> performStorageCategoryAction(cat, files, selectionKey)), matchWrap());
 
             root.addView(section("Preview"));
             LinearLayout gallery = column();
             List<LinearLayout> cells = new ArrayList<>();
-            int limit = Math.min(220, files.size());
+            int limit = visibleLimit(scrollKey, files.size());
             for (int i=0;i<limit;i++) {
                 File file = files.get(i);
                 AppFileInfo info = describeAppFile(file);
                 cells.add(galleryFileCard(file,file.length(),selectionKey,
                         !info.protectedFile,info,cat.color,
-                        () -> showStorageCategoryFiles(cat, sourceFiles)));
+                        () -> renderStorageCategoryFiles(cat, files)));
             }
             addGalleryCells(gallery,cells);
             root.addView(gallery,matchWrap());
 
             if (files.size() > limit) {
                 root.addView(space(10));
-                root.addView(centerText("Showing first "+limit+" of "+files.size()+
-                        " • Select All applies to all selectable files",10,MUTED,false));
+                root.addView(loadMoreButton(scrollKey, limit, files.size(),
+                        () -> renderStorageCategoryFiles(cat, files)),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+                root.addView(space(6));
+                root.addView(centerText("Preview batches memory-safe तरीके से load होंगी • Select All सभी selectable files पर लागू है",
+                        10,MUTED,false));
             }
         } else {
             LinearLayout empty = card();
