@@ -165,9 +165,38 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        stopSensorLiveTest();
+        stopTorchIfActive();
         try { thumbnailExecutor.shutdownNow(); } catch (Exception ignored) {}
         releasePreviewResources();
         super.onDestroy();
+    }
+
+    private void stopTorchIfActive(){
+        if(!torchActive||torchCameraId==null)return;
+        try{
+            CameraManager cm=(CameraManager)getSystemService(CAMERA_SERVICE);
+            cm.setTorchMode(torchCameraId,false);
+        }catch(Exception ignored){}
+        torchActive=false;
+        torchCameraId=null;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+        boolean granted=grantResults!=null&&grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED;
+        String pending=pendingDoctorPermissionTest;
+        pendingDoctorPermissionTest=null;
+        if(requestCode==7101){
+            if(granted) runMicrophoneTest();
+            else {saveDoctorResult("microphone","WARNING");showPhoneDoctor();}
+        }else if(requestCode==7102){
+            if(granted) runFlashTest();
+            else {saveDoctorResult("flash","WARNING");showPhoneDoctor();}
+        }else if(pending!=null){
+            showPhoneDoctor();
+        }
     }
 
     @Override
@@ -201,6 +230,8 @@ public class MainActivity extends Activity {
 
     private void showHome() {
         categoryLoadToken++;
+        stopSensorLiveTest();
+        stopTorchIfActive();
         rememberCurrentScroll();
         clearThumbnailQueue();
         releasePreviewResources();
@@ -5255,6 +5286,18 @@ public class MainActivity extends Activity {
         Object tag = getWindow().getDecorView().getTag();
         if ("preview".equals(tag)) {
             returnFromPreview();
+        } else if ("displayTest".equals(tag) || "touchTest".equals(tag) ||
+                "sensorLive".equals(tag) || "doctorLoading".equals(tag)) {
+            haptic();
+            stopSensorLiveTest();
+            stopTorchIfActive();
+            showPhoneDoctor();
+        } else if ("phoneDoctor".equals(tag) || "batteryDoctor".equals(tag) ||
+                "healthAnalysis".equals(tag) || "healthLoading".equals(tag)) {
+            haptic();
+            stopSensorLiveTest();
+            stopTorchIfActive();
+            showHome();
         } else if ("storageCategory".equals(tag)) {
             haptic();
             showHome();
@@ -5900,6 +5943,93 @@ public class MainActivity extends Activity {
         static AppFileInfo folder() {
             return new AppFileInfo("Device Storage", null, "Folder", "FOLDER",
                     PURPLE, Color.rgb(239,236,255), "Storage folder", false, true);
+        }
+    }
+
+    private static final class BatterySnapshot {
+        int percent=-1;
+        int status=-1;
+        int health=-1;
+        int plugged=0;
+        int voltageMv=0;
+        float tempC=0f;
+        String technology;
+        int currentUa=0;
+        int averageUa=0;
+        int chargeCounterUah=0;
+        long chargeTimeMs=-1L;
+    }
+
+    private static final class HealthReport {
+        int score=0;
+        String status="NEEDS ATTENTION";
+        long totalStorage;
+        long usedStorage;
+        long freeStorage;
+        float freePct;
+        long totalRam;
+        long freeRam;
+        int thermalStatus=-1;
+        int sensorCount=0;
+        long appCacheBytes=0L;
+        int doctorPass=0;
+        int doctorFails=0;
+        int doctorWarnings=0;
+        BatterySnapshot battery=new BatterySnapshot();
+        final List<String> issues=new ArrayList<>();
+        final List<String> good=new ArrayList<>();
+    }
+
+    private interface TouchProgressListener {
+        void onProgress(float progress);
+    }
+
+    private static final class TouchTestView extends View {
+        private static final int COLS=8;
+        private static final int ROWS=12;
+        private final Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final boolean[] hit=new boolean[COLS*ROWS];
+        private TouchProgressListener listener;
+
+        TouchTestView(Context c){
+            super(c);
+            setBackgroundColor(Color.rgb(245,246,250));
+        }
+
+        void setProgressListener(TouchProgressListener l){listener=l;}
+
+        @Override public boolean onTouchEvent(MotionEvent e){
+            if(e.getAction()==MotionEvent.ACTION_DOWN||e.getAction()==MotionEvent.ACTION_MOVE){
+                int col=Math.max(0,Math.min(COLS-1,(int)(e.getX()/Math.max(1f,getWidth()/(float)COLS))));
+                int row=Math.max(0,Math.min(ROWS-1,(int)(e.getY()/Math.max(1f,getHeight()/(float)ROWS))));
+                hit[row*COLS+col]=true;
+                invalidate();
+                if(listener!=null){
+                    int n=0;for(boolean b:hit)if(b)n++;
+                    listener.onProgress(n/(float)hit.length);
+                }
+                return true;
+            }
+            return true;
+        }
+
+        @Override protected void onDraw(Canvas c){
+            super.onDraw(c);
+            float cw=getWidth()/(float)COLS;
+            float rh=getHeight()/(float)ROWS;
+            p.setStyle(Paint.Style.FILL);
+            for(int r=0;r<ROWS;r++){
+                for(int col=0;col<COLS;col++){
+                    boolean on=hit[r*COLS+col];
+                    p.setColor(on?Color.rgb(197,245,229):Color.rgb(238,240,247));
+                    c.drawRect(col*cw,r*rh,(col+1)*cw,(r+1)*rh,p);
+                }
+            }
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(1f);
+            p.setColor(Color.rgb(205,208,220));
+            for(int col=1;col<COLS;col++) c.drawLine(col*cw,0,col*cw,getHeight(),p);
+            for(int r=1;r<ROWS;r++) c.drawLine(0,r*rh,getWidth(),r*rh,p);
         }
     }
 
