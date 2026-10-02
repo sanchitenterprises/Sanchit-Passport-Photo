@@ -144,6 +144,9 @@ public class SmartSleepVpnService extends VpnService {
             if (protectedPkgs.contains(ai.packageName)) continue;
             if (pm.getLaunchIntentForPackage(ai.packageName) == null) continue;
 
+            long wakeUntil = prefs.getLong("wake_until_" + ai.packageName, 0L);
+            if (wakeUntil > now) continue;
+
             UsageStats us = usage.get(ai.packageName);
             long last = us == null ? 0L : us.getLastTimeUsed();
             if (last <= 0L || now - last >= threshold) {
