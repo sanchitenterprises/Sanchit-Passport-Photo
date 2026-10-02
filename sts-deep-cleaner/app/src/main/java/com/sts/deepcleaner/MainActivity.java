@@ -173,6 +173,7 @@ public class MainActivity extends Activity {
 
     private void showHome() {
         rememberCurrentScroll();
+        clearThumbnailQueue();
         releasePreviewResources();
         purgeExpiredTrashAsync();
         getWindow().getDecorView().setTag("home");
@@ -993,8 +994,18 @@ public class MainActivity extends Activity {
         currentScrollKey = null;
     }
 
+    private void clearThumbnailQueue() {
+        try {
+            if (thumbnailExecutor instanceof ThreadPoolExecutor) {
+                ((ThreadPoolExecutor) thumbnailExecutor).getQueue().clear();
+                ((ThreadPoolExecutor) thumbnailExecutor).purge();
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private void beginNonScrollScreen() {
         rememberCurrentScroll();
+        clearThumbnailQueue();
         clearCurrentScrollBinding();
     }
 
@@ -1832,6 +1843,7 @@ public class MainActivity extends Activity {
 
     private void showAppVisibleFiles(AppDetailResult result,AppVisibleCategory cat){
         rememberCurrentScroll();
+        clearThumbnailQueue();
         activeScanSummary = null;
         activeScanGalleryMode = -1;
         activeAppDetailResult=result;
@@ -2072,6 +2084,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderStorageCategoryFiles(StorageCategory cat, List<File> files) {
+        clearThumbnailQueue();
         getWindow().getDecorView().setTag("storageCategory");
 
         String scrollKey = "storageCategory:" + cat.name();
@@ -2328,6 +2341,7 @@ public class MainActivity extends Activity {
 
     private void showToolResult(ToolResult result) {
         rememberCurrentScroll();
+        clearThumbnailQueue();
         activeScanSummary = null;
         activeScanGalleryMode = -1;
         activeToolResult = result;
@@ -3364,6 +3378,7 @@ public class MainActivity extends Activity {
 
     private void showTrashScreen() {
         rememberCurrentScroll();
+        clearThumbnailQueue();
         activeScanSummary = null;
         activeScanGalleryMode = -1;
         releasePreviewResources();
@@ -3622,21 +3637,29 @@ public class MainActivity extends Activity {
     private void scanTool(String type, ToolCallback cb) {
         new Thread(() -> {
             ToolResult out = new ToolResult(type);
-            File root = Environment.getExternalStorageDirectory();
-            Set<String> seen = new HashSet<>();
+            try {
+                File root = Environment.getExternalStorageDirectory();
+                Set<String> seen = new HashSet<>();
 
-            if ("duplicates".equals(type)) {
-                Map<Long,List<File>> bySize = new HashMap<>();
-                collectDuplicateCandidates(root, seen, 0, out, bySize, cb);
-                hashDuplicateCandidates(bySize, out, cb);
-            } else {
-                walkTool(root, seen, 0, out, cb);
+                if ("duplicates".equals(type)) {
+                    Map<Long,List<File>> bySize = new HashMap<>();
+                    collectDuplicateCandidates(root, seen, 0, out, bySize, cb);
+                    hashDuplicateCandidates(bySize, out, cb);
+                } else {
+                    walkTool(root, seen, 0, out, cb);
+                }
+                if ("large".equals(type)) {
+                    Collections.sort(out.items, (a,b) -> Long.compare(b.bytes, a.bytes));
+                }
+                cb.live("Scan complete", out.scannedFiles, out.scannedBytes, out.items.size(), out.totalBytes);
+                cb.done(out);
+            } catch (Throwable error) {
+                try {
+                    cb.live("Scan safely stopped • partial result", out.scannedFiles, out.scannedBytes,
+                            out.items.size(), out.totalBytes);
+                    cb.done(out);
+                } catch (Throwable ignored) {}
             }
-            if ("large".equals(type)) {
-                Collections.sort(out.items, (a,b) -> Long.compare(b.bytes, a.bytes));
-            }
-            cb.live("Scan complete", out.scannedFiles, out.scannedBytes, out.items.size(), out.totalBytes);
-            cb.done(out);
         }, "sts-tool-"+type).start();
     }
 
@@ -3982,6 +4005,7 @@ public class MainActivity extends Activity {
 
     private void showScanItemsGallery(ScanSummary summary, int mode) {
         rememberCurrentScroll();
+        clearThumbnailQueue();
         activeScanSummary = summary;
         activeScanGalleryMode = mode;
         getWindow().getDecorView().setTag("scanGallery");
@@ -4300,29 +4324,36 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             ScanSummary out = new ScanSummary();
             out.fullAccess = hasAllFilesAccess();
-            cb.progress(1, "Storage map तैयार कर रहे हैं…");
+            try {
+                cb.progress(1, "Storage map तैयार कर रहे हैं…");
 
-            List<File> roots = new ArrayList<>();
-            if (out.fullAccess) {
-                roots.add(Environment.getExternalStorageDirectory());
-            } else {
-                File[] appRoots = getExternalFilesDirs(null);
-                if (appRoots != null) for (File f : appRoots) if (f != null) roots.add(f);
-                File d = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                if (d != null) roots.add(d);
+                List<File> roots = new ArrayList<>();
+                if (out.fullAccess) {
+                    roots.add(Environment.getExternalStorageDirectory());
+                } else {
+                    File[] appRoots = getExternalFilesDirs(null);
+                    if (appRoots != null) for (File f : appRoots) if (f != null) roots.add(f);
+                    File d = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                    if (d != null) roots.add(d);
+                }
+
+                Set<String> seen = new HashSet<>();
+                for (File root : roots) {
+                    if (root == null || !root.exists()) continue;
+                    emitLive(out, cb, root.getAbsolutePath(), true);
+                    walk(root, out, seen, 0, cb);
+                }
+
+                emitLive(out, cb, "Final verification", true);
+                cb.progress(98, "Junk / large / old files verify कर रहे हैं…");
+                cb.progress(100, "Scan complete • " + out.scannedFiles + " files");
+                cb.done(out);
+            } catch (Throwable error) {
+                try {
+                    cb.progress(100, "Scan safely stopped • partial result तैयार है");
+                    cb.done(out);
+                } catch (Throwable ignored) {}
             }
-
-            Set<String> seen = new HashSet<>();
-            for (File root : roots) {
-                if (root == null || !root.exists()) continue;
-                emitLive(out, cb, root.getAbsolutePath(), true);
-                walk(root, out, seen, 0, cb);
-            }
-
-            emitLive(out, cb, "Final verification", true);
-            cb.progress(98, "Junk / large / old files verify कर रहे हैं…");
-            cb.progress(100, "Scan complete • " + out.scannedFiles + " files");
-            cb.done(out);
         }, "sts-scan").start();
     }
 
