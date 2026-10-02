@@ -11,6 +11,8 @@ import android.app.AppOpsManager;
 import android.app.ActivityManager;
 import android.app.usage.StorageStats;
 import android.app.usage.StorageStatsManager;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -125,6 +127,7 @@ public class MainActivity extends Activity {
     private StorageAnalytics cachedAnalytics = null;
     private long cachedAnalyticsAt = 0L;
     private boolean pendingUsageAnalyzer = false;
+    private boolean pendingBatteryUsage = false;
 
     private final Map<String,Integer> scrollPositions = new HashMap<>();
     private final Map<String,Integer> sortModes = new HashMap<>();
@@ -202,6 +205,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingBatteryUsage && hasUsageAccess()) {
+            pendingBatteryUsage = false;
+            showBatteryDoctor();
+            return;
+        }
         if (pendingUsageAnalyzer && hasUsageAccess()) {
             pendingUsageAnalyzer = false;
             cachedAnalytics = null;
