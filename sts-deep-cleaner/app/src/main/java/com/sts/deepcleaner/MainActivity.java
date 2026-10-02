@@ -2904,6 +2904,11 @@ public class MainActivity extends Activity {
         assessment.addView(thermal);assessment.addView(space(7));assessment.addView(drain);assessment.addView(space(9));assessment.addView(note);
         root.addView(assessment,matchWrap());
 
+        root.addView(section("Apps affecting battery"));
+        LinearLayout batteryApps=column();
+        root.addView(batteryApps,matchWrap());
+        loadBatteryAppImpacts(batteryApps);
+
         root.addView(space(14));
         TextView healthBtn=actionButton("OPEN PHONE HEALTH ANALYSIS",Color.rgb(66,158,105));
         touch(healthBtn);
@@ -2966,6 +2971,200 @@ public class MainActivity extends Activity {
             }
         };
         updater.run();
+    }
+
+    private void loadBatteryAppImpacts(LinearLayout container){
+        container.removeAllViews();
+
+        if(!hasUsageAccess()){
+            LinearLayout c=card();
+            c.setPadding(dp(16),dp(15),dp(16),dp(15));
+            c.addView(text("App battery analysis needs Usage Access",14,INK,true));
+            c.addView(space(5));
+            c.addView(text("Android normal apps को exact per-app mAh/% BatteryStats नहीं देता। Usage Access से recent app activity पढ़कर honest estimated battery impact दिखेगा।",10,MUTED,false));
+            c.addView(space(10));
+            TextView grant=actionButton("ENABLE APP USAGE ANALYSIS",PURPLE);
+            touch(grant);
+            grant.setOnClickListener(v->{
+                pendingBatteryUsage=true;
+                try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}
+                catch(Exception e){pendingBatteryUsage=false;}
+            });
+            c.addView(grant,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(50)));
+            container.addView(c,matchWrap());
+            return;
+        }
+
+        LinearLayout loading=card();
+        loading.setPadding(dp(16),dp(15),dp(16),dp(15));
+        loading.addView(text("Analyzing last 24 hours…",13,PURPLE,true));
+        loading.addView(space(4));
+        loading.addView(text("Foreground activity और recent usage से app impact estimate तैयार हो रहा है।",10,MUTED,false));
+        container.addView(loading,matchWrap());
+
+        new Thread(()->{
+            List<BatteryAppImpact> list;
+            try{list=collectBatteryAppImpacts();}catch(Throwable e){list=new ArrayList<>();}
+            List<BatteryAppImpact> finalList=list;
+            runOnUiThread(()->{
+                Object tag=getWindow().getDecorView().getTag();
+                if(!"batteryDoctor".equals(tag)) return;
+                renderBatteryAppImpacts(container,finalList);
+            });
+        },"sts-battery-app-impact").start();
+    }
+
+    private List<BatteryAppImpact> collectBatteryAppImpacts(){
+        List<BatteryAppImpact> out=new ArrayList<>();
+        UsageStatsManager usm=(UsageStatsManager)getSystemService(USAGE_STATS_SERVICE);
+        if(usm==null) return out;
+
+        long end=System.currentTimeMillis();
+        long start=end-24L*60L*60L*1000L;
+        Map<String,UsageStats> map=usm.queryAndAggregateUsageStats(start,end);
+        if(map==null||map.isEmpty()) return out;
+
+        long totalForeground=0L;
+        for(UsageStats us:map.values()){
+            if(us==null)continue;
+            long fg=Math.max(0L,us.getTotalTimeInForeground());
+            if(fg>0) totalForeground+=fg;
+        }
+        if(totalForeground<=0L) return out;
+
+        PackageManager pm=getPackageManager();
+        for(Map.Entry<String,UsageStats> entry:map.entrySet()){
+            String pkg=entry.getKey();
+            UsageStats us=entry.getValue();
+            if(pkg==null||us==null||pkg.equals(getPackageName()))continue;
+            long fg=Math.max(0L,us.getTotalTimeInForeground());
+            if(fg<60_000L)continue;
+
+            try{
+                ApplicationInfo ai=pm.getApplicationInfo(pkg,0);
+                String name=pm.getApplicationLabel(ai).toString();
+                boolean system=(ai.flags&ApplicationInfo.FLAG_SYSTEM)!=0;
+                float share=Math.max(0f,Math.min(100f,fg*100f/(float)totalForeground));
+                String impact;
+                if(share>=15f||fg>=2L*60L*60L*1000L)impact="HIGH";
+                else if(share>=5f||fg>=30L*60L*1000L)impact="MEDIUM";
+                else impact="LOW";
+                out.add(new BatteryAppImpact(name,pkg,fg,us.getLastTimeUsed(),share,impact,system));
+            }catch(Exception ignored){}
+        }
+
+        Collections.sort(out,(a,b)->Long.compare(b.foregroundMs,a.foregroundMs));
+        if(out.size()>20) return new ArrayList<>(out.subList(0,20));
+        return out;
+    }
+
+    private void renderBatteryAppImpacts(LinearLayout container,List<BatteryAppImpact> list){
+        container.removeAllViews();
+
+        LinearLayout noteCard=card();
+        noteCard.setPadding(dp(15),dp(13),dp(15),dp(13));
+        noteCard.addView(text("Estimated Battery Impact • Last 24h",13,INK,true));
+        noteCard.addView(space(4));
+        noteCard.addView(text("Shown % is recent foreground activity share, not exact battery drain. Exact per-app battery mAh/% is protected by Android/OEM on normal apps.",9,MUTED,false));
+        container.addView(noteCard,matchWrap());
+
+        container.addView(space(9));
+        TextView batterySettings=actionButton("OPEN ANDROID BATTERY SETTINGS",Color.rgb(190,120,25));
+        touch(batterySettings);
+        batterySettings.setOnClickListener(v->{
+            try{startActivity(new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS));}
+            catch(Exception e){try{startActivity(new Intent(Settings.ACTION_SETTINGS));}catch(Exception ignored){}}
+        });
+        container.addView(batterySettings,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(50)));
+
+        if(list.isEmpty()){
+            container.addView(space(9));
+            LinearLayout empty=card();
+            empty.setPadding(dp(16),dp(15),dp(16),dp(15));
+            empty.addView(text("Recent app activity data नहीं मिला। कुछ apps use करने के बाद फिर check करें।",11,MUTED,false));
+            container.addView(empty,matchWrap());
+            return;
+        }
+
+        for(BatteryAppImpact impact:list){
+            container.addView(space(9));
+            LinearLayout c=card();
+            c.setPadding(dp(14),dp(13),dp(14),dp(13));
+
+            LinearLayout top=row();
+            top.setGravity(Gravity.CENTER_VERTICAL);
+            try{
+                Drawable d=getPackageManager().getApplicationIcon(impact.packageName);
+                ImageView iv=new ImageView(this);
+                iv.setImageDrawable(d);
+                top.addView(iv,new LinearLayout.LayoutParams(dp(38),dp(38)));
+                top.addView(spaceH(9));
+            }catch(Exception ignored){}
+
+            LinearLayout labels=column();
+            labels.addView(text(impact.appName,13,INK,true));
+            labels.addView(space(2));
+            labels.addView(text(formatUsageDuration(impact.foregroundMs)+" active • "+
+                    String.format(Locale.US,"%.1f%% activity share"),10,MUTED,false));
+            top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+
+            int impactColor="HIGH".equals(impact.impact)?ROSE:"MEDIUM".equals(impact.impact)?AMBER:TEAL;
+            top.addView(pill(impact.impact,impactColor,
+                    "HIGH".equals(impact.impact)?Color.rgb(255,238,243):
+                            "MEDIUM".equals(impact.impact)?Color.rgb(255,247,230):
+                                    Color.rgb(228,252,248)));
+            c.addView(top,matchWrap());
+
+            c.addView(space(7));
+            c.addView(text("Estimated impact share: "+String.format(Locale.US,"%.1f%%",impact.activityShare)+
+                    " • Last used "+formatRelativeTime(impact.lastTimeUsed),10,impactColor,true));
+
+            c.addView(space(9));
+            LinearLayout actions=row();
+            TextView open=pill("OPEN",Color.rgb(36,145,180),Color.rgb(232,248,252));
+            TextView info=pill("APP INFO / BATTERY",PURPLE,Color.rgb(239,236,255));
+            touch(open);touch(info);
+            open.setOnClickListener(v->openInstalledApp(impact.packageName));
+            info.setOnClickListener(v->openAppStorageSettings(impact.packageName));
+            actions.addView(open,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,.7f));
+            actions.addView(spaceH(7));
+            actions.addView(info,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1.25f));
+
+            if(!impact.systemApp){
+                actions.addView(spaceH(7));
+                TextView uninstall=pill("UNINSTALL",ROSE,Color.rgb(255,238,243));
+                touch(uninstall);
+                uninstall.setOnClickListener(v->requestUninstall(impact.packageName));
+                actions.addView(uninstall,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            }
+            c.addView(actions,matchWrap());
+            container.addView(c,matchWrap());
+        }
+    }
+
+    private String formatUsageDuration(long ms){
+        long min=Math.max(0L,ms/60000L);
+        if(min>=60) return (min/60)+"h "+(min%60)+"m";
+        return min+"m";
+    }
+
+    private String formatRelativeTime(long time){
+        if(time<=0)return "unknown";
+        long diff=Math.max(0L,System.currentTimeMillis()-time);
+        long min=diff/60000L;
+        if(min<1)return "now";
+        if(min<60)return min+"m ago";
+        long h=min/60L;
+        if(h<24)return h+"h ago";
+        return (h/24L)+"d ago";
+    }
+
+    private void openInstalledApp(String packageName){
+        try{
+            Intent i=getPackageManager().getLaunchIntentForPackage(packageName);
+            if(i!=null){startActivity(i);return;}
+        }catch(Exception ignored){}
+        openAppStorageSettings(packageName);
     }
 
     private long validCurrentUa(int v){
