@@ -3247,28 +3247,54 @@ public class MainActivity extends Activity {
         r.usedStorage=st[1];
         r.freeStorage=Math.max(0L,st[0]-st[1]);
         r.freePct=st[0]<=0?0f:r.freeStorage*100f/st[0];
-        if(r.freePct<8f){r.score-=22;r.issues.add("Storage critically low • "+String.format(Locale.US,"%.1f%% free",r.freePct));}
-        else if(r.freePct<18f){r.score-=10;r.issues.add("Storage getting low • "+String.format(Locale.US,"%.1f%% free",r.freePct));}
-        else r.good.add("Storage free space healthy • "+String.format(Locale.US,"%.1f%% free",r.freePct));
+        if(r.freePct<8f){
+            r.score-=22;
+            r.issues.add(new HealthIssue("Storage critically low • "+
+                    String.format(Locale.US,"%.1f%% free",r.freePct),"storage","FREE STORAGE"));
+        }else if(r.freePct<18f){
+            r.score-=10;
+            r.issues.add(new HealthIssue("Storage getting low • "+
+                    String.format(Locale.US,"%.1f%% free",r.freePct),"storage","FREE STORAGE"));
+        }else{
+            r.good.add("Storage free space healthy • "+String.format(Locale.US,"%.1f%% free",r.freePct));
+        }
 
         ActivityManager am=(ActivityManager)getSystemService(ACTIVITY_SERVICE);
         ActivityManager.MemoryInfo mi=new ActivityManager.MemoryInfo();
         am.getMemoryInfo(mi);
-        r.totalRam=mi.totalMem;r.freeRam=mi.availMem;
+        r.totalRam=mi.totalMem;
+        r.freeRam=mi.availMem;
         float ramPct=mi.totalMem<=0?0f:mi.availMem*100f/mi.totalMem;
-        if(ramPct<10f){r.score-=15;r.issues.add("RAM pressure high • "+String.format(Locale.US,"%.1f%% available",ramPct));}
-        else if(ramPct<20f){r.score-=7;r.issues.add("RAM pressure moderate • "+String.format(Locale.US,"%.1f%% available",ramPct));}
-        else r.good.add("RAM availability healthy • "+String.format(Locale.US,"%.1f%% available",ramPct));
+        if(ramPct<10f){
+            r.score-=15;
+            r.issues.add(new HealthIssue("RAM pressure high • "+
+                    String.format(Locale.US,"%.1f%% available",ramPct),"ram","CHECK APPS"));
+        }else if(ramPct<20f){
+            r.score-=7;
+            r.issues.add(new HealthIssue("RAM pressure moderate • "+
+                    String.format(Locale.US,"%.1f%% available",ramPct),"ram","CHECK APPS"));
+        }else{
+            r.good.add("RAM availability healthy • "+String.format(Locale.US,"%.1f%% available",ramPct));
+        }
 
         r.battery=readBatterySnapshot();
-        if(r.battery.tempC>=45f){r.score-=20;r.issues.add("Battery temperature high • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));}
-        else if(r.battery.tempC>=40f){r.score-=8;r.issues.add("Battery warm • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));}
-        else if(r.battery.tempC>0) r.good.add("Battery temperature normal • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));
+        if(r.battery.tempC>=45f){
+            r.score-=20;
+            r.issues.add(new HealthIssue("Battery temperature high • "+
+                    String.format(Locale.US,"%.1f°C",r.battery.tempC),"battery","BATTERY DOCTOR"));
+        }else if(r.battery.tempC>=40f){
+            r.score-=8;
+            r.issues.add(new HealthIssue("Battery warm • "+
+                    String.format(Locale.US,"%.1f°C",r.battery.tempC),"battery","BATTERY DOCTOR"));
+        }else if(r.battery.tempC>0){
+            r.good.add("Battery temperature normal • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));
+        }
 
         if(r.battery.health!=BatteryManager.BATTERY_HEALTH_GOOD && r.battery.health>0){
             if(r.battery.health!=BatteryManager.BATTERY_HEALTH_UNKNOWN){
                 r.score-=18;
-                r.issues.add("Android battery health reports: "+batteryHealthText(r.battery.health));
+                r.issues.add(new HealthIssue("Android battery health reports: "+
+                        batteryHealthText(r.battery.health),"battery","BATTERY DOCTOR"));
             }
         }else if(r.battery.health==BatteryManager.BATTERY_HEALTH_GOOD){
             r.good.add("Android battery health reports Good");
@@ -3279,35 +3305,63 @@ public class MainActivity extends Activity {
             if(Build.VERSION.SDK_INT>=29){
                 r.thermalStatus=pm.getCurrentThermalStatus();
                 if(r.thermalStatus>=PowerManager.THERMAL_STATUS_SEVERE){
-                    r.score-=15;r.issues.add("Phone thermal status severe or above");
+                    r.score-=15;
+                    r.issues.add(new HealthIssue("Phone thermal status severe or above",
+                            "battery","CHECK THERMAL"));
                 }else if(r.thermalStatus>=PowerManager.THERMAL_STATUS_MODERATE){
-                    r.score-=6;r.issues.add("Phone thermal status moderate");
-                }else r.good.add("Phone thermal status normal");
+                    r.score-=6;
+                    r.issues.add(new HealthIssue("Phone thermal status moderate",
+                            "battery","CHECK THERMAL"));
+                }else{
+                    r.good.add("Phone thermal status normal");
+                }
             }
         }catch(Exception ignored){}
 
         SensorManager sm=(SensorManager)getSystemService(SENSOR_SERVICE);
         r.sensorCount=sm==null?0:sm.getSensorList(Sensor.TYPE_ALL).size();
-        if(r.sensorCount<=0){r.score-=8;r.issues.add("No Android sensors reported");}
-        else r.good.add(r.sensorCount+" sensors detected");
+        if(r.sensorCount<=0){
+            r.score-=8;
+            r.issues.add(new HealthIssue("No Android sensors reported","doctor","PHONE DOCTOR"));
+        }else{
+            r.good.add(r.sensorCount+" sensors detected");
+        }
 
         try{
             StorageStatsManager mgr=(StorageStatsManager)getSystemService(STORAGE_STATS_SERVICE);
             if(hasUsageAccess()){
                 StorageStats ss=mgr.queryStatsForUser(StorageManager.UUID_DEFAULT,Process.myUserHandle());
                 r.appCacheBytes=Math.max(0L,ss.getCacheBytes());
-                if(r.appCacheBytes>5L*1024*1024*1024){r.score-=8;r.issues.add("App cache very large • "+format(r.appCacheBytes));}
-                else if(r.appCacheBytes>2L*1024*1024*1024){r.score-=4;r.issues.add("App cache large • "+format(r.appCacheBytes));}
-                else r.good.add("App cache under control • "+format(r.appCacheBytes));
+                if(r.appCacheBytes>5L*1024*1024*1024){
+                    r.score-=8;
+                    r.issues.add(new HealthIssue("App cache very large • "+format(r.appCacheBytes),
+                            "cache","OPEN APP CACHE"));
+                }else if(r.appCacheBytes>2L*1024*1024*1024){
+                    r.score-=4;
+                    r.issues.add(new HealthIssue("App cache large • "+format(r.appCacheBytes),
+                            "cache","OPEN APP CACHE"));
+                }else{
+                    r.good.add("App cache under control • "+format(r.appCacheBytes));
+                }
             }
         }catch(Exception ignored){}
 
         String[] keys={"display","touch","vibration","speaker","microphone","camera","flash","sensors"};
         for(String key:keys){
             String value=doctorResult(key);
-            if("FAIL".equals(value)){r.score-=6;r.doctorFails++;r.issues.add("Phone Doctor failed: "+doctorLabel(key));}
-            else if("WARNING".equals(value)){r.score-=3;r.doctorWarnings++;r.issues.add("Phone Doctor warning: "+doctorLabel(key));}
-            else if("PASS".equals(value)) r.doctorPass++;
+            if("FAIL".equals(value)){
+                r.score-=6;
+                r.doctorFails++;
+                r.issues.add(new HealthIssue("Phone Doctor failed: "+doctorLabel(key),
+                        "doctor","RUN TEST"));
+            }else if("WARNING".equals(value)){
+                r.score-=3;
+                r.doctorWarnings++;
+                r.issues.add(new HealthIssue("Phone Doctor warning: "+doctorLabel(key),
+                        "doctor","RUN TEST"));
+            }else if("PASS".equals(value)){
+                r.doctorPass++;
+            }
         }
         if(r.doctorPass>0) r.good.add("Phone Doctor: "+r.doctorPass+" tests passed");
 
@@ -3328,6 +3382,45 @@ public class MainActivity extends Activity {
         if("flash".equals(key))return "Flash";
         if("sensors".equals(key))return "Sensors";
         return key;
+    }
+
+    private void performHealthAction(HealthIssue issue){
+        if(issue==null)return;
+        haptic();
+        if("storage".equals(issue.action)){
+            openTool("large");
+        }else if("ram".equals(issue.action)){
+            activeSystemCategory=null;
+            openSystemAnalyzer();
+        }else if("cache".equals(issue.action)){
+            activeSystemCategory=StorageCategory.APP_CACHE;
+            openSystemAnalyzer();
+        }else if("battery".equals(issue.action)){
+            showBatteryDoctor();
+        }else if("doctor".equals(issue.action)){
+            showPhoneDoctor();
+        }else{
+            showHome();
+        }
+    }
+
+    private LinearLayout healthIssueCard(HealthIssue issue){
+        LinearLayout c=card();
+        c.setPadding(dp(15),dp(13),dp(15),dp(13));
+
+        LinearLayout top=row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(text("●",15,ROSE,true),new LinearLayout.LayoutParams(dp(24),ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView msg=text(issue.text,11,INK,true);
+        top.addView(msg,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        c.addView(top,matchWrap());
+
+        c.addView(space(9));
+        TextView action=actionButton(issue.buttonLabel,PURPLE);
+        touch(action);
+        action.setOnClickListener(v->performHealthAction(issue));
+        c.addView(action,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(46)));
+        return c;
     }
 
     private void showHealthReport(HealthReport r){
@@ -3374,13 +3467,10 @@ public class MainActivity extends Activity {
 
         if(!r.issues.isEmpty()){
             root.addView(section("Needs attention"));
-            LinearLayout issues=card();
-            issues.setPadding(dp(16),dp(14),dp(16),dp(14));
             for(int i=0;i<r.issues.size();i++){
-                issues.addView(text("• "+r.issues.get(i),11,ROSE,i<3));
-                if(i<r.issues.size()-1)issues.addView(space(7));
+                root.addView(healthIssueCard(r.issues.get(i)),matchWrap());
+                if(i<r.issues.size()-1)root.addView(space(9));
             }
-            root.addView(issues,matchWrap());
         }
 
         if(!r.good.isEmpty()){
@@ -6188,6 +6278,17 @@ public class MainActivity extends Activity {
         long chargeTimeMs=-1L;
     }
 
+    private static final class HealthIssue {
+        final String text;
+        final String action;
+        final String buttonLabel;
+        HealthIssue(String text,String action,String buttonLabel){
+            this.text=text;
+            this.action=action;
+            this.buttonLabel=buttonLabel;
+        }
+    }
+
     private static final class HealthReport {
         int score=0;
         String status="NEEDS ATTENTION";
@@ -6204,7 +6305,7 @@ public class MainActivity extends Activity {
         int doctorFails=0;
         int doctorWarnings=0;
         BatterySnapshot battery=new BatterySnapshot();
-        final List<String> issues=new ArrayList<>();
+        final List<HealthIssue> issues=new ArrayList<>();
         final List<String> good=new ArrayList<>();
     }
 
