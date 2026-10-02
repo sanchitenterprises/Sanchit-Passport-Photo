@@ -2752,6 +2752,444 @@ public class MainActivity extends Activity {
         setContentView(root);
     }
 
+    private BatterySnapshot readBatterySnapshot(){
+        BatterySnapshot b=new BatterySnapshot();
+        try{
+            Intent i=registerReceiver(null,new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if(i!=null){
+                int level=i.getIntExtra(BatteryManager.EXTRA_LEVEL,-1);
+                int scale=i.getIntExtra(BatteryManager.EXTRA_SCALE,100);
+                b.percent=level<0?-1:Math.round(level*100f/Math.max(1,scale));
+                b.status=i.getIntExtra(BatteryManager.EXTRA_STATUS,-1);
+                b.health=i.getIntExtra(BatteryManager.EXTRA_HEALTH,-1);
+                b.plugged=i.getIntExtra(BatteryManager.EXTRA_PLUGGED,0);
+                b.voltageMv=i.getIntExtra(BatteryManager.EXTRA_VOLTAGE,0);
+                b.tempC=i.getIntExtra(BatteryManager.EXTRA_TEMPERATURE,0)/10f;
+                b.technology=i.getStringExtra(BatteryManager.EXTRA_TECHNOLOGY);
+            }
+            BatteryManager bm=(BatteryManager)getSystemService(BATTERY_SERVICE);
+            if(bm!=null){
+                b.currentUa=bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+                b.averageUa=bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE);
+                b.chargeCounterUah=bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
+                if(Build.VERSION.SDK_INT>=28){
+                    try{b.chargeTimeMs=bm.computeChargeTimeRemaining();}catch(Exception ignored){}
+                }
+            }
+        }catch(Exception ignored){}
+        return b;
+    }
+
+    private String batteryStatusText(BatterySnapshot b){
+        if(b.status==BatteryManager.BATTERY_STATUS_CHARGING) return "Charging";
+        if(b.status==BatteryManager.BATTERY_STATUS_FULL) return "Full";
+        if(b.status==BatteryManager.BATTERY_STATUS_DISCHARGING) return "Discharging";
+        if(b.status==BatteryManager.BATTERY_STATUS_NOT_CHARGING) return "Not charging";
+        return "Unknown";
+    }
+
+    private String batteryHealthText(int h){
+        if(h==BatteryManager.BATTERY_HEALTH_GOOD) return "Good";
+        if(h==BatteryManager.BATTERY_HEALTH_OVERHEAT) return "Overheat";
+        if(h==BatteryManager.BATTERY_HEALTH_DEAD) return "Dead";
+        if(h==BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE) return "Over voltage";
+        if(h==BatteryManager.BATTERY_HEALTH_COLD) return "Cold";
+        if(h==BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE) return "Failure";
+        return "Unknown";
+    }
+
+    private String chargerText(int plugged){
+        if((plugged&BatteryManager.BATTERY_PLUGGED_AC)!=0) return "AC charger";
+        if((plugged&BatteryManager.BATTERY_PLUGGED_USB)!=0) return "USB charger";
+        if((plugged&BatteryManager.BATTERY_PLUGGED_WIRELESS)!=0) return "Wireless";
+        return "Not plugged";
+    }
+
+    private double batteryPowerW(BatterySnapshot b){
+        if(b.currentUa==Integer.MIN_VALUE || b.voltageMv<=0) return 0d;
+        return Math.abs(b.currentUa/1000000d)*(b.voltageMv/1000d);
+    }
+
+    private void showBatteryDoctor(){
+        beginNonScrollScreen();
+        stopSensorLiveTest();
+        getWindow().getDecorView().setTag("batteryDoctor");
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text("Battery Doctor",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("Live battery current • voltage • temperature • charging power",12,MUTED,false));
+        root.addView(space(14));
+
+        LinearLayout hero=card();
+        hero.setPadding(dp(18),dp(18),dp(18),dp(18));
+        TextView pct=centerText("--%",34,PURPLE,true);
+        TextView state=centerText("Reading battery…",14,MUTED,true);
+        TextView power=centerText("-- W",22,TEAL,true);
+        hero.addView(pct);
+        hero.addView(space(5));
+        hero.addView(state);
+        hero.addView(space(10));
+        hero.addView(power);
+        hero.addView(centerText("live estimated electrical power",9,MUTED,false));
+        root.addView(hero,matchWrap());
+
+        root.addView(section("Live readings"));
+        LinearLayout live=card();
+        live.setPadding(dp(16),dp(14),dp(16),dp(14));
+        TextView current=text("Current: --",12,INK,true);
+        TextView avg=text("Average current: --",12,INK,false);
+        TextView voltage=text("Voltage: --",12,INK,false);
+        TextView temp=text("Temperature: --",12,INK,false);
+        TextView health=text("Battery health: --",12,INK,false);
+        TextView charger=text("Charger: --",12,INK,false);
+        TextView charge=text("Charge counter: --",12,INK,false);
+        TextView time=text("Time to full: --",12,INK,false);
+        live.addView(current);live.addView(space(7));live.addView(avg);live.addView(space(7));
+        live.addView(voltage);live.addView(space(7));live.addView(temp);live.addView(space(7));
+        live.addView(health);live.addView(space(7));live.addView(charger);live.addView(space(7));
+        live.addView(charge);live.addView(space(7));live.addView(time);
+        root.addView(live,matchWrap());
+
+        root.addView(section("Battery assessment"));
+        LinearLayout assessment=card();
+        assessment.setPadding(dp(16),dp(14),dp(16),dp(14));
+        TextView thermal=text("Thermal: checking…",12,INK,true);
+        TextView drain=text("Current behavior: checking…",12,INK,false);
+        TextView note=text("OEM cycle count / true design capacity केवल उन्हीं phones में दिख सकती है जहाँ manufacturer Android API से expose करे। Fake health % नहीं दिखाया जाएगा।",10,MUTED,false);
+        assessment.addView(thermal);assessment.addView(space(7));assessment.addView(drain);assessment.addView(space(9));assessment.addView(note);
+        root.addView(assessment,matchWrap());
+
+        root.addView(space(14));
+        TextView healthBtn=actionButton("OPEN PHONE HEALTH ANALYSIS",Color.rgb(66,158,105));
+        touch(healthBtn);
+        healthBtn.setOnClickListener(v->showHealthAnalysis());
+        root.addView(healthBtn,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(56)));
+
+        root.addView(space(9));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v->showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition("batteryDoctor",scroll);
+        fadeIn(root);
+
+        BatterySnapshot first=readBatterySnapshot();
+        saveBatterySample(first);
+
+        Runnable updater=new Runnable(){
+            @Override public void run(){
+                Object tag=getWindow().getDecorView().getTag();
+                if(!"batteryDoctor".equals(tag)) return;
+                BatterySnapshot b=readBatterySnapshot();
+                pct.setText(b.percent<0?"--%":b.percent+"%");
+                state.setText(batteryStatusText(b)+" • "+chargerText(b.plugged));
+                power.setText(String.format(Locale.US,"%.2f W",batteryPowerW(b)));
+
+                current.setText("Current: "+formatCurrentUa(b.currentUa));
+                avg.setText("Average current: "+formatCurrentUa(b.averageUa));
+                voltage.setText("Voltage: "+(b.voltageMv>0?String.format(Locale.US,"%.3f V",b.voltageMv/1000f):"Unavailable"));
+                temp.setText("Temperature: "+(b.tempC>0?String.format(Locale.US,"%.1f °C",b.tempC):"Unavailable"));
+                health.setText("Battery health: "+batteryHealthText(b.health));
+                charger.setText("Charger: "+chargerText(b.plugged));
+                charge.setText("Charge counter: "+formatChargeCounter(b.chargeCounterUah));
+                time.setText("Time to full: "+formatChargeTime(b.chargeTimeMs));
+
+                if(b.tempC>=45f){
+                    thermal.setText("Thermal: HIGH • battery गर्म है");
+                    thermal.setTextColor(ROSE);
+                }else if(b.tempC>=40f){
+                    thermal.setText("Thermal: WARM • ध्यान रखें");
+                    thermal.setTextColor(AMBER);
+                }else{
+                    thermal.setText("Thermal: NORMAL");
+                    thermal.setTextColor(TEAL);
+                }
+
+                double ma=Math.abs(validCurrentUa(b.currentUa))/1000d;
+                String behavior;
+                if(b.status==BatteryManager.BATTERY_STATUS_CHARGING){
+                    behavior=ma>0?"Charging current लगभग "+String.format(Locale.US,"%.0f mA",ma):"Charging current OEM ने expose नहीं किया";
+                }else{
+                    behavior=ma>0?"Discharge current लगभग "+String.format(Locale.US,"%.0f mA",ma):"Discharge current OEM ने expose नहीं किया";
+                }
+                drain.setText("Current behavior: "+behavior);
+                uiHandler.postDelayed(this,2000L);
+            }
+        };
+        updater.run();
+    }
+
+    private long validCurrentUa(int v){
+        if(v==Integer.MIN_VALUE||v==Integer.MAX_VALUE) return 0L;
+        return v;
+    }
+
+    private String formatCurrentUa(int ua){
+        long v=validCurrentUa(ua);
+        if(v==0L) return "OEM unavailable";
+        return String.format(Locale.US,"%+.0f mA",v/1000d);
+    }
+
+    private String formatChargeCounter(int uah){
+        if(uah<=0||uah==Integer.MIN_VALUE) return "OEM unavailable";
+        return String.format(Locale.US,"%.0f mAh",uah/1000d);
+    }
+
+    private String formatChargeTime(long ms){
+        if(ms<=0) return "Unavailable";
+        long min=ms/60000L;
+        return (min/60L)+"h "+(min%60L)+"m";
+    }
+
+    private void saveBatterySample(BatterySnapshot b){
+        getSharedPreferences("sts_battery",MODE_PRIVATE).edit()
+                .putInt("last_pct",b.percent)
+                .putFloat("last_temp",b.tempC)
+                .putInt("last_current",b.currentUa)
+                .putLong("last_time",System.currentTimeMillis())
+                .apply();
+    }
+
+    private void showHealthAnalysis(){
+        beginNonScrollScreen();
+        stopSensorLiveTest();
+        getWindow().getDecorView().setTag("healthLoading");
+
+        LinearLayout root=column();
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(dp(20),dp(42),dp(20),dp(28));
+        root.setBackgroundColor(BG);
+        root.addView(text("Phone Health Analysis",28,INK,true));
+        root.addView(space(6));
+        root.addView(centerText("Battery • Storage • RAM • Thermal • Sensors • Doctor tests",12,MUTED,false));
+        root.addView(space(32));
+
+        ScanRing ring=new ScanRing(this);
+        ring.setLiveCount(6,"checks");
+        FrameLayout visual=animatedLoadingVisual(ring,220);
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(dp(220),dp(220));
+        lp.gravity=Gravity.CENTER_HORIZONTAL;
+        root.addView(visual,lp);
+        root.addView(space(18));
+        root.addView(centerText("Deep health report तैयार हो रही है…",13,PURPLE,true));
+
+        Space flex=new Space(this);
+        root.addView(flex,new LinearLayout.LayoutParams(1,0,1f));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v->showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+        setContentView(root);
+
+        new Thread(()->{
+            HealthReport report;
+            try{report=analyzePhoneHealth();}catch(Throwable e){report=new HealthReport();}
+            HealthReport finalReport=report;
+            runOnUiThread(()->showHealthReport(finalReport));
+        },"sts-health-analysis").start();
+    }
+
+    private HealthReport analyzePhoneHealth(){
+        HealthReport r=new HealthReport();
+        r.score=100;
+
+        long[] st=storage();
+        r.totalStorage=st[0];
+        r.usedStorage=st[1];
+        r.freeStorage=Math.max(0L,st[0]-st[1]);
+        r.freePct=st[0]<=0?0f:r.freeStorage*100f/st[0];
+        if(r.freePct<8f){r.score-=22;r.issues.add("Storage critically low • "+String.format(Locale.US,"%.1f%% free",r.freePct));}
+        else if(r.freePct<18f){r.score-=10;r.issues.add("Storage getting low • "+String.format(Locale.US,"%.1f%% free",r.freePct));}
+        else r.good.add("Storage free space healthy • "+String.format(Locale.US,"%.1f%% free",r.freePct));
+
+        ActivityManager am=(ActivityManager)getSystemService(ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo mi=new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+        r.totalRam=mi.totalMem;r.freeRam=mi.availMem;
+        float ramPct=mi.totalMem<=0?0f:mi.availMem*100f/mi.totalMem;
+        if(ramPct<10f){r.score-=15;r.issues.add("RAM pressure high • "+String.format(Locale.US,"%.1f%% available",ramPct));}
+        else if(ramPct<20f){r.score-=7;r.issues.add("RAM pressure moderate • "+String.format(Locale.US,"%.1f%% available",ramPct));}
+        else r.good.add("RAM availability healthy • "+String.format(Locale.US,"%.1f%% available",ramPct));
+
+        r.battery=readBatterySnapshot();
+        if(r.battery.tempC>=45f){r.score-=20;r.issues.add("Battery temperature high • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));}
+        else if(r.battery.tempC>=40f){r.score-=8;r.issues.add("Battery warm • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));}
+        else if(r.battery.tempC>0) r.good.add("Battery temperature normal • "+String.format(Locale.US,"%.1f°C",r.battery.tempC));
+
+        if(r.battery.health!=BatteryManager.BATTERY_HEALTH_GOOD && r.battery.health>0){
+            if(r.battery.health!=BatteryManager.BATTERY_HEALTH_UNKNOWN){
+                r.score-=18;
+                r.issues.add("Android battery health reports: "+batteryHealthText(r.battery.health));
+            }
+        }else if(r.battery.health==BatteryManager.BATTERY_HEALTH_GOOD){
+            r.good.add("Android battery health reports Good");
+        }
+
+        try{
+            PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
+            if(Build.VERSION.SDK_INT>=29){
+                r.thermalStatus=pm.getCurrentThermalStatus();
+                if(r.thermalStatus>=PowerManager.THERMAL_STATUS_SEVERE){
+                    r.score-=15;r.issues.add("Phone thermal status severe or above");
+                }else if(r.thermalStatus>=PowerManager.THERMAL_STATUS_MODERATE){
+                    r.score-=6;r.issues.add("Phone thermal status moderate");
+                }else r.good.add("Phone thermal status normal");
+            }
+        }catch(Exception ignored){}
+
+        SensorManager sm=(SensorManager)getSystemService(SENSOR_SERVICE);
+        r.sensorCount=sm==null?0:sm.getSensorList(Sensor.TYPE_ALL).size();
+        if(r.sensorCount<=0){r.score-=8;r.issues.add("No Android sensors reported");}
+        else r.good.add(r.sensorCount+" sensors detected");
+
+        try{
+            StorageStatsManager mgr=(StorageStatsManager)getSystemService(STORAGE_STATS_SERVICE);
+            if(hasUsageAccess()){
+                StorageStats ss=mgr.queryStatsForUser(StorageManager.UUID_DEFAULT,Process.myUserHandle());
+                r.appCacheBytes=Math.max(0L,ss.getCacheBytes());
+                if(r.appCacheBytes>5L*1024*1024*1024){r.score-=8;r.issues.add("App cache very large • "+format(r.appCacheBytes));}
+                else if(r.appCacheBytes>2L*1024*1024*1024){r.score-=4;r.issues.add("App cache large • "+format(r.appCacheBytes));}
+                else r.good.add("App cache under control • "+format(r.appCacheBytes));
+            }
+        }catch(Exception ignored){}
+
+        String[] keys={"display","touch","vibration","speaker","microphone","camera","flash","sensors"};
+        for(String key:keys){
+            String value=doctorResult(key);
+            if("FAIL".equals(value)){r.score-=6;r.doctorFails++;r.issues.add("Phone Doctor failed: "+doctorLabel(key));}
+            else if("WARNING".equals(value)){r.score-=3;r.doctorWarnings++;r.issues.add("Phone Doctor warning: "+doctorLabel(key));}
+            else if("PASS".equals(value)) r.doctorPass++;
+        }
+        if(r.doctorPass>0) r.good.add("Phone Doctor: "+r.doctorPass+" tests passed");
+
+        r.score=Math.max(0,Math.min(100,r.score));
+        if(r.score>=85) r.status="HEALTHY";
+        else if(r.score>=65) r.status="NEEDS ATTENTION";
+        else r.status="CRITICAL";
+        return r;
+    }
+
+    private String doctorLabel(String key){
+        if("display".equals(key))return "Display";
+        if("touch".equals(key))return "Touch";
+        if("vibration".equals(key))return "Vibration";
+        if("speaker".equals(key))return "Speaker";
+        if("microphone".equals(key))return "Microphone";
+        if("camera".equals(key))return "Camera";
+        if("flash".equals(key))return "Flash";
+        if("sensors".equals(key))return "Sensors";
+        return key;
+    }
+
+    private void showHealthReport(HealthReport r){
+        getWindow().getDecorView().setTag("healthAnalysis");
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text("Phone Health Analysis",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("Real Android readings + Phone Doctor test history",12,MUTED,false));
+        root.addView(space(14));
+
+        int statusColor="HEALTHY".equals(r.status)?TEAL:"CRITICAL".equals(r.status)?ROSE:AMBER;
+        LinearLayout hero=card();
+        hero.setPadding(dp(18),dp(18),dp(18),dp(18));
+        hero.addView(centerText(r.score+" / 100",36,statusColor,true));
+        hero.addView(space(5));
+        hero.addView(centerText(r.status,15,statusColor,true));
+        hero.addView(space(7));
+        hero.addView(centerText("Score केवल उपलब्ध real metrics पर based है; unavailable OEM data fake नहीं किया गया।",9,MUTED,false));
+        root.addView(hero,matchWrap());
+
+        root.addView(section("Core health"));
+        LinearLayout core=card();
+        core.setPadding(dp(16),dp(14),dp(16),dp(14));
+        core.addView(healthMetricRow("Storage free",format(r.freeStorage)+" • "+String.format(Locale.US,"%.1f%%",r.freePct),r.freePct>=18f));
+        core.addView(space(7));
+        float ramPct=r.totalRam<=0?0f:r.freeRam*100f/r.totalRam;
+        core.addView(healthMetricRow("RAM available",format(r.freeRam)+" • "+String.format(Locale.US,"%.1f%%",ramPct),ramPct>=20f));
+        core.addView(space(7));
+        core.addView(healthMetricRow("Battery",r.battery.percent+"% • "+batteryHealthText(r.battery.health),r.battery.health==BatteryManager.BATTERY_HEALTH_GOOD));
+        core.addView(space(7));
+        core.addView(healthMetricRow("Battery temp",String.format(Locale.US,"%.1f °C",r.battery.tempC),r.battery.tempC>0&&r.battery.tempC<40f));
+        core.addView(space(7));
+        core.addView(healthMetricRow("Sensors",r.sensorCount+" detected",r.sensorCount>0));
+        if(r.appCacheBytes>0){
+            core.addView(space(7));
+            core.addView(healthMetricRow("App cache",format(r.appCacheBytes),r.appCacheBytes<2L*1024*1024*1024));
+        }
+        root.addView(core,matchWrap());
+
+        if(!r.issues.isEmpty()){
+            root.addView(section("Needs attention"));
+            LinearLayout issues=card();
+            issues.setPadding(dp(16),dp(14),dp(16),dp(14));
+            for(int i=0;i<r.issues.size();i++){
+                issues.addView(text("• "+r.issues.get(i),11,ROSE,i<3));
+                if(i<r.issues.size()-1)issues.addView(space(7));
+            }
+            root.addView(issues,matchWrap());
+        }
+
+        if(!r.good.isEmpty()){
+            root.addView(section("Healthy checks"));
+            LinearLayout good=card();
+            good.setPadding(dp(16),dp(14),dp(16),dp(14));
+            for(int i=0;i<r.good.size();i++){
+                good.addView(text("✓ "+r.good.get(i),11,Color.rgb(18,145,123),false));
+                if(i<r.good.size()-1)good.addView(space(7));
+            }
+            root.addView(good,matchWrap());
+        }
+
+        root.addView(space(14));
+        LinearLayout actions=row();
+        TextView doctor=pill("PHONE DOCTOR",Color.rgb(36,145,180),Color.rgb(232,248,252));
+        TextView battery=pill("BATTERY DOCTOR",Color.rgb(190,120,25),Color.rgb(255,246,225));
+        touch(doctor);touch(battery);
+        doctor.setOnClickListener(v->showPhoneDoctor());
+        battery.setOnClickListener(v->showBatteryDoctor());
+        actions.addView(doctor,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        actions.addView(spaceH(8));
+        actions.addView(battery,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        root.addView(actions,matchWrap());
+
+        root.addView(space(9));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v->showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition("healthAnalysis",scroll);
+        fadeIn(root);
+    }
+
+    private LinearLayout healthMetricRow(String title,String value,boolean good){
+        LinearLayout r=row();
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.addView(text(good?"●":"●",14,good?TEAL:AMBER,true),new LinearLayout.LayoutParams(dp(22),ViewGroup.LayoutParams.WRAP_CONTENT));
+        r.addView(text(title,12,INK,true),new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        r.addView(text(value,11,good?TEAL:AMBER,true));
+        return r;
+    }
+
     private void openTool(String type) {
         haptic();
         if (Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) {
