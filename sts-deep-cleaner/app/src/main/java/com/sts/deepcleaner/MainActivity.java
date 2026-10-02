@@ -3916,7 +3916,7 @@ public class MainActivity extends Activity {
         TextView info=pill("APP INFO / BATTERY",PURPLE,Color.rgb(239,236,255));
         TextView protect=pill("PROTECT",Color.rgb(36,145,180),Color.rgb(232,248,252));
         touch(open);touch(info);touch(protect);
-        open.setOnClickListener(v->openInstalledApp(pkg));
+        open.setOnClickListener(v->wakeSmartSleepApp(pkg));
         info.setOnClickListener(v->openAppStorageSettings(pkg));
         protect.setOnClickListener(v->protectSmartSleepApp(pkg));
         actions.addView(open,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
@@ -3938,6 +3938,7 @@ public class MainActivity extends Activity {
     }
 
     private void startSmartSleepFlow(){
+        smartSleepProtected();
         if(!hasUsageAccess()){
             pendingMasterSleepAfterUsage=true;
             try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}
@@ -3989,6 +3990,14 @@ public class MainActivity extends Activity {
         Intent i=new Intent(this,SmartSleepVpnService.class);
         i.setAction(SmartSleepVpnService.ACTION_REFRESH);
         try{startForegroundService(i);}catch(Exception e){try{startService(i);}catch(Exception ignored){}}
+    }
+
+    private void wakeSmartSleepApp(String pkg){
+        getSharedPreferences("sts_smart_sleep",MODE_PRIVATE).edit()
+                .putLong("wake_until_"+pkg,System.currentTimeMillis()+15L*60L*1000L)
+                .apply();
+        refreshSmartSleepService();
+        openInstalledApp(pkg);
     }
 
     private void protectSmartSleepApp(String pkg){
