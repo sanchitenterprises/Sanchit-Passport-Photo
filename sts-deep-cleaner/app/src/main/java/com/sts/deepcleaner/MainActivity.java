@@ -709,17 +709,30 @@ public class MainActivity extends Activity {
     private void loadThumbnail(ImageView image, TextView fallback, File file) {
         String path = file.getAbsolutePath();
         image.setTag(path);
-        thumbnailExecutor.execute(() -> {
-            Bitmap bm = createThumbnail(file, Math.max(dp(140), dp(previewHeightDp())));
-            if (bm == null) return;
-            runOnUiThread(() -> {
-                Object tag = image.getTag();
-                if (tag != null && path.equals(tag.toString())) {
-                    image.setImageBitmap(bm);
-                    fallback.setVisibility(View.GONE);
+        try {
+            thumbnailExecutor.execute(() -> {
+                Bitmap bm = null;
+                try {
+                    int target = Math.max(dp(96), Math.min(dp(150), dp(previewHeightDp())));
+                    bm = createThumbnail(file, target);
+                } catch (OutOfMemoryError oom) {
+                    bm = null;
+                } catch (Throwable ignored) {
+                    bm = null;
                 }
+                if (bm == null) return;
+                Bitmap ready = bm;
+                runOnUiThread(() -> {
+                    Object tag = image.getTag();
+                    if (tag != null && path.equals(tag.toString()) && image.isAttachedToWindow()) {
+                        image.setImageBitmap(ready);
+                        fallback.setVisibility(View.GONE);
+                    } else if (!ready.isRecycled()) {
+                        ready.recycle();
+                    }
+                });
             });
-        });
+        } catch (Throwable ignored) {}
     }
 
     private Bitmap createThumbnail(File file, int targetPx) {
@@ -1213,9 +1226,10 @@ public class MainActivity extends Activity {
 
         ScanRing ring = new ScanRing(this);
         ring.setLiveCount(0, "apps");
+        FrameLayout systemVisual = animatedLoadingVisual(ring, 190);
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(190), dp(190));
         rlp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(ring, rlp);
+        root.addView(systemVisual, rlp);
 
         root.addView(space(18));
         LinearLayout live = card();
@@ -1515,9 +1529,10 @@ public class MainActivity extends Activity {
         root.addView(space(24));
 
         ScanRing ring=new ScanRing(this);
+        FrameLayout appVisual=animatedLoadingVisual(ring,190);
         LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(dp(190),dp(190));
         rp.gravity=Gravity.CENTER_HORIZONTAL;
-        root.addView(ring,rp);
+        root.addView(appVisual,rp);
         root.addView(space(14));
 
         TextView status=centerText("Visible/shared files map कर रहे हैं…",13,MUTED,false);
@@ -2225,9 +2240,10 @@ public class MainActivity extends Activity {
         root.addView(space(24));
 
         ScanRing ring = new ScanRing(this);
+        FrameLayout toolVisual = animatedLoadingVisual(ring, 205);
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(205), dp(205));
         rlp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(ring, rlp);
+        root.addView(toolVisual, rlp);
 
         TextView path = text("Preparing…", 12, MUTED, false);
         path.setGravity(Gravity.CENTER);
@@ -3775,9 +3791,10 @@ public class MainActivity extends Activity {
         root.addView(title); root.addView(space(5)); root.addView(sub); root.addView(space(22));
 
         ScanRing ring = new ScanRing(this);
+        FrameLayout scanVisual = animatedLoadingVisual(ring, 220);
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(dp(220), dp(220));
         rlp.gravity = Gravity.CENTER_HORIZONTAL;
-        root.addView(ring, rlp);
+        root.addView(scanVisual, rlp);
 
         TextView status = text("Preparing storage map…", 13, MUTED, false);
         status.setGravity(Gravity.CENTER);
