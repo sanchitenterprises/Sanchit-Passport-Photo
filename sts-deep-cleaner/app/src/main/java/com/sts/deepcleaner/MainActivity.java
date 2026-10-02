@@ -8,10 +8,12 @@ import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
+import android.app.ActivityManager;
 import android.app.usage.StorageStats;
 import android.app.usage.StorageStatsManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -26,14 +28,33 @@ import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.media.ThumbnailUtils;
+import android.media.ToneGenerator;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.Uri;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.Process;
+import android.os.PowerManager;
 import android.os.StatFs;
+import android.os.SystemClock;
 import android.os.UserHandle;
 import android.os.storage.StorageManager;
 import android.os.VibrationEffect;
@@ -126,6 +147,10 @@ public class MainActivity extends Activity {
     private long activeStorageCategoryBytes = 0L;
     private long categoryLoadToken = 0L;
     private StorageCategory activeSystemCategory = null;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private String pendingDoctorPermissionTest = null;
+    private boolean torchActive = false;
+    private String torchCameraId = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -4487,7 +4512,10 @@ public class MainActivity extends Activity {
                 new HomeToolSpec("◉","Apps","& System",Color.rgb(82,88,110),"system"),
                 new HomeToolSpec("▶","Media","Photo/Video",Color.rgb(170,82,205),"media"),
                 new HomeToolSpec("⇩","Downloads","Offline",Color.rgb(244,139,45),"downloads"),
-                new HomeToolSpec("⛃","Backups","Database",Color.rgb(139,93,210),"backups")
+                new HomeToolSpec("⛃","Backups","Database",Color.rgb(139,93,210),"backups"),
+                new HomeToolSpec("✚","Phone","Doctor",Color.rgb(36,145,180),"phoneDoctor"),
+                new HomeToolSpec("⚡","Battery","Doctor",Color.rgb(230,150,40),"batteryDoctor"),
+                new HomeToolSpec("♥","Phone Health","Analysis",Color.rgb(66,158,105),"healthAnalysis")
         };
         int cols = galleryListMode() ? 1 : galleryColumns();
         LinearLayout row = null;
@@ -4504,6 +4532,9 @@ public class MainActivity extends Activity {
             card.setOnClickListener(v -> {
                 if ("trash".equals(spec.id)) showTrashScreen();
                 else if ("system".equals(spec.id)) { activeSystemCategory = null; openSystemAnalyzer(); }
+                else if ("phoneDoctor".equals(spec.id)) showPhoneDoctor();
+                else if ("batteryDoctor".equals(spec.id)) showBatteryDoctor();
+                else if ("healthAnalysis".equals(spec.id)) showHealthAnalysis();
                 else openTool(spec.id);
             });
             row.addView(card, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
