@@ -2,7 +2,9 @@ package com.sts.deepcleaner;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.AppOpsManager;
@@ -67,8 +69,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import android.webkit.MimeTypeMap;
 import androidx.core.content.FileProvider;
@@ -104,7 +108,11 @@ public class MainActivity extends Activity {
     private final Map<String,Integer> scrollPositions = new HashMap<>();
     private final Map<String,Integer> sortModes = new HashMap<>();
     private final Map<String,Set<String>> selections = new HashMap<>();
-    private final ExecutorService thumbnailExecutor = Executors.newFixedThreadPool(3);
+    private final Map<String,Integer> visibleLimits = new HashMap<>();
+    private final ExecutorService thumbnailExecutor = new ThreadPoolExecutor(
+            2, 2, 20L, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(72),
+            new ThreadPoolExecutor.DiscardOldestPolicy());
     private ScrollView currentScrollView = null;
     private String currentScrollKey = null;
     private SystemStorageResult activeSystemResult = null;
@@ -124,6 +132,13 @@ public class MainActivity extends Activity {
         w.setStatusBarColor(PURPLE);
         w.setNavigationBarColor(BG);
         showHome();
+    }
+
+    @Override
+    protected void onDestroy() {
+        try { thumbnailExecutor.shutdownNow(); } catch (Exception ignored) {}
+        releasePreviewResources();
+        super.onDestroy();
     }
 
     @Override
@@ -263,6 +278,112 @@ public class MainActivity extends Activity {
         bindScrollPosition("home", scroll);
         fadeIn(root);
         popIn(logo);
+    }
+
+    private static final int PREVIEW_BATCH = 36;
+
+    private int visibleLimit(String key, int total) {
+        int limit = visibleLimits.containsKey(key) ? visibleLimits.get(key) : PREVIEW_BATCH;
+        return Math.max(0, Math.min(total, Math.max(PREVIEW_BATCH, limit)));
+    }
+
+    private void resetVisibleLimit(String key) {
+        visibleLimits.put(key, PREVIEW_BATCH);
+    }
+
+    private void loadMore(String key, int total, Runnable refresh) {
+        int current = visibleLimit(key, total);
+        visibleLimits.put(key, Math.min(total, current + PREVIEW_BATCH));
+        refresh.run();
+    }
+
+    private TextView loadMoreButton(String key, int shown, int total, Runnable refresh) {
+        TextView more = actionButton("LOAD MORE  •  " + shown + " / " + total, Color.rgb(61,92,150));
+        touch(more);
+        more.setOnClickListener(v -> loadMore(key, total, refresh));
+        return more;
+    }
+
+    private FrameLayout animatedLoadingVisual(ScanRing ring, int sizeDp) {
+        FrameLayout frame = new FrameLayout(this);
+        frame.addView(ring, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(com.sts.deepcleaner.R.drawable.ic_launcher);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        int logoSize = Math.max(62, Math.round(sizeDp * 0.36f));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(logoSize), dp(logoSize), Gravity.CENTER);
+        frame.addView(logo, lp);
+        animateLoadingLogo(logo);
+        return frame;
+    }
+
+    private void animateLoadingLogo(ImageView logo) {
+        ObjectAnimator rotate = ObjectAnimator.ofFloat(logo, View.ROTATION, 0f, 360f);
+        rotate.setDuration(1800);
+        rotate.setRepeatCount(ValueAnimator.INFINITE);
+        rotate.setRepeatMode(ValueAnimator.RESTART);
+
+        ObjectAnimator sx = ObjectAnimator.ofFloat(logo, View.SCALE_X, 0.90f, 1.06f);
+        sx.setDuration(850);
+        sx.setRepeatCount(ValueAnimator.INFINITE);
+        sx.setRepeatMode(ValueAnimator.REVERSE);
+
+        ObjectAnimator sy = ObjectAnimator.ofFloat(logo, View.SCALE_Y, 0.90f, 1.06f);
+        sy.setDuration(850);
+        sy.setRepeatCount(ValueAnimator.INFINITE);
+        sy.setRepeatMode(ValueAnimator.REVERSE);
+
+        AnimatorSet set = new AnimatorSet();
+        set.playTogether(rotate, sx, sy);
+        set.start();
+
+        logo.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {}
+            @Override public void onViewDetachedFromWindow(View v) {
+                try { set.cancel(); } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    private void showCategoryLoading(StorageCategory cat, int count) {
+        beginNonScrollScreen();
+        getWindow().getDecorView().setTag("categoryLoading");
+
+        LinearLayout root = column();
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(dp(22), dp(34), dp(22), dp(28));
+        root.setBackgroundColor(BG);
+
+        root.addView(text(cat.label, 27, INK, true));
+        root.addView(space(6));
+        root.addView(centerText(count + " files prepare हो रही हैं", 13, MUTED, false));
+        root.addView(space(34));
+
+        ScanRing ring = new ScanRing(this);
+        ring.setLiveCount(count, "files");
+        FrameLayout visual = animatedLoadingVisual(ring, 210);
+        LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(dp(210), dp(210));
+        vp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(visual, vp);
+
+        root.addView(space(18));
+        root.addView(centerText("STS Smart Cleaner", 17, PURPLE, true));
+        root.addView(space(5));
+        root.addView(centerText("Preview को safe batches में तैयार किया जा रहा है…", 12, MUTED, false));
+
+        Space flex = new Space(this);
+        root.addView(flex, new LinearLayout.LayoutParams(1,0,1f));
+
+        TextView back = actionButton("BACK", Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(54)));
+
+        setContentView(root);
+        fadeIn(root);
     }
 
     private boolean galleryListMode() {
