@@ -113,6 +113,9 @@ public class MainActivity extends Activity {
     private ScanSummary activeScanSummary = null;
     private int activeScanGalleryMode = -1;
     private String previewReturnTag = null;
+    private StorageCategory activeStorageCategory = null;
+    private List<File> activeStorageCategoryFiles = null;
+    private StorageCategory activeSystemCategory = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -180,7 +183,7 @@ public class MainActivity extends Activity {
 
         LinearLayout brandText = column();
         brandText.setPadding(dp(12), 0, 0, 0);
-        TextView title = text("STS Deep Cleaner", 27, Color.WHITE, true);
+        TextView title = text("STS Smart Cleaner", 27, Color.WHITE, true);
         TextView sub = text("Safe • Smart • Deep", 14, Color.argb(220,255,255,255), false);
         brandText.addView(title);
         brandText.addView(space(3));
@@ -262,6 +265,15 @@ public class MainActivity extends Activity {
         popIn(logo);
     }
 
+    private boolean galleryListMode() {
+        return getSharedPreferences("sts_view", MODE_PRIVATE).getBoolean("gallery_list_mode", false);
+    }
+
+    private void setGalleryListMode(boolean listMode) {
+        getSharedPreferences("sts_view", MODE_PRIVATE).edit()
+                .putBoolean("gallery_list_mode", listMode).apply();
+    }
+
     private int galleryColumns() {
         int n = getSharedPreferences("sts_view", MODE_PRIVATE).getInt("gallery_columns", 3);
         return Math.max(2, Math.min(5, n));
@@ -273,15 +285,21 @@ public class MainActivity extends Activity {
     }
 
     private TextView viewControl(Runnable refresh) {
-        TextView v = pill("VIEW  •  " + galleryColumns() + " COLUMNS", PURPLE, Color.rgb(239,236,255));
+        String label = galleryListMode() ? "VIEW  •  LIST" : "VIEW  •  GRID " + galleryColumns();
+        TextView v = pill(label, Color.rgb(61,92,150), Color.rgb(235,242,255));
         touch(v);
         v.setOnClickListener(x -> {
-            String[] options = {"2 Columns", "3 Columns", "4 Columns", "5 Columns"};
-            int current = galleryColumns() - 2;
+            String[] options = {"List", "Grid • 2 Columns", "Grid • 3 Columns", "Grid • 4 Columns", "Grid • 5 Columns"};
+            int current = galleryListMode() ? 0 : galleryColumns() - 1;
             new AlertDialog.Builder(this)
-                    .setTitle("Preview Grid")
+                    .setTitle("View Layout")
                     .setSingleChoiceItems(options, current, (d, which) -> {
-                        setGalleryColumns(which + 2);
+                        if (which == 0) {
+                            setGalleryListMode(true);
+                        } else {
+                            setGalleryListMode(false);
+                            setGalleryColumns(which + 1);
+                        }
                         d.dismiss();
                         refresh.run();
                     })
@@ -290,6 +308,7 @@ public class MainActivity extends Activity {
         });
         return v;
     }
+
 
     private Set<String> selectionSet(String key) {
         Set<String> set = selections.get(key);
@@ -344,7 +363,7 @@ public class MainActivity extends Activity {
         LinearLayout top = row();
         TextView view = viewControl(refresh);
         TextView all = pill("SELECT ALL", Color.rgb(18,145,123), Color.rgb(228,252,248));
-        TextView clear = pill("CLEAR ALL", ROSE, Color.rgb(255,238,243));
+        TextView clear = pill("CLEAR ALL", Color.rgb(92,98,116), Color.rgb(239,241,246));
         touch(all); touch(clear);
         all.setOnClickListener(v -> { selectAllFiles(selectionKey, selectableFiles); refresh.run(); });
         clear.setOnClickListener(v -> { clearSelection(selectionKey); refresh.run(); });
@@ -371,7 +390,10 @@ public class MainActivity extends Activity {
 
         if (count > 0 && selectedActionLabel != null && selectedAction != null) {
             box.addView(space(8));
-            TextView action = actionButton(selectedActionLabel, PURPLE);
+            int actionColor = selectedActionLabel.contains("RESTORE") ? TEAL
+                    : (selectedActionLabel.contains("DELETE") || selectedActionLabel.contains("TRASH") ||
+                       selectedActionLabel.contains("CLEAN")) ? ROSE : PURPLE;
+            TextView action = actionButton(selectedActionLabel, actionColor);
             touch(action);
             action.setOnClickListener(v -> selectedAction.run());
             box.addView(action, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
@@ -380,6 +402,7 @@ public class MainActivity extends Activity {
     }
 
     private int previewHeightDp() {
+        if (galleryListMode()) return 86;
         switch (galleryColumns()) {
             case 2: return 150;
             case 4: return 82;
@@ -389,17 +412,52 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showFileActions(File file, AppFileInfo info) {
+        List<String> actions = new ArrayList<>();
+        actions.add("Open / Preview");
+        actions.add("Share");
+        actions.add("Details");
+        String[] options = actions.toArray(new String[0]);
+        new AlertDialog.Builder(this)
+                .setTitle(file.getName())
+                .setItems(options, (d, which) -> {
+                    if (which == 0) openFoundFile(file);
+                    else if (which == 1) shareFoundFile(file);
+                    else showFileDetails(file, info != null ? info : describeAppFile(file));
+                })
+                .setNegativeButton("CANCEL", null)
+                .show();
+    }
+
+    private void shareFoundFile(File file) {
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", file);
+            Intent share = new Intent(Intent.ACTION_SEND);
+            share.setType(mime(file));
+            share.putExtra(Intent.EXTRA_STREAM, uri);
+            share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(share, "Share file"));
+        } catch (Exception e) {
+            new AlertDialog.Builder(this).setTitle("Share unavailable")
+                    .setMessage("इस file को share नहीं किया जा सका।")
+                    .setPositiveButton("OK", null).show();
+        }
+    }
+
     private LinearLayout galleryFileCard(File file, long bytes, String selectionKey,
                                          boolean selectable, AppFileInfo info, int accent,
                                          Runnable refresh) {
         boolean isSelected = selectable && selected(selectionKey, file);
+        boolean listMode = galleryListMode();
 
-        LinearLayout card = column();
-        card.setPadding(dp(5), dp(5), dp(5), dp(7));
+        LinearLayout card = listMode ? row() : column();
+        card.setGravity(listMode ? Gravity.CENTER_VERTICAL : Gravity.NO_GRAVITY);
+        card.setPadding(dp(6), dp(6), dp(6), dp(7));
+
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(isSelected ? Color.rgb(244,240,255) : Color.WHITE);
+        bg.setColor(isSelected ? Color.rgb(239,236,255) : Color.WHITE);
         bg.setCornerRadius(dp(16));
-        bg.setStroke(dp(isSelected ? 2 : 1), isSelected ? PURPLE : Color.rgb(228,230,238));
+        bg.setStroke(dp(isSelected ? 2 : 1), isSelected ? PURPLE : Color.rgb(224,227,236));
         card.setBackground(bg);
         card.setElevation(dp(2));
 
@@ -412,26 +470,38 @@ public class MainActivity extends Activity {
         preview.addView(image, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        TextView fallback = centerText(fileIcon(file), galleryColumns() >= 4 ? 20 : 28, MUTED, true);
+        int fallbackSize = listMode ? 22 : (galleryColumns() >= 4 ? 20 : 28);
+        TextView fallback = centerText(fileIcon(file), fallbackSize, MUTED, true);
         preview.addView(fallback, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         if (isVideoFile(file)) {
-            TextView play = centerText("▶", galleryColumns() >= 4 ? 20 : 30, Color.WHITE, true);
+            TextView play = centerText("▶", listMode ? 18 : (galleryColumns() >= 4 ? 20 : 30), Color.WHITE, true);
             GradientDrawable pd = new GradientDrawable();
-            pd.setColor(Color.argb(120, 0, 0, 0));
+            pd.setColor(Color.argb(135, 0, 0, 0));
             pd.setShape(GradientDrawable.OVAL);
             play.setBackground(pd);
-            FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER);
+            FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(dp(listMode ? 34 : 42), dp(listMode ? 34 : 42), Gravity.CENTER);
             preview.addView(play, pp);
         }
+
+        TextView menu = centerText("⋮", 18, Color.rgb(45,50,65), true);
+        GradientDrawable md = new GradientDrawable();
+        md.setShape(GradientDrawable.OVAL);
+        md.setColor(Color.argb(230,255,255,255));
+        menu.setBackground(md);
+        FrameLayout.LayoutParams mp = new FrameLayout.LayoutParams(dp(30),dp(30),Gravity.TOP|Gravity.START);
+        mp.setMargins(dp(5),dp(5),0,0);
+        preview.addView(menu,mp);
+        touch(menu);
+        menu.setOnClickListener(v -> showFileActions(file, info));
 
         if (selectable) {
             TextView check = centerText(isSelected ? "✓" : "○", 16,
                     isSelected ? Color.WHITE : PURPLE, true);
             GradientDrawable cd = new GradientDrawable();
             cd.setShape(GradientDrawable.OVAL);
-            cd.setColor(isSelected ? PURPLE : Color.argb(225,255,255,255));
+            cd.setColor(isSelected ? PURPLE : Color.argb(235,255,255,255));
             check.setBackground(cd);
             FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(dp(30), dp(30),
                     Gravity.TOP | Gravity.END);
@@ -452,22 +522,43 @@ public class MainActivity extends Activity {
             refresh.run();
             return true;
         });
-        card.addView(preview, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(previewHeightDp())));
 
-        card.addView(space(6));
-        TextView name = text(file.getName(), galleryColumns() >= 4 ? 9 : 11, INK, true);
-        name.setMaxLines(2);
-        card.addView(name, matchWrap());
-
-        card.addView(space(2));
-        card.addView(text(format(bytes), galleryColumns() >= 4 ? 8 : 10, accent, true));
-
-        if (info != null && galleryColumns() <= 3) {
-            card.addView(space(3));
-            TextView status = text(info.status, 8, info.statusColor, true);
-            status.setMaxLines(1);
-            card.addView(status, matchWrap());
+        if (listMode) {
+            card.addView(preview, new LinearLayout.LayoutParams(dp(108), dp(previewHeightDp())));
+            card.addView(spaceH(9));
+            LinearLayout details = column();
+            TextView name = text(file.getName(), 12, INK, true);
+            name.setMaxLines(2);
+            details.addView(name, matchWrap());
+            details.addView(space(3));
+            details.addView(text(format(bytes), 10, accent, true));
+            if (info != null) {
+                details.addView(space(3));
+                TextView status = text(info.status, 9, info.statusColor, true);
+                status.setMaxLines(1);
+                details.addView(status, matchWrap());
+            }
+            details.addView(space(5));
+            TextView actions = text("OPEN  •  SHARE  •  DETAILS", 8, Color.rgb(61,92,150), true);
+            actions.setOnClickListener(v -> showFileActions(file, info));
+            touch(actions);
+            details.addView(actions, matchWrap());
+            card.addView(details, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        } else {
+            card.addView(preview, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(previewHeightDp())));
+            card.addView(space(6));
+            TextView name = text(file.getName(), galleryColumns() >= 4 ? 9 : 11, INK, true);
+            name.setMaxLines(2);
+            card.addView(name, matchWrap());
+            card.addView(space(2));
+            card.addView(text(format(bytes), galleryColumns() >= 4 ? 8 : 10, accent, true));
+            if (info != null && galleryColumns() <= 3) {
+                card.addView(space(3));
+                TextView status = text(info.status, 8, info.statusColor, true);
+                status.setMaxLines(1);
+                card.addView(status, matchWrap());
+            }
         }
 
         card.setOnLongClickListener(v -> {
@@ -480,6 +571,7 @@ public class MainActivity extends Activity {
         loadThumbnail(image, fallback, file);
         return card;
     }
+
 
     private String fileIcon(File file) {
         String n = file.getName().toLowerCase(Locale.ROOT);
@@ -552,7 +644,7 @@ public class MainActivity extends Activity {
     }
 
     private void addGalleryCells(LinearLayout gallery, List<LinearLayout> cells) {
-        int cols = galleryColumns();
+        int cols = galleryListMode() ? 1 : galleryColumns();
         LinearLayout row = null;
         int inRow = 0;
         for (LinearLayout cell : cells) {
@@ -566,7 +658,7 @@ public class MainActivity extends Activity {
             row.addView(cell, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             inRow++;
         }
-        if (row != null && inRow < cols) {
+        if (!galleryListMode() && row != null && inRow < cols) {
             while (inRow < cols) {
                 if (inRow > 0) row.addView(spaceH(7));
                 Space filler = new Space(this);
@@ -576,15 +668,14 @@ public class MainActivity extends Activity {
         }
     }
 
+
     private static final String[] FILE_SORT_OPTIONS = new String[]{
-            "Size • Large → Small",
-            "Size • Small → Large",
-            "Name • A → Z",
-            "Name • Z → A",
-            "Date • Newest first",
-            "Date • Oldest first",
-            "Type / App",
-            "Safety / Status"
+            "Largest",
+            "Smallest",
+            "Newest",
+            "Oldest",
+            "A–Z",
+            "Z–A"
     };
 
     private static final String[] APP_SORT_OPTIONS = new String[]{
@@ -655,85 +746,47 @@ public class MainActivity extends Activity {
     private void sortToolItems(ToolResult result, int mode) {
         Comparator<ToolItem> cmp;
         switch (mode) {
-            case 1:
-                cmp = Comparator.comparingLong(a -> a.bytes);
-                break;
-            case 2:
-                cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT));
-                break;
-            case 3:
-                cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName());
-                break;
-            case 4:
-                cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified());
-                break;
-            case 5:
-                cmp = Comparator.comparingLong(a -> a.file.lastModified());
-                break;
-            case 6:
-                cmp = Comparator.comparing((ToolItem a) -> {
-                    if (a.directory) return "Folder";
-                    AppFileInfo info = describeAppFile(a.file);
-                    return info.category + " • " + info.appName;
-                }, String.CASE_INSENSITIVE_ORDER).thenComparing(a -> a.file.getName(), String.CASE_INSENSITIVE_ORDER);
-                break;
-            case 7:
-                cmp = Comparator.comparing((ToolItem a) -> {
-                    if (a.directory) return "Folder";
-                    return describeAppFile(a.file).status;
-                }, String.CASE_INSENSITIVE_ORDER).thenComparing((ToolItem a) -> -a.bytes);
-                break;
+            case 1: cmp = Comparator.comparingLong(a -> a.bytes); break;
+            case 2: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
+            case 3: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
+            case 4: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
+            case 5: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
             case 0:
-            default:
-                cmp = (a,b) -> Long.compare(b.bytes, a.bytes);
-                break;
+            default: cmp = (a,b) -> Long.compare(b.bytes, a.bytes); break;
         }
         Collections.sort(result.items, cmp);
     }
+
 
     private void sortScanItems(List<ScanItem> items, int mode) {
         Comparator<ScanItem> cmp;
         switch (mode) {
             case 1: cmp = Comparator.comparingLong(a -> a.bytes); break;
-            case 2: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
-            case 3: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
-            case 4: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
-            case 5: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
-            case 6:
-                cmp = Comparator.comparing((ScanItem a) -> fileTypeFromExtension(a.file.getName().toLowerCase(Locale.ROOT)),
-                        String.CASE_INSENSITIVE_ORDER).thenComparing(a -> a.file.getName(), String.CASE_INSENSITIVE_ORDER);
-                break;
-            case 7:
-                cmp = Comparator.comparing((ScanItem a) -> a.safe ? "SAFE" : "REVIEW")
-                        .thenComparing((ScanItem a) -> -a.bytes);
-                break;
+            case 2: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
+            case 3: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
+            case 4: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
+            case 5: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
             case 0:
             default: cmp = (a,b) -> Long.compare(b.bytes, a.bytes); break;
         }
         Collections.sort(items, cmp);
     }
 
+
     private void sortAppVisibleFiles(AppDetailResult result, int mode) {
         Comparator<AppVisibleFile> cmp;
         switch (mode) {
             case 1: cmp = Comparator.comparingLong(a -> a.bytes); break;
-            case 2: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
-            case 3: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
-            case 4: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
-            case 5: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
-            case 6:
-                cmp = Comparator.comparing((AppVisibleFile a) -> a.info.category + " • " + a.info.appName,
-                        String.CASE_INSENSITIVE_ORDER).thenComparing(a -> a.file.getName(), String.CASE_INSENSITIVE_ORDER);
-                break;
-            case 7:
-                cmp = Comparator.comparing((AppVisibleFile a) -> a.info.status, String.CASE_INSENSITIVE_ORDER)
-                        .thenComparing((AppVisibleFile a) -> -a.bytes);
-                break;
+            case 2: cmp = (a,b) -> Long.compare(b.file.lastModified(), a.file.lastModified()); break;
+            case 3: cmp = Comparator.comparingLong(a -> a.file.lastModified()); break;
+            case 4: cmp = Comparator.comparing(a -> a.file.getName().toLowerCase(Locale.ROOT)); break;
+            case 5: cmp = (a,b) -> b.file.getName().compareToIgnoreCase(a.file.getName()); break;
             case 0:
             default: cmp = (a,b) -> Long.compare(b.bytes, a.bytes); break;
         }
         Collections.sort(result.files, cmp);
     }
+
 
     private void sortApps(SystemStorageResult result, int mode) {
         Comparator<AppStorageEntry> cmp;
