@@ -124,6 +124,7 @@ public class MainActivity extends Activity {
     private StorageCategory activeStorageCategory = null;
     private List<File> activeStorageCategoryFiles = null;
     private long activeStorageCategoryBytes = 0L;
+    private long categoryLoadToken = 0L;
     private StorageCategory activeSystemCategory = null;
 
     @Override
@@ -172,6 +173,7 @@ public class MainActivity extends Activity {
     }
 
     private void showHome() {
+        categoryLoadToken++;
         rememberCurrentScroll();
         clearThumbnailQueue();
         releasePreviewResources();
@@ -1020,20 +1022,25 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             StorageAnalytics a = new StorageAnalytics();
-            File root = Environment.getExternalStorageDirectory();
-            Set<String> seen = new HashSet<>();
-            scanAnalytics(root, seen, 0, a);
+            try {
+                File root = Environment.getExternalStorageDirectory();
+                Set<String> seen = new HashSet<>();
+                scanAnalytics(root, seen, 0, a);
 
-            if (hasUsageAccess()) {
-                fillPrivateStorageStats(a, usedStorage);
-            } else {
-                long hiddenBytes = Math.max(0L, usedStorage - a.visibleBytes);
-                a.add(StorageCategory.HIDDEN_UNCLASSIFIED, hiddenBytes, hiddenBytes > 0 ? 1 : 0);
+                if (hasUsageAccess()) {
+                    fillPrivateStorageStats(a, usedStorage);
+                } else {
+                    long hiddenBytes = Math.max(0L, usedStorage - a.visibleBytes);
+                    a.add(StorageCategory.HIDDEN_UNCLASSIFIED, hiddenBytes, hiddenBytes > 0 ? 1 : 0);
+                }
+                a.usedStorage = usedStorage;
+                cachedAnalytics = a;
+                cachedAnalyticsAt = System.currentTimeMillis();
+            } catch (Throwable error) {
+                a.usedStorage = usedStorage;
+                cachedAnalytics = a;
+                cachedAnalyticsAt = System.currentTimeMillis();
             }
-            a.usedStorage = usedStorage;
-
-            cachedAnalytics = a;
-            cachedAnalyticsAt = System.currentTimeMillis();
 
             runOnUiThread(() -> {
                 Object tag = getWindow().getDecorView().getTag();
@@ -1277,29 +1284,35 @@ public class MainActivity extends Activity {
         fadeIn(root);
 
         new Thread(() -> {
-            SystemStorageResult result = collectSystemStorageResult(new SystemAnalyzeCallback() {
-                @Override public void live(int done, int total, String appName,
-                                           long code, long data, long cache) {
-                    runOnUiThread(() -> {
-                        ring.setLiveCount(done, "apps");
-                        processed.setText("Apps scanned: " + done + " / " + total);
-                        current.setText(appName == null ? "Reading Android storage statistics…" :
-                                "Scanning: " + appName);
-                        appCode.setText("App code: " + format(code));
-                        appData.setText("App data: " + format(data));
-                        appCache.setText("App cache: " + format(cache));
-                    });
-                }
-            });
+            SystemStorageResult result;
+            try {
+                result = collectSystemStorageResult(new SystemAnalyzeCallback() {
+                    @Override public void live(int done, int total, String appName,
+                                               long code, long data, long cache) {
+                        runOnUiThread(() -> {
+                            ring.setLiveCount(done, "apps");
+                            processed.setText("Apps scanned: " + done + " / " + total);
+                            current.setText(appName == null ? "Reading Android storage statistics…" :
+                                    "Scanning: " + appName);
+                            appCode.setText("App code: " + format(code));
+                            appData.setText("App data: " + format(data));
+                            appCache.setText("App cache: " + format(cache));
+                        });
+                    }
+                });
+            } catch (Throwable error) {
+                result = new SystemStorageResult();
+            }
+            SystemStorageResult finalResult = result;
             runOnUiThread(() -> {
                 ring.setDone();
-                processed.setText("Apps scanned: " + result.apps.size());
+                processed.setText("Apps scanned: " + finalResult.apps.size());
                 current.setText("Analysis complete");
-                appCode.setText("App code: " + format(result.appCodeBytes));
-                appData.setText("App data: " + format(result.appDataBytes));
-                appCache.setText("App cache: " + format(result.appCacheBytes));
-                sys.setText("Android/System/Reserved: " + format(result.systemReservedBytes));
-                showSystemAnalyzerResult(result);
+                appCode.setText("App code: " + format(finalResult.appCodeBytes));
+                appData.setText("App data: " + format(finalResult.appDataBytes));
+                appCache.setText("App cache: " + format(finalResult.appCacheBytes));
+                sys.setText("Android/System/Reserved: " + format(finalResult.systemReservedBytes));
+                showSystemAnalyzerResult(finalResult);
             });
         }, "sts-system-analyzer").start();
     }
@@ -1573,10 +1586,16 @@ public class MainActivity extends Activity {
         fadeIn(root);
 
         new Thread(() -> {
-            AppDetailResult result=collectAppDetail(entry);
+            AppDetailResult result;
+            try {
+                result=collectAppDetail(entry);
+            } catch (Throwable error) {
+                result=new AppDetailResult(entry);
+            }
+            AppDetailResult finalResult=result;
             runOnUiThread(() -> {
                 ring.setDone();
-                showAppDetailResult(result);
+                showAppDetailResult(finalResult);
             });
         },"sts-app-detail").start();
     }
@@ -2053,6 +2072,7 @@ public class MainActivity extends Activity {
 
     private void showStorageCategoryFiles(StorageCategory cat, List<File> sourceFiles) {
         rememberCurrentScroll();
+        final long loadToken = ++categoryLoadToken;
         showCategoryLoading(cat, sourceFiles == null ? 0 : sourceFiles.size());
 
         new Thread(() -> {
@@ -2071,6 +2091,7 @@ public class MainActivity extends Activity {
 
             long totalBytes = total;
             runOnUiThread(() -> {
+                if (loadToken != categoryLoadToken) return;
                 activeStorageCategory = cat;
                 activeStorageCategoryFiles = files;
                 activeStorageCategoryBytes = totalBytes;
@@ -2257,6 +2278,7 @@ public class MainActivity extends Activity {
     }
 
     private void showToolScan(String type) {
+        resetVisibleLimit("toolResult:" + type);
         beginNonScrollScreen();
         getWindow().getDecorView().setTag("toolScan");
         LinearLayout root = column();
@@ -3837,6 +3859,9 @@ public class MainActivity extends Activity {
     }
 
     private void startScan(boolean deep) {
+        resetVisibleLimit("scanGallery:0");
+        resetVisibleLimit("scanGallery:1");
+        resetVisibleLimit("scanGallery:2");
         beginNonScrollScreen();
         getWindow().getDecorView().setTag("scan");
         LinearLayout root = column();
