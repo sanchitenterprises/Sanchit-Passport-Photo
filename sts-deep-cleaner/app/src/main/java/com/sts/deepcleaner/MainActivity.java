@@ -1857,6 +1857,7 @@ public class MainActivity extends Activity {
         sortAppVisibleFiles(result, sortMode(sortKey, 0));
         TextView fileSort = sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
             resetSavedScroll(scrollKey);
+            resetVisibleLimit(scrollKey);
             showAppVisibleFiles(result, cat);
         });
         root.addView(fileSort, matchWrap());
@@ -1876,7 +1877,7 @@ public class MainActivity extends Activity {
         LinearLayout gallery=column();
         List<LinearLayout> cells=new ArrayList<>();
         int shown=0;
-        int limit=160;
+        int limit=visibleLimit(scrollKey, result.count(cat));
         for(AppVisibleFile vf:result.files){
             if(vf.category!=cat) continue;
             if(shown>=limit) break;
@@ -1890,8 +1891,12 @@ public class MainActivity extends Activity {
 
         if(result.count(cat)>shown){
             root.addView(space(10));
-            root.addView(centerText("Showing first "+shown+" of "+result.count(cat)+
-                    " • Select All applies to all selectable files",10,MUTED,false));
+            root.addView(loadMoreButton(scrollKey, shown, result.count(cat),
+                    () -> showAppVisibleFiles(result,cat)),
+                    new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(52)));
+            root.addView(space(6));
+            root.addView(centerText("Preview safe batches में load होंगी • Select All सभी selectable files पर लागू है",
+                    10,MUTED,false));
         }
 
         root.addView(space(12));
@@ -2177,6 +2182,7 @@ public class MainActivity extends Activity {
                         }
                     }
                     clearSelection(selectionKey);
+                    activeStorageCategoryBytes = Math.max(0L, activeStorageCategoryBytes - changed);
                     cachedAnalytics = null;
                     cachedAnalyticsAt = 0L;
                     int finalCount=count;
@@ -2184,7 +2190,7 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this)
                             .setTitle(direct ? "Clean complete" : "Moved to STS Trash")
                             .setMessage(finalCount+" files • "+format(finalChanged))
-                            .setPositiveButton("OK",(x,y)->showStorageCategoryFiles(cat,sourceFiles))
+                            .setPositiveButton("OK",(x,y)->renderStorageCategoryFiles(cat,sourceFiles))
                             .show();
                 }).show();
     }
@@ -2368,6 +2374,7 @@ public class MainActivity extends Activity {
             root.addView(space(10));
             TextView sort = sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
                 resetSavedScroll(scrollKey);
+                resetVisibleLimit(scrollKey);
                 showToolResult(result);
             });
             root.addView(sort, matchWrap());
@@ -2388,7 +2395,7 @@ public class MainActivity extends Activity {
             root.addView(section("Preview Grid"));
             LinearLayout gallery = column();
             List<LinearLayout> cells = new ArrayList<>();
-            int limit = Math.min(160, result.items.size());
+            int limit = visibleLimit(scrollKey, result.items.size());
             for (int i=0; i<limit; i++) {
                 ToolItem item = result.items.get(i);
                 AppFileInfo info = item.directory ? AppFileInfo.folder() : describeAppFile(item.file);
@@ -2401,8 +2408,12 @@ public class MainActivity extends Activity {
 
             if (result.items.size() > limit) {
                 root.addView(space(10));
-                root.addView(centerText("Showing first " + limit + " of " + result.items.size() +
-                        " • Select All applies to all safe/selectable items", 10, MUTED, false));
+                root.addView(loadMoreButton(scrollKey, limit, result.items.size(),
+                        () -> showToolResult(result)),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
+                root.addView(space(6));
+                root.addView(centerText("Preview safe batches में load होंगी • Select All सभी safe/selectable items पर लागू है",
+                        10, MUTED, false));
             }
         }
 
@@ -3148,7 +3159,7 @@ public class MainActivity extends Activity {
         if ("trash".equals(target)) {
             showTrashScreen();
         } else if ("storageCategory".equals(target) && activeStorageCategory != null && activeStorageCategoryFiles != null) {
-            showStorageCategoryFiles(activeStorageCategory, activeStorageCategoryFiles);
+            renderStorageCategoryFiles(activeStorageCategory, activeStorageCategoryFiles);
         } else if ("scanGallery".equals(target) && activeScanSummary != null && activeScanGalleryMode >= 0) {
             showScanItemsGallery(activeScanSummary, activeScanGalleryMode);
         } else if ("appVisibleFiles".equals(target) && activeVisibleCategory != null && activeAppDetailResult != null) {
@@ -3387,6 +3398,7 @@ public class MainActivity extends Activity {
         if (metas.length > 0) {
             TextView trashSort = sortControl(sortKey, TRASH_SORT_OPTIONS, 0, () -> {
                 resetSavedScroll("trash");
+                resetVisibleLimit("trash");
                 showTrashScreen();
             });
             root.addView(trashSort, matchWrap());
@@ -3431,7 +3443,7 @@ public class MainActivity extends Activity {
             LinearLayout gallery=column();
             List<LinearLayout> cells=new ArrayList<>();
             int shown=0;
-            int limit=160;
+            int limit=visibleLimit("trash", trashFiles.size());
             for(File meta:metas){
                 File data=trashDataFile(meta);
                 if(!data.exists()){meta.delete();continue;}
@@ -3447,8 +3459,11 @@ public class MainActivity extends Activity {
             root.addView(gallery,matchWrap());
             if(trashFiles.size()>shown){
                 root.addView(space(10));
-                root.addView(centerText("Showing first "+shown+" of "+trashFiles.size()+
-                        " • Select All applies to all trash items",10,MUTED,false));
+                root.addView(loadMoreButton("trash", shown, trashFiles.size(), this::showTrashScreen),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(52)));
+                root.addView(space(6));
+                root.addView(centerText("Trash preview safe batches में load होगी • Select All सभी trash items पर लागू है",
+                        10,MUTED,false));
             }
         }
 
@@ -4003,6 +4018,7 @@ public class MainActivity extends Activity {
         if (!list.isEmpty()) {
             root.addView(sortControl(sortKey, FILE_SORT_OPTIONS, 0, () -> {
                 resetSavedScroll(scrollKey);
+                resetVisibleLimit(scrollKey);
                 showScanItemsGallery(summary, mode);
             }), matchWrap());
 
@@ -4032,7 +4048,7 @@ public class MainActivity extends Activity {
             root.addView(section("Preview Grid"));
             LinearLayout gallery = column();
             List<LinearLayout> cells = new ArrayList<>();
-            int limit = Math.min(160, list.size());
+            int limit = visibleLimit(scrollKey, list.size());
             for (int i=0;i<limit;i++) {
                 ScanItem item = list.get(i);
                 AppFileInfo info = describeAppFile(item.file);
@@ -4045,8 +4061,12 @@ public class MainActivity extends Activity {
 
             if (list.size()>limit) {
                 root.addView(space(10));
-                root.addView(centerText("Showing first "+limit+" of "+list.size()+
-                        (mode==2 ? "" : " • Select All applies to all selectable files"),10,MUTED,false));
+                root.addView(loadMoreButton(scrollKey, limit, list.size(),
+                        () -> showScanItemsGallery(summary,mode)),
+                        new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(52)));
+                root.addView(space(6));
+                root.addView(centerText("Preview safe batches में load होंगी" +
+                        (mode==2 ? "" : " • Select All सभी selectable files पर लागू है"),10,MUTED,false));
             }
         } else {
             LinearLayout empty=card();
