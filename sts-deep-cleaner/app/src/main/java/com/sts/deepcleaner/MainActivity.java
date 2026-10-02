@@ -433,7 +433,7 @@ public class MainActivity extends Activity {
         try {
             Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".files", file);
             Intent share = new Intent(Intent.ACTION_SEND);
-            share.setType(mime(file));
+            share.setType(mimeForFile(file));
             share.putExtra(Intent.EXTRA_STREAM, uri);
             share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(Intent.createChooser(share, "Share file"));
@@ -1213,6 +1213,36 @@ public class MainActivity extends Activity {
         return result;
     }
 
+    private String systemCategoryTitle() {
+        if (activeSystemCategory == StorageCategory.APP_CODE) return "Installed Apps";
+        if (activeSystemCategory == StorageCategory.APP_DATA) return "Private App Data";
+        if (activeSystemCategory == StorageCategory.APP_CACHE) return "App Cache";
+        if (activeSystemCategory == StorageCategory.SYSTEM_RESERVED) return "Android / System / Reserved";
+        if (activeSystemCategory == StorageCategory.HIDDEN_UNCLASSIFIED) return "Hidden / Private Storage";
+        return "Apps & System";
+    }
+
+    private int systemCategoryDefaultSort() {
+        if (activeSystemCategory == StorageCategory.APP_DATA) return 4;
+        if (activeSystemCategory == StorageCategory.APP_CACHE) return 5;
+        if (activeSystemCategory == StorageCategory.APP_CODE) return 6;
+        return 0;
+    }
+
+    private long appMetricBytes(AppStorageEntry e) {
+        if (activeSystemCategory == StorageCategory.APP_DATA) return e.dataBytes;
+        if (activeSystemCategory == StorageCategory.APP_CACHE) return e.cacheBytes;
+        if (activeSystemCategory == StorageCategory.APP_CODE) return e.codeBytes;
+        return e.totalBytes;
+    }
+
+    private String appMetricLabel(AppStorageEntry e) {
+        if (activeSystemCategory == StorageCategory.APP_DATA) return "Private data";
+        if (activeSystemCategory == StorageCategory.APP_CACHE) return "Cache";
+        if (activeSystemCategory == StorageCategory.APP_CODE) return "App code";
+        return "Total";
+    }
+
     private void showSystemAnalyzerResult(SystemStorageResult result) {
         rememberCurrentScroll();
         activeSystemResult = result;
@@ -1226,9 +1256,12 @@ public class MainActivity extends Activity {
         LinearLayout root = column();
         root.setPadding(dp(16),dp(22),dp(16),dp(28));
 
-        root.addView(text("Apps & System",28,INK,true));
+        root.addView(text(systemCategoryTitle(),28,INK,true));
         root.addView(space(5));
-        root.addView(text("Hidden/private storage breakdown • Android-reported statistics",12,MUTED,false));
+        String systemSubtitle = activeSystemCategory == null
+                ? "Hidden/private storage breakdown • Android-reported statistics"
+                : "Category detail • app-wise Android-reported storage";
+        root.addView(text(systemSubtitle,12,MUTED,false));
         root.addView(space(16));
 
         LinearLayout totals = card();
@@ -1253,10 +1286,11 @@ public class MainActivity extends Activity {
         });
         root.addView(systemSettings,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(56)));
 
-        root.addView(section("Apps using most storage"));
-        String appSortKey = "sort:systemApps";
-        sortApps(result, sortMode(appSortKey, 0));
-        TextView appSort = sortControl(appSortKey, APP_SORT_OPTIONS, 0, () -> {
+        root.addView(section(activeSystemCategory == null ? "Apps using most storage" : "Apps in this category"));
+        int defaultAppSort = systemCategoryDefaultSort();
+        String appSortKey = "sort:systemApps:" + (activeSystemCategory == null ? "all" : activeSystemCategory.name());
+        sortApps(result, sortMode(appSortKey, defaultAppSort));
+        TextView appSort = sortControl(appSortKey, APP_SORT_OPTIONS, defaultAppSort, () -> {
             resetSavedScroll("systemResult");
             showSystemAnalyzerResult(result);
         });
@@ -1282,7 +1316,16 @@ public class MainActivity extends Activity {
             labels.addView(text(e.appName,14,INK,true));
             labels.addView(text(e.systemApp ? "System app" : "User app",10,e.systemApp?MUTED:PURPLE,false));
             top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-            top.addView(text(format(e.totalBytes),14,PURPLE,true));
+            long metricBytes = appMetricBytes(e);
+            LinearLayout metric = column();
+            TextView metricValue = text(format(metricBytes),14,
+                    activeSystemCategory == StorageCategory.APP_CACHE ? TEAL : PURPLE,true);
+            metricValue.setGravity(Gravity.END);
+            metric.addView(metricValue);
+            TextView metricLabel = text(appMetricLabel(e),8,MUTED,false);
+            metricLabel.setGravity(Gravity.END);
+            metric.addView(metricLabel);
+            top.addView(metric);
             c.addView(top,matchWrap());
 
             c.addView(space(9));
@@ -1292,14 +1335,21 @@ public class MainActivity extends Activity {
             c.addView(space(9));
             LinearLayout actions=row();
             TextView details=pill("DETAILS",Color.rgb(18,145,123),Color.rgb(228,252,248));
-            TextView manage=pill("APP STORAGE",PURPLE,Color.rgb(239,236,255));
+            TextView info=pill("APP INFO",PURPLE,Color.rgb(239,236,255));
             touch(details);
-            touch(manage);
+            touch(info);
             details.setOnClickListener(v -> showAppDetailLoading(e));
-            manage.setOnClickListener(v -> openAppStorageSettings(e.packageName));
+            info.setOnClickListener(v -> openAppStorageSettings(e.packageName));
             actions.addView(details,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
-            actions.addView(spaceH(8));
-            actions.addView(manage,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            actions.addView(spaceH(7));
+            actions.addView(info,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            if(!e.systemApp){
+                actions.addView(spaceH(7));
+                TextView uninstall=pill("UNINSTALL",ROSE,Color.rgb(255,238,243));
+                touch(uninstall);
+                uninstall.setOnClickListener(v -> requestUninstall(e.packageName));
+                actions.addView(uninstall,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            }
             c.addView(actions,matchWrap());
             c.setOnClickListener(v -> showAppDetailLoading(e));
             touch(c);
@@ -1787,6 +1837,15 @@ public class MainActivity extends Activity {
         r.addView(text(label,13,INK,true),new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
         r.addView(text(format(bytes),13,color,true));
         return r;
+    }
+
+    private void requestUninstall(String packageName){
+        try{
+            Intent i=new Intent(Intent.ACTION_DELETE,Uri.parse("package:"+packageName));
+            startActivity(i);
+        }catch(Exception e){
+            openAppStorageSettings(packageName);
+        }
     }
 
     private void openAppStorageSettings(String packageName){
