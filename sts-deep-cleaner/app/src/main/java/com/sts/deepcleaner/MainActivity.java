@@ -3557,6 +3557,440 @@ public class MainActivity extends Activity {
         return r;
     }
 
+    private void showDataUsageDoctor(){
+        beginNonScrollScreen();
+        getWindow().getDecorView().setTag("dataUsageDoctor");
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text("Internet / Data Usage Doctor",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("App-wise received + sent data • Android counter since reboot where available",12,MUTED,false));
+        root.addView(space(14));
+
+        LinearLayout summary=card();
+        summary.setPadding(dp(16),dp(14),dp(16),dp(14));
+        summary.addView(text("REAL DATA COUNTERS",12,Color.rgb(36,145,180),true));
+        summary.addView(space(5));
+        summary.addView(text("यह exact per-UID network byte counter है जहाँ Android expose करता है। Time period 'since reboot' है; unsupported apps पर fake value नहीं बनेगी।",10,MUTED,false));
+        root.addView(summary,matchWrap());
+
+        root.addView(section("Apps using data"));
+        LinearLayout list=column();
+        LinearLayout loading=card();
+        loading.setPadding(dp(16),dp(15),dp(16),dp(15));
+        loading.addView(text("Reading app network counters…",13,PURPLE,true));
+        list.addView(loading,matchWrap());
+        root.addView(list,matchWrap());
+
+        root.addView(space(14));
+        TextView settings=actionButton("OPEN ANDROID DATA USAGE SETTINGS",Color.rgb(36,145,180));
+        touch(settings);
+        settings.setOnClickListener(v->{
+            try{startActivity(new Intent(Settings.ACTION_DATA_USAGE_SETTINGS));}
+            catch(Exception e){try{startActivity(new Intent(Settings.ACTION_SETTINGS));}catch(Exception ignored){}}
+        });
+        root.addView(settings,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        root.addView(space(9));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v->showPhoneDoctor());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition("dataUsageDoctor",scroll);
+        fadeIn(root);
+
+        new Thread(()->{
+            List<AppDataUsage> apps;
+            try{apps=collectAppDataUsage();}catch(Throwable e){apps=new ArrayList<>();}
+            List<AppDataUsage> finalApps=apps;
+            runOnUiThread(()->{
+                Object tag=getWindow().getDecorView().getTag();
+                if("dataUsageDoctor".equals(tag)) renderAppDataUsage(list,finalApps);
+            });
+        },"sts-data-usage").start();
+    }
+
+    private List<AppDataUsage> collectAppDataUsage(){
+        List<AppDataUsage> out=new ArrayList<>();
+        PackageManager pm=getPackageManager();
+        List<ApplicationInfo> apps=pm.getInstalledApplications(0);
+
+        Set<Integer> seenUid=new HashSet<>();
+        for(ApplicationInfo ai:apps){
+            if(ai==null||ai.uid<=0||seenUid.contains(ai.uid))continue;
+            long rx=TrafficStats.getUidRxBytes(ai.uid);
+            long tx=TrafficStats.getUidTxBytes(ai.uid);
+            if(rx==TrafficStats.UNSUPPORTED)rx=0L;
+            if(tx==TrafficStats.UNSUPPORTED)tx=0L;
+            long total=Math.max(0L,rx)+Math.max(0L,tx);
+            if(total<=0L)continue;
+            seenUid.add(ai.uid);
+
+            String name;
+            try{name=pm.getApplicationLabel(ai).toString();}catch(Exception e){name=ai.packageName;}
+            boolean system=(ai.flags&ApplicationInfo.FLAG_SYSTEM)!=0;
+            out.add(new AppDataUsage(name,ai.packageName,ai.uid,Math.max(0L,rx),Math.max(0L,tx),system));
+        }
+
+        Collections.sort(out,(a,b)->Long.compare(b.totalBytes(),a.totalBytes()));
+        if(out.size()>80)return new ArrayList<>(out.subList(0,80));
+        return out;
+    }
+
+    private void renderAppDataUsage(LinearLayout container,List<AppDataUsage> apps){
+        container.removeAllViews();
+        if(apps.isEmpty()){
+            LinearLayout empty=card();
+            empty.setPadding(dp(16),dp(15),dp(16),dp(15));
+            empty.addView(text("Android ने per-app counters expose नहीं किए या अभी data नहीं मिला।",11,MUTED,false));
+            container.addView(empty,matchWrap());
+            return;
+        }
+
+        long total=0L;
+        for(AppDataUsage a:apps)total+=a.totalBytes();
+
+        LinearLayout totalCard=card();
+        totalCard.setPadding(dp(16),dp(14),dp(16),dp(14));
+        totalCard.addView(text("Visible app data • "+format(total),16,PURPLE,true));
+        totalCard.addView(space(4));
+        totalCard.addView(text(apps.size()+" apps with network counters",10,MUTED,false));
+        container.addView(totalCard,matchWrap());
+
+        for(AppDataUsage a:apps){
+            container.addView(space(9));
+            LinearLayout c=card();
+            c.setPadding(dp(14),dp(13),dp(14),dp(13));
+
+            LinearLayout top=row();
+            top.setGravity(Gravity.CENTER_VERTICAL);
+            try{
+                Drawable d=getPackageManager().getApplicationIcon(a.packageName);
+                ImageView iv=new ImageView(this);
+                iv.setImageDrawable(d);
+                top.addView(iv,new LinearLayout.LayoutParams(dp(38),dp(38)));
+                top.addView(spaceH(9));
+            }catch(Exception ignored){}
+
+            LinearLayout labels=column();
+            labels.addView(text(a.appName,13,INK,true));
+            labels.addView(space(2));
+            labels.addView(text(a.systemApp?"System app":"User app",9,a.systemApp?MUTED:PURPLE,false));
+            top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            top.addView(text(format(a.totalBytes()),14,Color.rgb(36,145,180),true));
+            c.addView(top,matchWrap());
+
+            c.addView(space(7));
+            c.addView(text("Received "+format(a.rxBytes)+"  •  Sent "+format(a.txBytes),10,MUTED,false));
+
+            c.addView(space(9));
+            LinearLayout actions=row();
+            TextView open=pill("OPEN",Color.rgb(36,145,180),Color.rgb(232,248,252));
+            TextView info=pill("APP INFO / DATA",PURPLE,Color.rgb(239,236,255));
+            touch(open);touch(info);
+            open.setOnClickListener(v->openInstalledApp(a.packageName));
+            info.setOnClickListener(v->openAppStorageSettings(a.packageName));
+            actions.addView(open,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,.75f));
+            actions.addView(spaceH(7));
+            actions.addView(info,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1.2f));
+            if(!a.systemApp){
+                actions.addView(spaceH(7));
+                TextView uninstall=pill("UNINSTALL",ROSE,Color.rgb(255,238,243));
+                touch(uninstall);
+                uninstall.setOnClickListener(v->requestUninstall(a.packageName));
+                actions.addView(uninstall,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+            }
+            c.addView(actions,matchWrap());
+            container.addView(c,matchWrap());
+        }
+    }
+
+    private Set<String> smartSleepProtected(){
+        android.content.SharedPreferences p=getSharedPreferences("sts_smart_sleep",MODE_PRIVATE);
+        Set<String> saved=p.getStringSet("protected_packages",null);
+        if(saved!=null)return new HashSet<>(saved);
+
+        Set<String> defaults=new HashSet<>();
+        defaults.add(getPackageName());
+        defaults.add("com.whatsapp");
+        defaults.add("com.whatsapp.w4b");
+        defaults.add("org.telegram.messenger");
+        defaults.add("org.telegram.messenger.web");
+        p.edit().putStringSet("protected_packages",defaults).apply();
+        return defaults;
+    }
+
+    private Set<String> smartSleepingPackages(){
+        return new HashSet<>(getSharedPreferences("sts_smart_sleep",MODE_PRIVATE)
+                .getStringSet("sleeping_packages",new HashSet<>()));
+    }
+
+    private void showSmartSleepControl(){
+        beginNonScrollScreen();
+        getWindow().getDecorView().setTag("smartSleep");
+
+        android.content.SharedPreferences prefs=getSharedPreferences("sts_smart_sleep",MODE_PRIVATE);
+        boolean enabled=prefs.getBoolean("enabled",false);
+        Set<String> sleeping=smartSleepingPackages();
+        Set<String> protectedPkgs=smartSleepProtected();
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text("Master Smart Sleep",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("10 min inactive user apps • real local VPN internet block",12,MUTED,false));
+        root.addView(space(14));
+
+        LinearLayout state=card();
+        state.setPadding(dp(16),dp(15),dp(16),dp(15));
+        state.addView(text(enabled?"MASTER RULE ACTIVE":"MASTER RULE OFF",16,enabled?TEAL:MUTED,true));
+        state.addView(space(5));
+        state.addView(text("Rule: app 10 मिनट foreground में use नहीं हुआ → Sleeping mark → internet traffic local VPN firewall में block.",10,INK,false));
+        state.addView(space(6));
+        state.addView(text("Battery/RAM: normal Android दूसरे app को force-stop करने की permission नहीं देता; इसलिए fake kill नहीं किया जाता। Internet blocking real है, और App Info से battery/background restriction किया जा सकता है।",9,MUTED,false));
+        state.addView(space(10));
+
+        TextView toggle=actionButton(enabled?"STOP MASTER SLEEP":"ENABLE MASTER SLEEP",enabled?ROSE:TEAL);
+        touch(toggle);
+        toggle.setOnClickListener(v->{
+            if(enabled)disableSmartSleep();
+            else confirmEnableSmartSleep();
+        });
+        state.addView(toggle,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+        root.addView(state,matchWrap());
+
+        root.addView(section("Control"));
+        LinearLayout controls=row();
+        TextView protect=pill("PROTECTED APPS",PURPLE,Color.rgb(239,236,255));
+        TextView refresh=pill("REFRESH NOW",Color.rgb(36,145,180),Color.rgb(232,248,252));
+        touch(protect);touch(refresh);
+        protect.setOnClickListener(v->showProtectedAppsDialog());
+        refresh.setOnClickListener(v->{
+            refreshSmartSleepService();
+            uiHandler.postDelayed(this::showSmartSleepControl,650L);
+        });
+        controls.addView(protect,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        controls.addView(spaceH(8));
+        controls.addView(refresh,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        root.addView(controls,matchWrap());
+
+        root.addView(space(9));
+        LinearLayout stats=card();
+        stats.setPadding(dp(16),dp(14),dp(16),dp(14));
+        stats.addView(text("Sleeping apps  "+sleeping.size(),14,enabled?PURPLE:MUTED,true));
+        stats.addView(space(4));
+        stats.addView(text("Protected apps  "+protectedPkgs.size(),11,MUTED,false));
+        stats.addView(space(4));
+        stats.addView(text("Check interval ~30 sec • Sleep threshold 10 min",10,MUTED,false));
+        root.addView(stats,matchWrap());
+
+        root.addView(section("Currently sleeping"));
+        if(sleeping.isEmpty()){
+            LinearLayout empty=card();
+            empty.setPadding(dp(16),dp(15),dp(16),dp(15));
+            empty.addView(text(enabled?"अभी कोई user app sleep threshold पर नहीं है।":"Master Sleep enable करने के बाद sleeping apps यहाँ दिखेंगे।",11,MUTED,false));
+            root.addView(empty,matchWrap());
+        }else{
+            List<String> pkgs=new ArrayList<>(sleeping);
+            Collections.sort(pkgs);
+            int shown=0;
+            for(String pkg:pkgs){
+                if(shown++>=30)break;
+                root.addView(smartSleepAppCard(pkg),matchWrap());
+                root.addView(space(8));
+            }
+        }
+
+        root.addView(space(10));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v->showPhoneDoctor());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition("smartSleep",scroll);
+        fadeIn(root);
+    }
+
+    private LinearLayout smartSleepAppCard(String pkg){
+        LinearLayout c=card();
+        c.setPadding(dp(14),dp(12),dp(14),dp(12));
+        LinearLayout top=row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+
+        try{
+            Drawable d=getPackageManager().getApplicationIcon(pkg);
+            ImageView iv=new ImageView(this);
+            iv.setImageDrawable(d);
+            top.addView(iv,new LinearLayout.LayoutParams(dp(36),dp(36)));
+            top.addView(spaceH(9));
+        }catch(Exception ignored){}
+
+        String name=pkg;
+        try{
+            ApplicationInfo ai=getPackageManager().getApplicationInfo(pkg,0);
+            name=getPackageManager().getApplicationLabel(ai).toString();
+        }catch(Exception ignored){}
+
+        LinearLayout labels=column();
+        labels.addView(text(name,13,INK,true));
+        labels.addView(text("SLEEPING • INTERNET BLOCKED",9,ROSE,true));
+        top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        c.addView(top,matchWrap());
+
+        c.addView(space(8));
+        LinearLayout actions=row();
+        TextView open=pill("OPEN / WAKE",TEAL,Color.rgb(228,252,248));
+        TextView info=pill("APP INFO / BATTERY",PURPLE,Color.rgb(239,236,255));
+        TextView protect=pill("PROTECT",Color.rgb(36,145,180),Color.rgb(232,248,252));
+        touch(open);touch(info);touch(protect);
+        open.setOnClickListener(v->openInstalledApp(pkg));
+        info.setOnClickListener(v->openAppStorageSettings(pkg));
+        protect.setOnClickListener(v->protectSmartSleepApp(pkg));
+        actions.addView(open,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        actions.addView(spaceH(6));
+        actions.addView(info,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1.2f));
+        actions.addView(spaceH(6));
+        actions.addView(protect,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,.85f));
+        c.addView(actions,matchWrap());
+        return c;
+    }
+
+    private void confirmEnableSmartSleep(){
+        new AlertDialog.Builder(this)
+                .setTitle("Enable Master Smart Sleep?")
+                .setMessage("10 मिनट inactive user apps का internet local VPN firewall से block होगा। WhatsApp/Telegram जैसे default protected apps और आपके selected protected apps नहीं block होंगे.\n\nAndroid normal mode में दूसरे apps को force-stop करके RAM zero करना allowed नहीं है।")
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton("ENABLE",(d,w)->startSmartSleepFlow())
+                .show();
+    }
+
+    private void startSmartSleepFlow(){
+        if(!hasUsageAccess()){
+            pendingMasterSleepAfterUsage=true;
+            try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}
+            catch(Exception e){pendingMasterSleepAfterUsage=false;}
+            return;
+        }
+        requestSmartSleepVpn();
+    }
+
+    private void requestSmartSleepVpn(){
+        try{
+            Intent prep=VpnService.prepare(this);
+            if(prep!=null){
+                startActivityForResult(prep,REQ_SMART_SLEEP_VPN);
+            }else{
+                enableSmartSleepService();
+            }
+        }catch(Exception e){
+            new AlertDialog.Builder(this).setTitle("VPN permission unavailable")
+                    .setMessage("Local VPN firewall start नहीं हो सका।")
+                    .setPositiveButton("OK",null).show();
+        }
+    }
+
+    private void enableSmartSleepService(){
+        getSharedPreferences("sts_smart_sleep",MODE_PRIVATE).edit()
+                .putBoolean("enabled",true)
+                .putInt("sleep_minutes",10)
+                .apply();
+        Intent i=new Intent(this,SmartSleepVpnService.class);
+        i.setAction(SmartSleepVpnService.ACTION_START);
+        try{startForegroundService(i);}catch(Exception e){try{startService(i);}catch(Exception ignored){}}
+        uiHandler.postDelayed(this::showSmartSleepControl,700L);
+    }
+
+    private void disableSmartSleep(){
+        getSharedPreferences("sts_smart_sleep",MODE_PRIVATE).edit()
+                .putBoolean("enabled",false)
+                .putStringSet("sleeping_packages",new HashSet<>())
+                .apply();
+        Intent i=new Intent(this,SmartSleepVpnService.class);
+        i.setAction(SmartSleepVpnService.ACTION_STOP);
+        try{startService(i);}catch(Exception ignored){stopService(i);}
+        uiHandler.postDelayed(this::showSmartSleepControl,350L);
+    }
+
+    private void refreshSmartSleepService(){
+        if(!getSharedPreferences("sts_smart_sleep",MODE_PRIVATE).getBoolean("enabled",false))return;
+        Intent i=new Intent(this,SmartSleepVpnService.class);
+        i.setAction(SmartSleepVpnService.ACTION_REFRESH);
+        try{startForegroundService(i);}catch(Exception e){try{startService(i);}catch(Exception ignored){}}
+    }
+
+    private void protectSmartSleepApp(String pkg){
+        android.content.SharedPreferences p=getSharedPreferences("sts_smart_sleep",MODE_PRIVATE);
+        Set<String> set=smartSleepProtected();
+        set.add(pkg);
+        p.edit().putStringSet("protected_packages",set).apply();
+        refreshSmartSleepService();
+        uiHandler.postDelayed(this::showSmartSleepControl,400L);
+    }
+
+    private void showProtectedAppsDialog(){
+        PackageManager pm=getPackageManager();
+        List<ApplicationInfo> raw=pm.getInstalledApplications(0);
+        List<ApplicationInfo> apps=new ArrayList<>();
+        for(ApplicationInfo ai:raw){
+            if(ai==null||ai.packageName.equals(getPackageName()))continue;
+            if((ai.flags&ApplicationInfo.FLAG_SYSTEM)!=0)continue;
+            apps.add(ai);
+        }
+        Collections.sort(apps,(a,b)->{
+            String an=pm.getApplicationLabel(a).toString();
+            String bn=pm.getApplicationLabel(b).toString();
+            return an.compareToIgnoreCase(bn);
+        });
+
+        String[] names=new String[apps.size()];
+        boolean[] checked=new boolean[apps.size()];
+        Set<String> protectedPkgs=smartSleepProtected();
+        for(int i=0;i<apps.size();i++){
+            names[i]=pm.getApplicationLabel(apps.get(i)).toString();
+            checked[i]=protectedPkgs.contains(apps.get(i).packageName);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Protected Apps")
+                .setMultiChoiceItems(names,checked,(d,which,isChecked)->checked[which]=isChecked)
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton("SAVE",(d,w)->{
+                    Set<String> set=new HashSet<>();
+                    set.add(getPackageName());
+                    for(int i=0;i<apps.size();i++)if(checked[i])set.add(apps.get(i).packageName);
+                    getSharedPreferences("sts_smart_sleep",MODE_PRIVATE).edit()
+                            .putStringSet("protected_packages",set).apply();
+                    refreshSmartSleepService();
+                    uiHandler.postDelayed(this::showSmartSleepControl,450L);
+                })
+                .show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode==REQ_SMART_SLEEP_VPN){
+            if(resultCode==RESULT_OK)enableSmartSleepService();
+            else showSmartSleepControl();
+        }
+    }
+
     private void openTool(String type) {
         haptic();
         if (Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) {
@@ -6283,6 +6717,26 @@ public class MainActivity extends Activity {
             return new AppFileInfo("Device Storage", null, "Folder", "FOLDER",
                     PURPLE, Color.rgb(239,236,255), "Storage folder", false, true);
         }
+    }
+
+    private static final class AppDataUsage {
+        final String appName;
+        final String packageName;
+        final int uid;
+        final long rxBytes;
+        final long txBytes;
+        final boolean systemApp;
+
+        AppDataUsage(String appName,String packageName,int uid,long rxBytes,long txBytes,boolean systemApp){
+            this.appName=appName;
+            this.packageName=packageName;
+            this.uid=uid;
+            this.rxBytes=rxBytes;
+            this.txBytes=txBytes;
+            this.systemApp=systemApp;
+        }
+
+        long totalBytes(){return rxBytes+txBytes;}
     }
 
     private static final class BatteryAppImpact {
