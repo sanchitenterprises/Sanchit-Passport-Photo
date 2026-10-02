@@ -45,7 +45,8 @@ import android.media.ToneGenerator;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.TrafficStats;
+import android.net.NetworkStats;
+import android.net.NetworkStatsManager;
 import android.net.Uri;
 import android.net.VpnService;
 import android.os.BatteryManager;
@@ -3569,23 +3570,51 @@ public class MainActivity extends Activity {
 
         root.addView(text("Internet / Data Usage Doctor",28,INK,true));
         root.addView(space(5));
-        root.addView(text("App-wise received + sent data • Android counter since reboot where available",12,MUTED,false));
+        root.addView(text("App-wise network usage • Last 24 hours",12,MUTED,false));
         root.addView(space(14));
 
         LinearLayout summary=card();
         summary.setPadding(dp(16),dp(14),dp(16),dp(14));
-        summary.addView(text("REAL DATA COUNTERS",12,Color.rgb(36,145,180),true));
+        summary.addView(text("ANDROID NETWORK STATS",12,Color.rgb(36,145,180),true));
         summary.addView(space(5));
-        summary.addView(text("यह exact per-UID network byte counter है जहाँ Android expose करता है। Time period 'since reboot' है; unsupported apps पर fake value नहीं बनेगी।",10,MUTED,false));
+        summary.addView(text("जहाँ Android/OEM expose करता है वहाँ Wi‑Fi + Mobile, Received + Sent के real byte counters दिखेंगे। Missing network type पर fake value नहीं बनेगी।",10,MUTED,false));
         root.addView(summary,matchWrap());
 
         root.addView(section("Apps using data"));
         LinearLayout list=column();
-        LinearLayout loading=card();
-        loading.setPadding(dp(16),dp(15),dp(16),dp(15));
-        loading.addView(text("Reading app network counters…",13,PURPLE,true));
-        list.addView(loading,matchWrap());
         root.addView(list,matchWrap());
+
+        if(!hasUsageAccess()){
+            LinearLayout access=card();
+            access.setPadding(dp(16),dp(15),dp(16),dp(15));
+            access.addView(text("Usage Access required",14,INK,true));
+            access.addView(space(5));
+            access.addView(text("App-wise historical network statistics पढ़ने के लिए Android Usage Access चाहिए।",10,MUTED,false));
+            access.addView(space(10));
+            TextView grant=actionButton("GRANT USAGE ACCESS",PURPLE);
+            touch(grant);
+            grant.setOnClickListener(v->{
+                try{startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));}
+                catch(Exception ignored){}
+            });
+            access.addView(grant,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(50)));
+            list.addView(access,matchWrap());
+        }else{
+            LinearLayout loading=card();
+            loading.setPadding(dp(16),dp(15),dp(16),dp(15));
+            loading.addView(text("Reading last 24h network statistics…",13,PURPLE,true));
+            list.addView(loading,matchWrap());
+
+            new Thread(()->{
+                List<AppDataUsage> apps;
+                try{apps=collectAppDataUsage();}catch(Throwable e){apps=new ArrayList<>();}
+                List<AppDataUsage> finalApps=apps;
+                runOnUiThread(()->{
+                    Object tag=getWindow().getDecorView().getTag();
+                    if("dataUsageDoctor".equals(tag))renderAppDataUsage(list,finalApps);
+                });
+            },"sts-data-usage").start();
+        }
 
         root.addView(space(14));
         TextView settings=actionButton("OPEN ANDROID DATA USAGE SETTINGS",Color.rgb(36,145,180));
@@ -3607,38 +3636,64 @@ public class MainActivity extends Activity {
         setContentView(scroll);
         bindScrollPosition("dataUsageDoctor",scroll);
         fadeIn(root);
+    }
 
-        new Thread(()->{
-            List<AppDataUsage> apps;
-            try{apps=collectAppDataUsage();}catch(Throwable e){apps=new ArrayList<>();}
-            List<AppDataUsage> finalApps=apps;
-            runOnUiThread(()->{
-                Object tag=getWindow().getDecorView().getTag();
-                if("dataUsageDoctor".equals(tag)) renderAppDataUsage(list,finalApps);
-            });
-        },"sts-data-usage").start();
+    private void addNetworkStats(Map<Integer,long[]> byUid,int networkType,long start,long end){
+        NetworkStats stats=null;
+        try{
+            NetworkStatsManager nsm=(NetworkStatsManager)getSystemService(NETWORK_STATS_SERVICE);
+            if(nsm==null)return;
+            stats=nsm.querySummary(networkType,null,start,end);
+            NetworkStats.Bucket bucket=new NetworkStats.Bucket();
+            while(stats.hasNextBucket()){
+                stats.getNextBucket(bucket);
+                int uid=bucket.getUid();
+                if(uid<=0)continue;
+                long[] values=byUid.get(uid);
+                if(values==null){
+                    values=new long[4];
+                    byUid.put(uid,values);
+                }
+                if(networkType==ConnectivityManager.TYPE_WIFI){
+                    values[0]+=Math.max(0L,bucket.getRxBytes());
+                    values[1]+=Math.max(0L,bucket.getTxBytes());
+                }else{
+                    values[2]+=Math.max(0L,bucket.getRxBytes());
+                    values[3]+=Math.max(0L,bucket.getTxBytes());
+                }
+            }
+        }catch(Throwable ignored){
+        }finally{
+            if(stats!=null)try{stats.close();}catch(Exception ignored){}
+        }
     }
 
     private List<AppDataUsage> collectAppDataUsage(){
         List<AppDataUsage> out=new ArrayList<>();
+        long end=System.currentTimeMillis();
+        long start=end-24L*60L*60L*1000L;
+
+        Map<Integer,long[]> byUid=new HashMap<>();
+        addNetworkStats(byUid,ConnectivityManager.TYPE_WIFI,start,end);
+        addNetworkStats(byUid,ConnectivityManager.TYPE_MOBILE,start,end);
+
         PackageManager pm=getPackageManager();
-        List<ApplicationInfo> apps=pm.getInstalledApplications(0);
-
-        Set<Integer> seenUid=new HashSet<>();
-        for(ApplicationInfo ai:apps){
-            if(ai==null||ai.uid<=0||seenUid.contains(ai.uid))continue;
-            long rx=TrafficStats.getUidRxBytes(ai.uid);
-            long tx=TrafficStats.getUidTxBytes(ai.uid);
-            if(rx==TrafficStats.UNSUPPORTED)rx=0L;
-            if(tx==TrafficStats.UNSUPPORTED)tx=0L;
-            long total=Math.max(0L,rx)+Math.max(0L,tx);
+        for(Map.Entry<Integer,long[]> entry:byUid.entrySet()){
+            int uid=entry.getKey();
+            long[] v=entry.getValue();
+            long total=v[0]+v[1]+v[2]+v[3];
             if(total<=0L)continue;
-            seenUid.add(ai.uid);
 
-            String name;
-            try{name=pm.getApplicationLabel(ai).toString();}catch(Exception e){name=ai.packageName;}
-            boolean system=(ai.flags&ApplicationInfo.FLAG_SYSTEM)!=0;
-            out.add(new AppDataUsage(name,ai.packageName,ai.uid,Math.max(0L,rx),Math.max(0L,tx),system));
+            String[] pkgs=pm.getPackagesForUid(uid);
+            if(pkgs==null||pkgs.length==0)continue;
+            String pkg=pkgs[0];
+
+            try{
+                ApplicationInfo ai=pm.getApplicationInfo(pkg,0);
+                String name=pm.getApplicationLabel(ai).toString();
+                boolean system=(ai.flags&ApplicationInfo.FLAG_SYSTEM)!=0;
+                out.add(new AppDataUsage(name,pkg,uid,v[0],v[1],v[2],v[3],system));
+            }catch(Exception ignored){}
         }
 
         Collections.sort(out,(a,b)->Long.compare(b.totalBytes(),a.totalBytes()));
@@ -3651,7 +3706,7 @@ public class MainActivity extends Activity {
         if(apps.isEmpty()){
             LinearLayout empty=card();
             empty.setPadding(dp(16),dp(15),dp(16),dp(15));
-            empty.addView(text("Android ने per-app counters expose नहीं किए या अभी data नहीं मिला।",11,MUTED,false));
+            empty.addView(text("इस phone/OEM ने app-wise NetworkStats उपलब्ध नहीं कराए या पिछले 24 घंटे में data record नहीं मिला।",11,MUTED,false));
             container.addView(empty,matchWrap());
             return;
         }
@@ -3661,9 +3716,9 @@ public class MainActivity extends Activity {
 
         LinearLayout totalCard=card();
         totalCard.setPadding(dp(16),dp(14),dp(16),dp(14));
-        totalCard.addView(text("Visible app data • "+format(total),16,PURPLE,true));
+        totalCard.addView(text("Last 24h visible app data • "+format(total),16,PURPLE,true));
         totalCard.addView(space(4));
-        totalCard.addView(text(apps.size()+" apps with network counters",10,MUTED,false));
+        totalCard.addView(text(apps.size()+" app UIDs with network statistics",10,MUTED,false));
         container.addView(totalCard,matchWrap());
 
         for(AppDataUsage a:apps){
@@ -3690,7 +3745,9 @@ public class MainActivity extends Activity {
             c.addView(top,matchWrap());
 
             c.addView(space(7));
-            c.addView(text("Received "+format(a.rxBytes)+"  •  Sent "+format(a.txBytes),10,MUTED,false));
+            c.addView(text("Wi‑Fi  ↓ "+format(a.wifiRx)+"  ↑ "+format(a.wifiTx),10,MUTED,false));
+            c.addView(space(3));
+            c.addView(text("Mobile ↓ "+format(a.mobileRx)+"  ↑ "+format(a.mobileTx),10,MUTED,false));
 
             c.addView(space(9));
             LinearLayout actions=row();
@@ -6723,21 +6780,27 @@ public class MainActivity extends Activity {
         final String appName;
         final String packageName;
         final int uid;
-        final long rxBytes;
-        final long txBytes;
+        final long wifiRx;
+        final long wifiTx;
+        final long mobileRx;
+        final long mobileTx;
         final boolean systemApp;
 
-        AppDataUsage(String appName,String packageName,int uid,long rxBytes,long txBytes,boolean systemApp){
+        AppDataUsage(String appName,String packageName,int uid,long wifiRx,long wifiTx,
+                     long mobileRx,long mobileTx,boolean systemApp){
             this.appName=appName;
             this.packageName=packageName;
             this.uid=uid;
-            this.rxBytes=rxBytes;
-            this.txBytes=txBytes;
+            this.wifiRx=wifiRx;
+            this.wifiTx=wifiTx;
+            this.mobileRx=mobileRx;
+            this.mobileTx=mobileTx;
             this.systemApp=systemApp;
         }
 
-        long totalBytes(){return rxBytes+txBytes;}
+        long totalBytes(){return wifiRx+wifiTx+mobileRx+mobileTx;}
     }
+
 
     private static final class BatteryAppImpact {
         final String appName;
