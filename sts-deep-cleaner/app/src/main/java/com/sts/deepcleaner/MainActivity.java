@@ -151,6 +151,8 @@ public class MainActivity extends Activity {
     private String pendingDoctorPermissionTest = null;
     private boolean torchActive = false;
     private String torchCameraId = null;
+    private SensorManager activeSensorManager = null;
+    private SensorEventListener activeSensorListener = null;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -2252,6 +2254,502 @@ public class MainActivity extends Activity {
                             .setPositiveButton("OK",(x,y)->renderStorageCategoryFiles(cat,sourceFiles))
                             .show();
                 }).show();
+    }
+
+    private String doctorResult(String key) {
+        return getSharedPreferences("sts_doctor", MODE_PRIVATE).getString(key, "NOT TESTED");
+    }
+
+    private void saveDoctorResult(String key, String value) {
+        getSharedPreferences("sts_doctor", MODE_PRIVATE).edit()
+                .putString(key, value)
+                .putLong(key + "_time", System.currentTimeMillis())
+                .apply();
+    }
+
+    private int doctorStatusColor(String status) {
+        if ("PASS".equals(status)) return Color.rgb(18,145,123);
+        if ("FAIL".equals(status)) return ROSE;
+        if ("WARNING".equals(status)) return AMBER;
+        return MUTED;
+    }
+
+    private LinearLayout doctorTestCard(String icon, String title, String sub, String key, Runnable action) {
+        LinearLayout c = card();
+        c.setPadding(dp(15),dp(14),dp(15),dp(14));
+
+        LinearLayout top = row();
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView ic = centerText(icon, 22, BLUE, true);
+        top.addView(ic,new LinearLayout.LayoutParams(dp(38),dp(38)));
+
+        LinearLayout labels = column();
+        labels.setPadding(dp(10),0,0,0);
+        labels.addView(text(title,14,INK,true));
+        labels.addView(space(3));
+        labels.addView(text(sub,10,MUTED,false));
+        top.addView(labels,new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+
+        String status = doctorResult(key);
+        TextView st = pill(status, doctorStatusColor(status),
+                "PASS".equals(status) ? Color.rgb(228,252,248)
+                        : "FAIL".equals(status) ? Color.rgb(255,238,243)
+                        : "WARNING".equals(status) ? Color.rgb(255,247,230)
+                        : Color.rgb(239,241,246));
+        top.addView(st);
+        c.addView(top,matchWrap());
+        touch(c);
+        c.setOnClickListener(v -> action.run());
+        return c;
+    }
+
+    private void showPhoneDoctor() {
+        beginNonScrollScreen();
+        stopSensorLiveTest();
+        getWindow().getDecorView().setTag("phoneDoctor");
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root = column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+
+        root.addView(text("Phone Doctor",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("Hardware • Sensors • Audio • Display • Touch • Camera",12,MUTED,false));
+        root.addView(space(14));
+
+        LinearLayout device = card();
+        device.setPadding(dp(16),dp(14),dp(16),dp(14));
+        device.addView(text(Build.MANUFACTURER + " " + Build.MODEL,17,PURPLE,true));
+        device.addView(space(5));
+        device.addView(text("Android " + Build.VERSION.RELEASE + " • API " + Build.VERSION.SDK_INT,11,MUTED,false));
+
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+        long[] st = storage();
+        device.addView(space(8));
+        device.addView(text("RAM  " + format(mi.totalMem) + " • Free " + format(mi.availMem),11,INK,false));
+        device.addView(text("Storage  " + format(st[0]) + " • Free " + format(Math.max(0L,st[0]-st[1])),11,INK,false));
+        device.addView(text("CPU cores  " + Runtime.getRuntime().availableProcessors() +
+                " • Uptime " + formatDuration(SystemClock.elapsedRealtime()),11,INK,false));
+        root.addView(device,matchWrap());
+
+        root.addView(section("Automatic hardware check"));
+        SensorManager sm = (SensorManager) getSystemService(SENSOR_SERVICE);
+        int sensorCount = sm == null ? 0 : sm.getSensorList(Sensor.TYPE_ALL).size();
+        boolean camera = getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY);
+        boolean flash = getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH);
+        boolean mic = getPackageManager().hasSystemFeature(PackageManager.FEATURE_MICROPHONE);
+        boolean touch = getPackageManager().hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
+
+        LinearLayout auto = card();
+        auto.setPadding(dp(16),dp(14),dp(16),dp(14));
+        auto.addView(doctorAutoRow("Sensors detected", sensorCount + " sensors", sensorCount > 0));
+        auto.addView(space(7));
+        auto.addView(doctorAutoRow("Camera", camera ? "Available" : "Not supported", camera));
+        auto.addView(space(7));
+        auto.addView(doctorAutoRow("Flash", flash ? "Available" : "Not supported", flash));
+        auto.addView(space(7));
+        auto.addView(doctorAutoRow("Microphone", mic ? "Available" : "Not supported", mic));
+        auto.addView(space(7));
+        auto.addView(doctorAutoRow("Touchscreen", touch ? "Available" : "Not supported", touch));
+        auto.addView(space(7));
+        auto.addView(doctorAutoRow("Network", networkSummary(), !"Offline".equals(networkSummary())));
+        root.addView(auto,matchWrap());
+
+        root.addView(section("Manual / Live tests"));
+        root.addView(doctorTestCard("▣","Display Test","Red • Green • Blue • White • Black","display",this::showDisplayTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("✥","Touch Test","Full-screen touch coverage","touch",this::showTouchTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("≋","Vibration Test","Real vibration pulse","vibration",this::runVibrationTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("♪","Speaker Test","Real audio tone","speaker",this::runSpeakerTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("●","Microphone Test","2-second live audio level","microphone",this::runMicrophoneTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("◎","Camera Test","Open real camera preview","camera",this::openCameraTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("✦","Flash Test","Real torch pulse","flash",this::runFlashTest));
+        root.addView(space(9));
+        root.addView(doctorTestCard("∿","Sensors Live","Accelerometer • Gyro • Light • Proximity","sensors",this::showSensorLiveTest));
+
+        root.addView(space(16));
+        TextView health = actionButton("OPEN PHONE HEALTH ANALYSIS",Color.rgb(66,158,105));
+        touch(health);
+        health.setOnClickListener(v -> showHealthAnalysis());
+        root.addView(health,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(56)));
+
+        root.addView(space(9));
+        TextView back=actionButton("BACK",Color.WHITE);
+        back.setTextColor(PURPLE);
+        touch(back);
+        back.setOnClickListener(v -> showHome());
+        root.addView(back,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(54)));
+
+        scroll.addView(root);
+        setContentView(scroll);
+        bindScrollPosition("phoneDoctor",scroll);
+        fadeIn(root);
+    }
+
+    private LinearLayout doctorAutoRow(String title,String value,boolean ok){
+        LinearLayout r=row();
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        TextView dot=text("●",14,ok?TEAL:AMBER,true);
+        r.addView(dot,new LinearLayout.LayoutParams(dp(22),ViewGroup.LayoutParams.WRAP_CONTENT));
+        r.addView(text(title,12,INK,true),new LinearLayout.LayoutParams(0,ViewGroup.LayoutParams.WRAP_CONTENT,1f));
+        r.addView(text(value,11,ok?TEAL:AMBER,true));
+        return r;
+    }
+
+    private String formatDuration(long millis) {
+        long sec = Math.max(0L,millis/1000L);
+        long days = sec/86400L;
+        long hours = (sec%86400L)/3600L;
+        long mins = (sec%3600L)/60L;
+        if(days>0) return days+"d "+hours+"h";
+        if(hours>0) return hours+"h "+mins+"m";
+        return mins+"m";
+    }
+
+    private String networkSummary(){
+        try{
+            ConnectivityManager cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);
+            Network n=cm.getActiveNetwork();
+            if(n==null) return "Offline";
+            NetworkCapabilities cap=cm.getNetworkCapabilities(n);
+            if(cap==null) return "Connected";
+            if(cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return "Wi-Fi connected";
+            if(cap.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) return "Mobile data connected";
+            if(cap.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return "Ethernet connected";
+            return "Connected";
+        }catch(Exception e){return "Unknown";}
+    }
+
+    private void showDisplayTest(){
+        beginNonScrollScreen();
+        getWindow().getDecorView().setTag("displayTest");
+
+        FrameLayout root=new FrameLayout(this);
+        int[] colors={Color.RED,Color.GREEN,Color.BLUE,Color.WHITE,Color.BLACK};
+        String[] names={"RED","GREEN","BLUE","WHITE","BLACK"};
+        int[] index={0};
+        root.setBackgroundColor(colors[0]);
+
+        TextView label=centerText("DISPLAY TEST\n"+names[0]+"\nTap screen for next color",18,Color.WHITE,true);
+        label.setShadowLayer(4,0,1,Color.BLACK);
+        FrameLayout.LayoutParams lp=new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,dp(120),Gravity.CENTER);
+        root.addView(label,lp);
+
+        LinearLayout actions=row();
+        actions.setPadding(dp(12),dp(8),dp(12),dp(12));
+        TextView fail=actionButton("FAIL",ROSE);
+        TextView pass=actionButton("PASS",TEAL);
+        touch(fail);touch(pass);
+        fail.setOnClickListener(v->{saveDoctorResult("display","FAIL");showPhoneDoctor();});
+        pass.setOnClickListener(v->{saveDoctorResult("display","PASS");showPhoneDoctor();});
+        actions.addView(fail,new LinearLayout.LayoutParams(0,dp(52),1f));
+        actions.addView(spaceH(8));
+        actions.addView(pass,new LinearLayout.LayoutParams(0,dp(52),1f));
+        FrameLayout.LayoutParams ap=new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,dp(76),Gravity.BOTTOM);
+        root.addView(actions,ap);
+
+        root.setOnClickListener(v->{
+            index[0]=(index[0]+1)%colors.length;
+            root.setBackgroundColor(colors[index[0]]);
+            label.setText("DISPLAY TEST\n"+names[index[0]]+"\nTap screen for next color");
+            label.setTextColor(index[0]==3?Color.BLACK:Color.WHITE);
+        });
+        setContentView(root);
+    }
+
+    private void showTouchTest(){
+        beginNonScrollScreen();
+        getWindow().getDecorView().setTag("touchTest");
+
+        LinearLayout root=column();
+        root.setPadding(dp(12),dp(18),dp(12),dp(18));
+        root.setBackgroundColor(BG);
+
+        TextView title=text("Touch Test",26,INK,true);
+        TextView coverage=text("Coverage 0%",13,PURPLE,true);
+        root.addView(title);
+        root.addView(space(4));
+        root.addView(text("पूरी screen पर finger चलाएँ। Green area touch detect होने का संकेत है।",11,MUTED,false));
+        root.addView(space(7));
+        root.addView(coverage);
+
+        TouchTestView touchView=new TouchTestView(this);
+        touchView.setProgressListener(p -> coverage.setText("Coverage "+Math.round(p*100f)+"%"));
+        root.addView(touchView,new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,0,1f));
+
+        LinearLayout actions=row();
+        TextView fail=actionButton("FAIL",ROSE);
+        TextView pass=actionButton("PASS",TEAL);
+        touch(fail);touch(pass);
+        fail.setOnClickListener(v->{saveDoctorResult("touch","FAIL");showPhoneDoctor();});
+        pass.setOnClickListener(v->{saveDoctorResult("touch","PASS");showPhoneDoctor();});
+        actions.addView(fail,new LinearLayout.LayoutParams(0,dp(52),1f));
+        actions.addView(spaceH(8));
+        actions.addView(pass,new LinearLayout.LayoutParams(0,dp(52),1f));
+        root.addView(space(8));
+        root.addView(actions,matchWrap());
+        setContentView(root);
+    }
+
+    private void runVibrationTest(){
+        haptic();
+        try{
+            Vibrator vib=(Vibrator)getSystemService(VIBRATOR_SERVICE);
+            if(vib==null||!vib.hasVibrator()){
+                saveDoctorResult("vibration","FAIL");
+                showSimpleDoctorDialog("Vibration","Vibrator hardware उपलब्ध नहीं मिला।","vibration");
+                return;
+            }
+            if(Build.VERSION.SDK_INT>=26) vib.vibrate(VibrationEffect.createOneShot(900,VibrationEffect.DEFAULT_AMPLITUDE));
+            else vib.vibrate(900);
+            askDoctorPassFail("Vibration Test","क्या vibration साफ महसूस हुआ?","vibration");
+        }catch(Exception e){
+            saveDoctorResult("vibration","FAIL");
+            showPhoneDoctor();
+        }
+    }
+
+    private void runSpeakerTest(){
+        haptic();
+        try{
+            ToneGenerator tone=new ToneGenerator(AudioManager.STREAM_MUSIC,85);
+            tone.startTone(ToneGenerator.TONE_DTMF_5,1200);
+            uiHandler.postDelayed(tone::release,1500);
+            askDoctorPassFail("Speaker Test","क्या test tone साफ सुनाई दिया?","speaker");
+        }catch(Exception e){
+            saveDoctorResult("speaker","FAIL");
+            showPhoneDoctor();
+        }
+    }
+
+    private void runMicrophoneTest(){
+        if(Build.VERSION.SDK_INT>=23 &&
+                checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){
+            pendingDoctorPermissionTest="microphone";
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},7101);
+            return;
+        }
+        beginNonScrollScreen();
+        showDoctorLoading("Microphone Test","2-second live audio sample लिया जा रहा है…");
+
+        new Thread(()->{
+            double db=-120d;
+            try{
+                int rate=44100;
+                int min=Math.max(AudioRecord.getMinBufferSize(rate,AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT),4096);
+                AudioRecord rec=new AudioRecord(MediaRecorder.AudioSource.MIC,rate,
+                        AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,min*2);
+                short[] buf=new short[min/2];
+                rec.startRecording();
+                long end=System.currentTimeMillis()+2000L;
+                double sum=0d;
+                long samples=0L;
+                while(System.currentTimeMillis()<end){
+                    int n=rec.read(buf,0,buf.length);
+                    if(n>0){
+                        for(int i=0;i<n;i++){double v=buf[i];sum+=v*v;}
+                        samples+=n;
+                    }
+                }
+                rec.stop();
+                rec.release();
+                if(samples>0){
+                    double rms=Math.sqrt(sum/samples);
+                    if(rms>0) db=20d*Math.log10(rms/32767d);
+                }
+            }catch(Throwable ignored){}
+            double resultDb=db;
+            runOnUiThread(()->{
+                boolean signal=resultDb>-58d;
+                saveDoctorResult("microphone",signal?"PASS":"WARNING");
+                new AlertDialog.Builder(this)
+                        .setTitle("Microphone Test")
+                        .setMessage("Peak/RMS level लगभग "+String.format(Locale.US,"%.1f",resultDb)+
+                                " dBFS\n\n"+(signal?"Microphone signal detected.":"बहुत कम signal मिला। शांत room हो तो दोबारा test करें।"))
+                        .setNegativeButton("MARK FAIL",(d,w)->{saveDoctorResult("microphone","FAIL");showPhoneDoctor();})
+                        .setPositiveButton("OK",(d,w)->showPhoneDoctor())
+                        .show();
+            });
+        },"sts-mic-test").start();
+    }
+
+    private void openCameraTest(){
+        try{
+            Intent i=new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            if(i.resolveActivity(getPackageManager())!=null){
+                startActivity(i);
+                saveDoctorResult("camera","PASS");
+            }else{
+                saveDoctorResult("camera","FAIL");
+                showPhoneDoctor();
+            }
+        }catch(Exception e){
+            saveDoctorResult("camera","FAIL");
+            showPhoneDoctor();
+        }
+    }
+
+    private void runFlashTest(){
+        if(Build.VERSION.SDK_INT>=23 &&
+                checkSelfPermission(android.Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED){
+            pendingDoctorPermissionTest="flash";
+            requestPermissions(new String[]{android.Manifest.permission.CAMERA},7102);
+            return;
+        }
+        try{
+            CameraManager cm=(CameraManager)getSystemService(CAMERA_SERVICE);
+            String found=null;
+            for(String id:cm.getCameraIdList()){
+                CameraCharacteristics cc=cm.getCameraCharacteristics(id);
+                Boolean available=cc.get(CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if(Boolean.TRUE.equals(available)){found=id;break;}
+            }
+            if(found==null){
+                saveDoctorResult("flash","FAIL");
+                showSimpleDoctorDialog("Flash Test","Flash hardware उपलब्ध नहीं मिला।","flash");
+                return;
+            }
+            torchCameraId=found;
+            torchActive=true;
+            cm.setTorchMode(found,true);
+            uiHandler.postDelayed(()->{
+                try{cm.setTorchMode(torchCameraId,false);}catch(Exception ignored){}
+                torchActive=false;
+                askDoctorPassFail("Flash Test","क्या flashlight लगभग 1 second जली?","flash");
+            },1100);
+        }catch(Exception e){
+            saveDoctorResult("flash","FAIL");
+            showPhoneDoctor();
+        }
+    }
+
+    private void showSensorLiveTest(){
+        beginNonScrollScreen();
+        stopSensorLiveTest();
+        getWindow().getDecorView().setTag("sensorLive");
+
+        ScrollView scroll=new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(BG);
+        LinearLayout root=column();
+        root.setPadding(dp(16),dp(22),dp(16),dp(28));
+        root.addView(text("Sensors Live",28,INK,true));
+        root.addView(space(5));
+        root.addView(text("Phone को move/cover करें और live values देखें।",12,MUTED,false));
+        root.addView(space(16));
+
+        LinearLayout card=card();
+        card.setPadding(dp(16),dp(15),dp(16),dp(15));
+        TextView values=text("Waiting for sensor data…",12,INK,false);
+        values.setLineSpacing(dp(5),1f);
+        card.addView(values);
+        root.addView(card,matchWrap());
+
+        root.addView(space(14));
+        LinearLayout actions=row();
+        TextView fail=actionButton("FAIL",ROSE);
+        TextView pass=actionButton("PASS",TEAL);
+        touch(fail);touch(pass);
+        fail.setOnClickListener(v->{saveDoctorResult("sensors","FAIL");stopSensorLiveTest();showPhoneDoctor();});
+        pass.setOnClickListener(v->{saveDoctorResult("sensors","PASS");stopSensorLiveTest();showPhoneDoctor();});
+        actions.addView(fail,new LinearLayout.LayoutParams(0,dp(52),1f));
+        actions.addView(spaceH(8));
+        actions.addView(pass,new LinearLayout.LayoutParams(0,dp(52),1f));
+        root.addView(actions,matchWrap());
+
+        scroll.addView(root);
+        setContentView(scroll);
+
+        activeSensorManager=(SensorManager)getSystemService(SENSOR_SERVICE);
+        if(activeSensorManager==null) return;
+        Map<Integer,float[]> latest=new HashMap<>();
+        activeSensorListener=new SensorEventListener(){
+            @Override public void onSensorChanged(SensorEvent event){
+                latest.put(event.sensor.getType(),event.values.clone());
+                StringBuilder b=new StringBuilder();
+                appendSensorLine(b,"Accelerometer",latest.get(Sensor.TYPE_ACCELEROMETER));
+                appendSensorLine(b,"Gyroscope",latest.get(Sensor.TYPE_GYROSCOPE));
+                appendSensorLine(b,"Light",latest.get(Sensor.TYPE_LIGHT));
+                appendSensorLine(b,"Proximity",latest.get(Sensor.TYPE_PROXIMITY));
+                appendSensorLine(b,"Magnetic",latest.get(Sensor.TYPE_MAGNETIC_FIELD));
+                values.setText(b.length()==0?"No live values yet":b.toString());
+            }
+            @Override public void onAccuracyChanged(Sensor sensor,int accuracy){}
+        };
+        int[] types={Sensor.TYPE_ACCELEROMETER,Sensor.TYPE_GYROSCOPE,Sensor.TYPE_LIGHT,
+                Sensor.TYPE_PROXIMITY,Sensor.TYPE_MAGNETIC_FIELD};
+        for(int type:types){
+            Sensor sensor=activeSensorManager.getDefaultSensor(type);
+            if(sensor!=null) activeSensorManager.registerListener(activeSensorListener,sensor,SensorManager.SENSOR_DELAY_NORMAL);
+        }
+    }
+
+    private void appendSensorLine(StringBuilder b,String name,float[] v){
+        if(v==null) return;
+        b.append(name).append(": ");
+        int max=Math.min(3,v.length);
+        for(int i=0;i<max;i++){
+            if(i>0)b.append(", ");
+            b.append(String.format(Locale.US,"%.2f",v[i]));
+        }
+        b.append("\n\n");
+    }
+
+    private void stopSensorLiveTest(){
+        try{
+            if(activeSensorManager!=null && activeSensorListener!=null)
+                activeSensorManager.unregisterListener(activeSensorListener);
+        }catch(Exception ignored){}
+        activeSensorManager=null;
+        activeSensorListener=null;
+    }
+
+    private void askDoctorPassFail(String title,String message,String key){
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(message)
+                .setNegativeButton("FAIL",(d,w)->{saveDoctorResult(key,"FAIL");showPhoneDoctor();})
+                .setPositiveButton("PASS",(d,w)->{saveDoctorResult(key,"PASS");showPhoneDoctor();})
+                .show();
+    }
+
+    private void showSimpleDoctorDialog(String title,String message,String key){
+        new AlertDialog.Builder(this).setTitle(title).setMessage(message)
+                .setPositiveButton("OK",(d,w)->showPhoneDoctor()).show();
+    }
+
+    private void showDoctorLoading(String title,String sub){
+        getWindow().getDecorView().setTag("doctorLoading");
+        LinearLayout root=column();
+        root.setGravity(Gravity.CENTER_HORIZONTAL);
+        root.setPadding(dp(20),dp(44),dp(20),dp(28));
+        root.setBackgroundColor(BG);
+        root.addView(text(title,27,INK,true));
+        root.addView(space(6));
+        root.addView(centerText(sub,12,MUTED,false));
+        root.addView(space(32));
+        ScanRing ring=new ScanRing(this);
+        ring.setLiveCount(1,"test");
+        FrameLayout visual=animatedLoadingVisual(ring,210);
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(dp(210),dp(210));
+        p.gravity=Gravity.CENTER_HORIZONTAL;
+        root.addView(visual,p);
+        root.addView(space(14));
+        root.addView(centerText("STS Smart Cleaner",16,PURPLE,true));
+        setContentView(root);
     }
 
     private void openTool(String type) {
