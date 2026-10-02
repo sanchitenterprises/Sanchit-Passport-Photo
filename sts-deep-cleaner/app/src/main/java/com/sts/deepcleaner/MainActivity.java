@@ -45,7 +45,9 @@ import android.media.ToneGenerator;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
+import android.net.TrafficStats;
 import android.net.Uri;
+import android.net.VpnService;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -128,6 +130,8 @@ public class MainActivity extends Activity {
     private long cachedAnalyticsAt = 0L;
     private boolean pendingUsageAnalyzer = false;
     private boolean pendingBatteryUsage = false;
+    private boolean pendingMasterSleepAfterUsage = false;
+    private static final int REQ_SMART_SLEEP_VPN = 7201;
 
     private final Map<String,Integer> scrollPositions = new HashMap<>();
     private final Map<String,Integer> sortModes = new HashMap<>();
@@ -205,6 +209,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingMasterSleepAfterUsage && hasUsageAccess()) {
+            pendingMasterSleepAfterUsage = false;
+            requestSmartSleepVpn();
+            return;
+        }
         if (pendingBatteryUsage && hasUsageAccess()) {
             pendingBatteryUsage = false;
             showBatteryDoctor();
@@ -2414,6 +2423,36 @@ public class MainActivity extends Activity {
         root.addView(doctorTestCard("✦","Flash Test","Real torch pulse","flash",this::runFlashTest));
         root.addView(space(9));
         root.addView(doctorTestCard("∿","Sensors Live","Accelerometer • Gyro • Light • Proximity","sensors",this::showSensorLiveTest));
+
+        root.addView(section("Internet & App Control"));
+        LinearLayout dataDoctor=card();
+        dataDoctor.setPadding(dp(16),dp(14),dp(16),dp(14));
+        dataDoctor.addView(text("Internet / Data Usage Doctor",15,INK,true));
+        dataDoctor.addView(space(4));
+        dataDoctor.addView(text("App-wise received/sent data • real actions",10,MUTED,false));
+        dataDoctor.addView(space(10));
+        TextView dataOpen=actionButton("OPEN DATA USAGE DOCTOR",Color.rgb(36,145,180));
+        touch(dataOpen);
+        dataOpen.setOnClickListener(v->showDataUsageDoctor());
+        dataDoctor.addView(dataOpen,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(50)));
+        root.addView(dataDoctor,matchWrap());
+
+        root.addView(space(9));
+        LinearLayout sleepCard=card();
+        sleepCard.setPadding(dp(16),dp(14),dp(16),dp(14));
+        boolean sleepOn=getSharedPreferences("sts_smart_sleep",MODE_PRIVATE).getBoolean("enabled",false);
+        sleepCard.addView(text("Master Smart Sleep",15,INK,true));
+        sleepCard.addView(space(4));
+        sleepCard.addView(text("10 min unused user apps → Sleeping → internet blocked; protected apps excluded",10,MUTED,false));
+        sleepCard.addView(space(8));
+        sleepCard.addView(pill(sleepOn?"ACTIVE":"OFF",sleepOn?TEAL:MUTED,
+                sleepOn?Color.rgb(228,252,248):Color.rgb(239,241,246)));
+        sleepCard.addView(space(10));
+        TextView sleepOpen=actionButton("OPEN SMART SLEEP CONTROL",sleepOn?TEAL:PURPLE);
+        touch(sleepOpen);
+        sleepOpen.setOnClickListener(v->showSmartSleepControl());
+        sleepCard.addView(sleepOpen,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,dp(50)));
+        root.addView(sleepCard,matchWrap());
 
         root.addView(space(16));
         TextView health = actionButton("OPEN PHONE HEALTH ANALYSIS",Color.rgb(66,158,105));
@@ -5588,6 +5627,9 @@ public class MainActivity extends Activity {
             haptic();
             stopSensorLiveTest();
             stopTorchIfActive();
+            showPhoneDoctor();
+        } else if ("dataUsageDoctor".equals(tag) || "smartSleep".equals(tag)) {
+            haptic();
             showPhoneDoctor();
         } else if ("phoneDoctor".equals(tag) || "batteryDoctor".equals(tag) ||
                 "healthAnalysis".equals(tag) || "healthLoading".equals(tag)) {
