@@ -43,6 +43,7 @@
             android:launchMode="standard"
             android:excludeFromRecents="false"
             android:resizeableActivity="true"
+            android:hardwareAccelerated="false"
             android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
