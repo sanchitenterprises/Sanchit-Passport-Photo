@@ -1085,7 +1085,7 @@ public class OfficeViewerActivity extends Activity {
     }
 
     private String sanitizeFileName(String s) {
-        String v = s == null ? "Document" : s.replaceAll("[\\/:*?\\"<>|]", "_").trim();
+        String v = s == null ? "Document" : s.replaceAll("[\\\\/:*?\\\"<>|]", "_").trim();
         return v.isEmpty() ? "Document" : v;
     }
 
