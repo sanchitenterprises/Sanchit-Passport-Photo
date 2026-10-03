@@ -825,6 +825,7 @@ public class PdfViewerActivity extends Activity {
         private final GestureDetector gestureDetector;
         private final int pageIndex;
 
+        private Bitmap baseBitmap;
         private Bitmap renderedBitmap;
         private float renderedScale = 1f;
         private float renderedOffsetX = 0f;
@@ -933,13 +934,19 @@ public class PdfViewerActivity extends Activity {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             canvas.drawColor(Color.WHITE);
-            Bitmap bmp = renderedBitmap;
+            Bitmap sharp = renderedBitmap;
+            Bitmap base = baseBitmap;
+            boolean useSharp = currentScale > 1.02f && sharp != null && !sharp.isRecycled();
+            Bitmap bmp = useSharp ? sharp : base;
             if (bmp == null || bmp.isRecycled()) return;
 
-            float safeRenderedScale = Math.max(0.0001f, renderedScale);
+            float bitmapScale = useSharp ? renderedScale : 1f;
+            float bitmapOffsetX = useSharp ? renderedOffsetX : 0f;
+            float bitmapOffsetY = useSharp ? renderedOffsetY : 0f;
+            float safeRenderedScale = Math.max(0.0001f, bitmapScale);
             float ratio = currentScale / safeRenderedScale;
-            float translateX = offsetX - (renderedOffsetX * ratio);
-            float translateY = offsetY - (renderedOffsetY * ratio);
+            float translateX = offsetX - (bitmapOffsetX * ratio);
+            float translateY = offsetY - (bitmapOffsetY * ratio);
 
             canvas.save();
             canvas.translate(translateX, translateY);
@@ -949,13 +956,24 @@ public class PdfViewerActivity extends Activity {
         }
 
         void setInitialBitmap(Bitmap bitmap) {
-            Bitmap old = renderedBitmap;
-            renderedBitmap = bitmap;
+            Bitmap oldBase = baseBitmap;
+            baseBitmap = bitmap;
+            clearSharpBitmap();
             renderedScale = 1f;
             renderedOffsetX = 0f;
             renderedOffsetY = 0f;
             invalidate();
-            if (old != null && old != bitmap && !old.isRecycled()) old.recycle();
+            if (oldBase != null && oldBase != bitmap && !oldBase.isRecycled()) oldBase.recycle();
+        }
+
+        private void clearSharpBitmap() {
+            renderGeneration++;
+            Bitmap sharp = renderedBitmap;
+            renderedBitmap = null;
+            if (sharp != null && !sharp.isRecycled()) sharp.recycle();
+            renderedScale = 1f;
+            renderedOffsetX = 0f;
+            renderedOffsetY = 0f;
         }
 
         private void requestSharpRender() {
@@ -998,9 +1016,9 @@ public class PdfViewerActivity extends Activity {
             currentScale = 1f;
             offsetX = 0f;
             offsetY = 0f;
+            clearSharpBitmap();
             clampOffsets();
             invalidate();
-            requestSharpRender();
             getParent().requestDisallowInterceptTouchEvent(false);
         }
 
@@ -1028,6 +1046,7 @@ public class PdfViewerActivity extends Activity {
         private String findLinkAt(float viewX, float viewY) {
             List<PdfLink> links = pageLinks.get(pageIndex);
             if (links == null || links.isEmpty() || getWidth() <= 0 || getHeight() <= 0) return null;
+            if (baseBitmap == null || baseBitmap.isRecycled()) return null;
 
             float contentX = (viewX - offsetX) / currentScale;
             float contentY = (viewY - offsetY) / currentScale;
@@ -1043,9 +1062,14 @@ public class PdfViewerActivity extends Activity {
 
         void releaseBitmap() {
             renderGeneration++;
-            Bitmap bmp = renderedBitmap;
+            Bitmap sharp = renderedBitmap;
             renderedBitmap = null;
-            if (bmp != null && !bmp.isRecycled()) bmp.recycle();
+            if (sharp != null && !sharp.isRecycled()) sharp.recycle();
+
+            Bitmap base = baseBitmap;
+            baseBitmap = null;
+            if (base != null && !base.isRecycled()) base.recycle();
+
             invalidate();
         }
 
