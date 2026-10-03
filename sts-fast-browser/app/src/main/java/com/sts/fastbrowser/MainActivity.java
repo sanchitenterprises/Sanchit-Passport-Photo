@@ -461,8 +461,10 @@ public class MainActivity extends android.app.Activity {
                 "if(!m){m=document.createElement('meta');m.name='viewport';document.head&&document.head.appendChild(m);}" +
                 "if(m){var ct=m.getAttribute('content')||'';" +
                 "ct=ct.replace(/user-scalable\\s*=\\s*no/ig,'user-scalable=yes')" +
+                ".replace(/minimum-scale\\s*=\\s*[^,;\\s]+/ig,'minimum-scale=0.25')" +
                 ".replace(/maximum-scale\\s*=\\s*1(?:\\.0+)?/ig,'maximum-scale=5.0');" +
                 "if(!/user-scalable\\s*=/i.test(ct))ct+=(ct?', ':'')+'user-scalable=yes';" +
+                "if(!/minimum-scale\\s*=/i.test(ct))ct+=(ct?', ':'')+'minimum-scale=0.25';" +
                 "if(!/maximum-scale\\s*=/i.test(ct))ct+=(ct?', ':'')+'maximum-scale=5.0';" +
                 "m.setAttribute('content',ct);}" +
                 "}catch(e){}" +
