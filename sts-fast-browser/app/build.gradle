@@ -10,8 +10,8 @@ android {
         applicationId 'com.sts.fastbrowser'
         minSdk 24
         targetSdk 35
-        versionCode 38
-        versionName '1.0.37'
+        versionCode 39
+        versionName '1.0.38'
     }
 
     buildTypes {
@@ -30,4 +30,6 @@ android {
 
 dependencies {
     implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+    implementation 'org.apache.poi:poi:3.17'
+    implementation 'org.apache.poi:poi-scratchpad:3.17'
 }
