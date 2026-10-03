@@ -416,6 +416,13 @@ public class MainActivity extends android.app.Activity {
         });
         targetWebView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                // Preserve the existing initial page-fit behavior while a new page loads.
+                view.getSettings().setLoadWithOverviewMode(true);
+                super.onPageStarted(view, url, favicon);
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
@@ -434,6 +441,12 @@ public class MainActivity extends android.app.Activity {
                 super.onPageFinished(view, url);
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
+
+                // WebView's overview mode also acts as the native pinch-zoom-out floor.
+                // Keep it for initial rendering, then release that floor so two-finger
+                // pinch-out can continue below the fitted page scale.
+                view.getSettings().setLoadWithOverviewMode(false);
+
                 if (adBlockEnabled) injectNormalAdCleanup(view);
                 if (hardAdBlockEnabled) injectHardAdCleanup(view);
             }
