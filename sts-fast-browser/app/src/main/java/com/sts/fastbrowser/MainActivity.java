@@ -460,6 +460,8 @@ public class MainActivity extends android.app.Activity {
                     String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
                     if (mt.contains("application/pdf") || isPdfCandidate(url, null)) {
                         openPdfTask(url, guessPdfName(url, contentDisposition));
+                    } else if (isOfficeCandidate(url, mt)) {
+                        openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
                     } else if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
                         targetWebView.loadUrl(url);
                     }
@@ -483,6 +485,12 @@ public class MainActivity extends android.app.Activity {
                         if (isPdfCandidate(url, null)) {
                             handled = true;
                             openPdfTask(url, guessPdfName(url, null));
+                            child.post(child::destroy);
+                            return true;
+                        }
+                        if (isOfficeCandidate(url, null)) {
+                            handled = true;
+                            openOfficeTask(url, guessOfficeName(url, null, null));
                             child.post(child::destroy);
                             return true;
                         }
@@ -518,6 +526,8 @@ public class MainActivity extends android.app.Activity {
             String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
             if (mt.contains("application/pdf") || isPdfCandidate(url, mt)) {
                 openPdfTask(url, guessPdfName(url, contentDisposition));
+            } else if (isOfficeCandidate(url, mt)) {
+                openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
             } else {
                 openExternal(url);
             }
@@ -537,6 +547,10 @@ public class MainActivity extends android.app.Activity {
                 if ("http".equals(scheme) || "https".equals(scheme)) {
                     if (isPdfCandidate(uri.toString(), null)) {
                         openPdfTask(uri.toString(), guessPdfName(uri.toString(), null));
+                        return true;
+                    }
+                    if (isOfficeCandidate(uri.toString(), null)) {
+                        openOfficeTask(uri.toString(), guessOfficeName(uri.toString(), null, null));
                         return true;
                     }
                     return false;
@@ -833,6 +847,57 @@ public class MainActivity extends android.app.Activity {
             startActivity(intent);
         } catch (Exception e) {
             Toast.makeText(this, "PDF open नहीं हो पाया", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+
+    private boolean isOfficeCandidate(String url, String typeHint) {
+        String type = typeHint == null ? "" : typeHint.toLowerCase(Locale.ROOT);
+        if (type.contains("wordprocessingml") || type.contains("spreadsheetml") ||
+                type.contains("application/msword") || type.contains("application/vnd.ms-word") ||
+                type.contains("application/vnd.ms-excel") || type.contains("application/excel")) {
+            return true;
+        }
+        if (url == null) return false;
+        String lower = url.toLowerCase(Locale.ROOT);
+        int hash = lower.indexOf('#');
+        if (hash >= 0) lower = lower.substring(0, hash);
+        return lower.endsWith(".docx") || lower.endsWith(".doc") ||
+                lower.endsWith(".xlsx") || lower.endsWith(".xls") ||
+                lower.contains(".docx?") || lower.contains(".doc?") ||
+                lower.contains(".xlsx?") || lower.contains(".xls?") ||
+                lower.contains(".docx&") || lower.contains(".doc&") ||
+                lower.contains(".xlsx&") || lower.contains(".xls&");
+    }
+
+    private String guessOfficeName(String url, String contentDisposition, String mimeType) {
+        try {
+            String mime = mimeType;
+            if (TextUtils.isEmpty(mime)) {
+                String l = url == null ? "" : url.toLowerCase(Locale.ROOT);
+                if (l.contains(".xlsx")) mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                else if (l.contains(".xls")) mime = "application/vnd.ms-excel";
+                else if (l.contains(".docx")) mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                else mime = "application/msword";
+            }
+            String guessed = URLUtil.guessFileName(url, contentDisposition, mime);
+            if (!TextUtils.isEmpty(guessed)) return guessed;
+        } catch (Exception ignored) {}
+        return "Document.docx";
+    }
+
+    private void openOfficeTask(String url, String name) {
+        try {
+            Intent intent = new Intent(this, OfficeViewerActivity.class);
+            intent.putExtra("office_url", url);
+            intent.putExtra("office_name", name);
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null) intent.putExtra("office_cookie", cookie);
+            intent.putExtra("office_user_agent", webView.getSettings().getUserAgentString());
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Word/Excel file open नहीं हो पाई", Toast.LENGTH_SHORT).show();
         }
     }
 
