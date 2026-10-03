@@ -993,7 +993,7 @@ public class PdfViewerActivity extends Activity {
         }
 
         private void superSetImageBitmap(Bitmap bitmap) {
-            ZoomPageView.super.setImageBitmap(bitmap);
+            super.setImageBitmap(bitmap);
         }
 
         private void clearSharpBitmap() {
