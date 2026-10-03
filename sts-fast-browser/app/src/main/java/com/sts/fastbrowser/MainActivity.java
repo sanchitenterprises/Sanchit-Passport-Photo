@@ -292,10 +292,15 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void installReliablePinchZoomOut(WebView targetWebView) {
-        // Keep WebView's normal pinch-to-zoom-in untouched. Native WebView can clamp
-        // pinch-out at its overview scale, so only switch to programmatic zoomBy()
-        // after the gesture is clearly moving in the zoom-out direction.
-        final boolean[] manualZoom = {false};
+        // This is browser-page zoom only. PDF/Image viewers are separate activities.
+        //
+        // Native WebView pinch-out can stop at its minimum/overview scale. For the user's
+        // "make the whole website smaller so the right side becomes visible" gesture,
+        // apply a Chromium CSS page zoom below 100%. While CSS zoom is below 100%,
+        // the reverse two-finger gesture restores it toward 100%. At 100%, normal
+        // WebView zoom-in remains untouched.
+        final float[] pageZoom = {1.0f};
+        final boolean[] customGesture = {false};
         final boolean[] multiTouch = {false};
 
         ScaleGestureDetector detector = new ScaleGestureDetector(this,
@@ -310,16 +315,23 @@ public class MainActivity extends android.app.Activity {
                         float factor = detector.getScaleFactor();
                         if (Float.isNaN(factor) || Float.isInfinite(factor)) return false;
 
-                        // Let the existing native WebView own a zoom-in gesture.
-                        if (!manualZoom[0] && factor >= 0.995f) return false;
+                        float current = pageZoom[0];
 
-                        manualZoom[0] = true;
+                        // At normal 100% zoom, keep pinch-to-zoom-in completely native.
+                        // Switch to custom page scaling only when the fingers move inward
+                        // (zoom out), or while restoring an already zoomed-out page.
+                        if (!customGesture[0] && current >= 0.999f && factor >= 0.995f) {
+                            return false;
+                        }
 
-                        // Smooth per-frame factor, with safe bounds accepted by WebView.zoomBy().
-                        float safeFactor = Math.max(0.85f, Math.min(1.15f, factor));
-                        try {
-                            targetWebView.zoomBy(safeFactor);
-                        } catch (Exception ignored) {}
+                        customGesture[0] = true;
+
+                        float next = current * factor;
+                        next = Math.max(0.25f, Math.min(1.0f, next));
+                        if (Math.abs(next - current) < 0.001f) return true;
+
+                        pageZoom[0] = next;
+                        applyBrowserPageZoom(targetWebView, next);
                         return true;
                     }
                 });
@@ -328,21 +340,20 @@ public class MainActivity extends android.app.Activity {
             int action = event.getActionMasked();
 
             if (action == MotionEvent.ACTION_DOWN) {
-                manualZoom[0] = false;
+                customGesture[0] = false;
                 multiTouch[0] = false;
             }
 
-            boolean hasTwoFingers = event.getPointerCount() >= 2;
-            if (hasTwoFingers) multiTouch[0] = true;
+            if (event.getPointerCount() >= 2) multiTouch[0] = true;
 
-            boolean wasManual = manualZoom[0];
-            if (hasTwoFingers || multiTouch[0] || manualZoom[0]) {
+            boolean wasCustom = customGesture[0];
+            if (event.getPointerCount() >= 2 || multiTouch[0] || customGesture[0]) {
                 detector.onTouchEvent(event);
             }
 
-            // The moment pinch-out is detected, cancel WebView's native pinch for this
-            // gesture so it cannot clamp back to the overview scale.
-            if (!wasManual && manualZoom[0]) {
+            // Cancel WebView's native pinch only after this gesture has actually
+            // become a custom zoom-out gesture. Single-finger touch stays untouched.
+            if (!wasCustom && customGesture[0]) {
                 MotionEvent cancel = MotionEvent.obtain(event);
                 cancel.setAction(MotionEvent.ACTION_CANCEL);
                 try {
@@ -352,17 +363,43 @@ public class MainActivity extends android.app.Activity {
                 }
             }
 
-            boolean consume = manualZoom[0];
+            boolean consume = customGesture[0];
 
-            if (action == MotionEvent.ACTION_UP ||
-                    action == MotionEvent.ACTION_CANCEL ||
-                    (action == MotionEvent.ACTION_POINTER_UP && event.getPointerCount() <= 2)) {
-                manualZoom[0] = false;
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                customGesture[0] = false;
+                multiTouch[0] = false;
+            } else if (action == MotionEvent.ACTION_POINTER_UP && event.getPointerCount() <= 2) {
+                customGesture[0] = false;
                 multiTouch[0] = false;
             }
 
             return consume;
         });
+
+        // A real navigation creates a new document, so its page zoom starts normally.
+        targetWebView.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void resetPageZoom() {
+                pageZoom[0] = 1.0f;
+            }
+        }, "STSPageZoomState");
+    }
+
+    private void applyBrowserPageZoom(WebView view, float scale) {
+        if (view == null) return;
+        final float safe = Math.max(0.25f, Math.min(1.0f, scale));
+        String js =
+                "(function(){" +
+                "try{" +
+                "var z=" + String.format(Locale.US, "%.4f", safe) + ";" +
+                "var d=document.documentElement;" +
+                "if(d){" +
+                "d.style.setProperty('zoom',String(z),'important');" +
+                "d.style.setProperty('transform-origin','0 0','important');" +
+                "}" +
+                "}catch(e){}" +
+                "})();";
+        try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
 
     private void configureWebView(WebView targetWebView) {
@@ -493,6 +530,13 @@ public class MainActivity extends android.app.Activity {
         });
         targetWebView.setWebViewClient(new WebViewClient() {
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                try { view.evaluateJavascript("try{STSPageZoomState.resetPageZoom();}catch(e){}", null); } catch (Exception ignored) {}
+                applyBrowserPageZoom(view, 1.0f);
+                super.onPageStarted(view, url, favicon);
+            }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
@@ -538,10 +582,8 @@ public class MainActivity extends android.app.Activity {
                 "if(!m){m=document.createElement('meta');m.name='viewport';document.head&&document.head.appendChild(m);}" +
                 "if(m){var ct=m.getAttribute('content')||'';" +
                 "ct=ct.replace(/user-scalable\\s*=\\s*no/ig,'user-scalable=yes')" +
-                ".replace(/minimum-scale\\s*=\\s*[^,;\\s]+/ig,'minimum-scale=0.25')" +
                 ".replace(/maximum-scale\\s*=\\s*1(?:\\.0+)?/ig,'maximum-scale=5.0');" +
                 "if(!/user-scalable\\s*=/i.test(ct))ct+=(ct?', ':'')+'user-scalable=yes';" +
-                "if(!/minimum-scale\\s*=/i.test(ct))ct+=(ct?', ':'')+'minimum-scale=0.25';" +
                 "if(!/maximum-scale\\s*=/i.test(ct))ct+=(ct?', ':'')+'maximum-scale=5.0';" +
                 "m.setAttribute('content',ct);}" +
                 "}catch(e){}" +
