@@ -24,6 +24,10 @@ public class PdfShareProvider extends ContentProvider {
         if (n.endsWith(".png")) return "image/png";
         if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
         if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (n.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (n.endsWith(".doc")) return "application/msword";
         return "application/pdf";
     }
 
@@ -46,8 +50,12 @@ public class PdfShareProvider extends ContentProvider {
     private File safeFile(Uri uri) {
         try {
             List<String> segments = uri.getPathSegments();
-            String folder = (segments != null && segments.size() >= 2 && "image".equals(segments.get(0)))
-                    ? "image" : "pdf";
+            String folder = "pdf";
+            if (segments != null && segments.size() >= 2) {
+                String first = segments.get(0);
+                if ("image".equals(first)) folder = "image";
+                else if ("office".equals(first)) folder = "office";
+            }
             String name = uri.getLastPathSegment();
             File dir = new File(getContext().getCacheDir(), folder);
             File f = new File(dir, name == null ? "" : name);
