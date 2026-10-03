@@ -24,6 +24,7 @@ import android.text.TextUtils;
 import android.text.method.PasswordTransformationMethod;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -290,6 +291,80 @@ public class MainActivity extends android.app.Activity {
         });
     }
 
+    private void installReliablePinchZoomOut(WebView targetWebView) {
+        // Keep WebView's normal pinch-to-zoom-in untouched. Native WebView can clamp
+        // pinch-out at its overview scale, so only switch to programmatic zoomBy()
+        // after the gesture is clearly moving in the zoom-out direction.
+        final boolean[] manualZoom = {false};
+        final boolean[] multiTouch = {false};
+
+        ScaleGestureDetector detector = new ScaleGestureDetector(this,
+                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override
+                    public boolean onScaleBegin(ScaleGestureDetector detector) {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onScale(ScaleGestureDetector detector) {
+                        float factor = detector.getScaleFactor();
+                        if (Float.isNaN(factor) || Float.isInfinite(factor)) return false;
+
+                        // Let the existing native WebView own a zoom-in gesture.
+                        if (!manualZoom[0] && factor >= 0.995f) return false;
+
+                        manualZoom[0] = true;
+
+                        // Smooth per-frame factor, with safe bounds accepted by WebView.zoomBy().
+                        float safeFactor = Math.max(0.85f, Math.min(1.15f, factor));
+                        try {
+                            targetWebView.zoomBy(safeFactor);
+                        } catch (Exception ignored) {}
+                        return true;
+                    }
+                });
+
+        targetWebView.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+
+            if (action == MotionEvent.ACTION_DOWN) {
+                manualZoom[0] = false;
+                multiTouch[0] = false;
+            }
+
+            boolean hasTwoFingers = event.getPointerCount() >= 2;
+            if (hasTwoFingers) multiTouch[0] = true;
+
+            boolean wasManual = manualZoom[0];
+            if (hasTwoFingers || multiTouch[0] || manualZoom[0]) {
+                detector.onTouchEvent(event);
+            }
+
+            // The moment pinch-out is detected, cancel WebView's native pinch for this
+            // gesture so it cannot clamp back to the overview scale.
+            if (!wasManual && manualZoom[0]) {
+                MotionEvent cancel = MotionEvent.obtain(event);
+                cancel.setAction(MotionEvent.ACTION_CANCEL);
+                try {
+                    targetWebView.onTouchEvent(cancel);
+                } finally {
+                    cancel.recycle();
+                }
+            }
+
+            boolean consume = manualZoom[0];
+
+            if (action == MotionEvent.ACTION_UP ||
+                    action == MotionEvent.ACTION_CANCEL ||
+                    (action == MotionEvent.ACTION_POINTER_UP && event.getPointerCount() <= 2)) {
+                manualZoom[0] = false;
+                multiTouch[0] = false;
+            }
+
+            return consume;
+        });
+    }
+
     private void configureWebView(WebView targetWebView) {
         WebSettings s = targetWebView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -307,6 +382,8 @@ public class MainActivity extends android.app.Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(targetWebView, true);
+
+        installReliablePinchZoomOut(targetWebView);
 
         targetWebView.addJavascriptInterface(new PdfBridge(), "STSPdf");
         targetWebView.addJavascriptInterface(new RdBridge(), "STSRD");
@@ -416,13 +493,6 @@ public class MainActivity extends android.app.Activity {
         });
         targetWebView.setWebViewClient(new WebViewClient() {
             @Override
-            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                // Preserve the existing initial page-fit behavior while a new page loads.
-                view.getSettings().setLoadWithOverviewMode(true);
-                super.onPageStarted(view, url, favicon);
-            }
-
-            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
@@ -441,12 +511,6 @@ public class MainActivity extends android.app.Activity {
                 super.onPageFinished(view, url);
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
-
-                // WebView's overview mode also acts as the native pinch-zoom-out floor.
-                // Keep it for initial rendering, then release that floor so two-finger
-                // pinch-out can continue below the fitted page scale.
-                view.getSettings().setLoadWithOverviewMode(false);
-
                 if (adBlockEnabled) injectNormalAdCleanup(view);
                 if (hardAdBlockEnabled) injectHardAdCleanup(view);
             }
