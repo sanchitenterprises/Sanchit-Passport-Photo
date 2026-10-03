@@ -85,7 +85,6 @@ public class PdfViewerActivity extends Activity {
     private PDDocument textDocument;
 
     private LinearLayout pages;
-    private ScrollView pageScroll;
     private TextView status;
     private boolean destroyed = false;
     private final Map<Integer, List<PdfLink>> pageLinks = new HashMap<>();
@@ -155,18 +154,16 @@ public class PdfViewerActivity extends Activity {
         top.addView(menu, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
         menu.setOnClickListener(this::showMenu);
 
-        pageScroll = new ScrollView(this);
-        pageScroll.setFillViewport(true);
-        pageScroll.setSmoothScrollingEnabled(true);
-        pageScroll.setOnScrollChangeListener((v, scrollX, scrollY, oldScrollX, oldScrollY) ->
-                updateVisiblePageRenders());
+        ScrollView sc = new ScrollView(this);
+        sc.setFillViewport(true);
+        sc.setSmoothScrollingEnabled(true);
         pages = new LinearLayout(this);
         pages.setOrientation(LinearLayout.VERTICAL);
         pages.setGravity(Gravity.CENTER_HORIZONTAL);
         pages.setPadding(dp(6), dp(6), dp(6), dp(12));
         pages.setClipChildren(false);
-        pageScroll.addView(pages, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        root.addView(pageScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        sc.addView(pages, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(sc, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         status = new TextView(this);
         status.setText("PDF loading...");
@@ -383,29 +380,19 @@ public class PdfViewerActivity extends Activity {
     private void renderAllPages() throws Exception {
         runOnUiThread(() -> pages.removeAllViews());
 
+        int screen = getResources().getDisplayMetrics().widthPixels;
+        int targetW = Math.min(Math.max(640, screen - dp(12)), 1200);
         int count;
         synchronized (this) {
             count = pdfRenderer.getPageCount();
         }
 
+        // Proven multi-page path: render every page in order before adding the next one.
+        // This avoids blank placeholders and keeps long PDFs reliable.
         for (int i = 0; i < count && !destroyed; i++) {
             final int pageIndex = i;
-            final float aspect = getPageAspectRatio(pageIndex);
-            runOnUiThread(() -> addPageView(pageIndex, aspect));
-        }
-
-        runOnUiThread(() -> {
-            if (pages != null) pages.post(this::updateVisiblePageRenders);
-        });
-    }
-
-    private synchronized float getPageAspectRatio(int pageIndex) throws Exception {
-        if (pdfRenderer == null) throw new IllegalStateException("PDF renderer unavailable");
-        PdfRenderer.Page page = pdfRenderer.openPage(pageIndex);
-        try {
-            return page.getHeight() / (float) Math.max(1, page.getWidth());
-        } finally {
-            page.close();
+            Bitmap bmp = renderPageBitmap(pageIndex, targetW);
+            runOnUiThread(() -> addPageView(pageIndex, bmp));
         }
     }
 
@@ -416,7 +403,7 @@ public class PdfViewerActivity extends Activity {
             int targetH = Math.max(1, Math.round(targetW * (page.getHeight() / (float) page.getWidth())));
             Bitmap bmp = Bitmap.createBitmap(targetW, targetH, Bitmap.Config.ARGB_8888);
             bmp.eraseColor(Color.WHITE);
-            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT);
+            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
             return bmp;
         } finally {
             page.close();
@@ -442,45 +429,24 @@ public class PdfViewerActivity extends Activity {
         }
     }
 
-    private void addPageView(int pageIndex, float aspect) {
-        if (destroyed) return;
+    private void addPageView(int pageIndex, Bitmap bitmap) {
+        if (destroyed) {
+            if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
+            return;
+        }
 
         ZoomPageView iv = new ZoomPageView(this, pageIndex);
+        iv.setInitialBitmap(bitmap);
         iv.setBackgroundColor(Color.WHITE);
         iv.setContentDescription("PDF page " + (pageIndex + 1));
 
-        int pageWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels - dp(12));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                Math.max(dp(120), Math.round(pageWidth * aspect))
+                Math.max(dp(120), Math.round((getResources().getDisplayMetrics().widthPixels - dp(12)) *
+                        (bitmap.getHeight() / (float) Math.max(1, bitmap.getWidth()))))
         );
         lp.setMargins(0, 0, 0, dp(7));
         pages.addView(iv, lp);
-    }
-
-    private void updateVisiblePageRenders() {
-        if (destroyed || pages == null || pageScroll == null || pageScroll.getHeight() <= 0) return;
-
-        int viewportTop = pageScroll.getScrollY();
-        int viewportBottom = viewportTop + pageScroll.getHeight();
-        int preload = Math.max(pageScroll.getHeight(), dp(480));
-        int keepTop = viewportTop - preload;
-        int keepBottom = viewportBottom + preload;
-
-        for (int i = 0; i < pages.getChildCount(); i++) {
-            View child = pages.getChildAt(i);
-            if (!(child instanceof ZoomPageView)) continue;
-
-            ZoomPageView page = (ZoomPageView) child;
-            int top = child.getTop();
-            int bottom = child.getBottom();
-
-            if (bottom >= keepTop && top <= keepBottom) {
-                page.ensureRendered();
-            } else {
-                page.releaseBitmap();
-            }
-        }
     }
 
     private void showPageActions(int pageIndex) {
@@ -870,7 +836,6 @@ public class PdfViewerActivity extends Activity {
         private float lastX;
         private float lastY;
         private int renderGeneration = 0;
-        private boolean renderPending = false;
 
         ZoomPageView(Context context, int pageIndex) {
             super(context);
@@ -959,7 +924,8 @@ public class PdfViewerActivity extends Activity {
                 currentScale = 1f;
                 offsetX = 0f;
                 offsetY = 0f;
-                post(PdfViewerActivity.this::updateVisiblePageRenders);
+                clampOffsets();
+                invalidate();
             }
         }
 
@@ -982,18 +948,20 @@ public class PdfViewerActivity extends Activity {
             canvas.restore();
         }
 
-        void ensureRendered() {
-            Bitmap bmp = renderedBitmap;
-            if ((bmp == null || bmp.isRecycled()) && !renderPending) {
-                requestSharpRender();
-            }
+        void setInitialBitmap(Bitmap bitmap) {
+            Bitmap old = renderedBitmap;
+            renderedBitmap = bitmap;
+            renderedScale = 1f;
+            renderedOffsetX = 0f;
+            renderedOffsetY = 0f;
+            invalidate();
+            if (old != null && old != bitmap && !old.isRecycled()) old.recycle();
         }
 
         private void requestSharpRender() {
             if (destroyed || getWidth() <= 0 || getHeight() <= 0) return;
 
             final int generation = ++renderGeneration;
-            renderPending = true;
             final int width = getWidth();
             final int height = getHeight();
             final float scale = currentScale;
@@ -1008,11 +976,9 @@ public class PdfViewerActivity extends Activity {
                     runOnUiThread(() -> {
                         if (destroyed || generation != renderGeneration || getWidth() != width || getHeight() != height) {
                             if (!result.isRecycled()) result.recycle();
-                            if (generation == renderGeneration) renderPending = false;
                             return;
                         }
 
-                        renderPending = false;
                         Bitmap old = renderedBitmap;
                         renderedBitmap = result;
                         renderedScale = scale;
@@ -1023,9 +989,7 @@ public class PdfViewerActivity extends Activity {
                     });
                 } catch (Exception e) {
                     if (fresh != null && !fresh.isRecycled()) fresh.recycle();
-                    runOnUiThread(() -> {
-                        if (generation == renderGeneration) renderPending = false;
-                    });
+
                 }
             }, "SFB-PDF-Render-" + pageIndex + "-" + generation).start();
         }
@@ -1079,7 +1043,6 @@ public class PdfViewerActivity extends Activity {
 
         void releaseBitmap() {
             renderGeneration++;
-            renderPending = false;
             Bitmap bmp = renderedBitmap;
             renderedBitmap = null;
             if (bmp != null && !bmp.isRecycled()) bmp.recycle();
