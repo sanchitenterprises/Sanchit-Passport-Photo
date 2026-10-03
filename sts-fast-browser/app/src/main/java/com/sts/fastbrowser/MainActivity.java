@@ -95,6 +95,7 @@ public class MainActivity extends android.app.Activity {
     private FrameLayout webStage;
     private WebView webView1;
     private WebView webView2;
+    private final java.util.WeakHashMap<WebView, Float> browserPageZoom = new java.util.WeakHashMap<>();
     // Active-slot alias. D1 and D2 themselves stay alive independently.
     private WebView webView;
     private String pendingGeoOrigin;
@@ -299,7 +300,7 @@ public class MainActivity extends android.app.Activity {
         // apply a Chromium CSS page zoom below 100%. While CSS zoom is below 100%,
         // the reverse two-finger gesture restores it toward 100%. At 100%, normal
         // WebView zoom-in remains untouched.
-        final float[] pageZoom = {1.0f};
+        browserPageZoom.put(targetWebView, 1.0f);
         final boolean[] customGesture = {false};
         final boolean[] multiTouch = {false};
 
@@ -315,7 +316,7 @@ public class MainActivity extends android.app.Activity {
                         float factor = detector.getScaleFactor();
                         if (Float.isNaN(factor) || Float.isInfinite(factor)) return false;
 
-                        float current = pageZoom[0];
+                        float current = browserPageZoom.containsKey(targetWebView) ? browserPageZoom.get(targetWebView) : 1.0f;
 
                         // At normal 100% zoom, keep pinch-to-zoom-in completely native.
                         // Switch to custom page scaling only when the fingers move inward
@@ -330,7 +331,7 @@ public class MainActivity extends android.app.Activity {
                         next = Math.max(0.25f, Math.min(1.0f, next));
                         if (Math.abs(next - current) < 0.001f) return true;
 
-                        pageZoom[0] = next;
+                        browserPageZoom.put(targetWebView, next);
                         applyBrowserPageZoom(targetWebView, next);
                         return true;
                     }
@@ -376,13 +377,6 @@ public class MainActivity extends android.app.Activity {
             return consume;
         });
 
-        // A real navigation creates a new document, so its page zoom starts normally.
-        targetWebView.addJavascriptInterface(new Object() {
-            @JavascriptInterface
-            public void resetPageZoom() {
-                pageZoom[0] = 1.0f;
-            }
-        }, "STSPageZoomState");
     }
 
     private void applyBrowserPageZoom(WebView view, float scale) {
@@ -531,7 +525,7 @@ public class MainActivity extends android.app.Activity {
         targetWebView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                try { view.evaluateJavascript("try{STSPageZoomState.resetPageZoom();}catch(e){}", null); } catch (Exception ignored) {}
+                browserPageZoom.put(view, 1.0f);
                 applyBrowserPageZoom(view, 1.0f);
                 super.onPageStarted(view, url, favicon);
             }
