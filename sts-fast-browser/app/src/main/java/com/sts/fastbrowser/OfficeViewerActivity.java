@@ -2,11 +2,15 @@ package com.sts.fastbrowser;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.pdf.PdfDocument;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
@@ -29,6 +33,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.hslf.usermodel.HSLFShape;
+import org.apache.poi.hslf.usermodel.HSLFSlide;
+import org.apache.poi.hslf.usermodel.HSLFSlideShow;
+import org.apache.poi.hslf.usermodel.HSLFTextShape;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.usermodel.CharacterRun;
 import org.apache.poi.hwpf.usermodel.Paragraph;
@@ -54,6 +62,8 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -67,6 +77,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 import java.util.TreeMap;
+import java.util.Collections;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -84,6 +95,8 @@ public class OfficeViewerActivity extends Activity {
     private WebView webView;
     private TextView status;
     private boolean pendingSaveOriginal;
+    private String pendingExportFormat;
+    private boolean editing = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -169,6 +182,11 @@ public class OfficeViewerActivity extends Activity {
 
     private void showMenu(View anchor) {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
+        pm.getMenu().add(editing ? "Finish Edit" : "Edit");
+        android.view.SubMenu saveAs = pm.getMenu().addSubMenu("Save As");
+        saveAs.add("JPG");
+        saveAs.add("PNG");
+        saveAs.add("PDF");
         pm.getMenu().add("Share");
         pm.getMenu().add("Print");
         pm.getMenu().add("Save Original");
@@ -178,7 +196,12 @@ public class OfficeViewerActivity extends Activity {
                 return true;
             }
             String t = String.valueOf(item.getTitle());
-            if ("Share".equals(t)) shareOriginal();
+            if ("Edit".equals(t)) setEditMode(true);
+            else if ("Finish Edit".equals(t)) setEditMode(false);
+            else if ("JPG".equals(t)) chooseImageExportScope("jpg");
+            else if ("PNG".equals(t)) chooseImageExportScope("png");
+            else if ("PDF".equals(t)) exportAsPdf();
+            else if ("Share".equals(t)) shareOriginal();
             else if ("Print".equals(t)) printDocument();
             else if ("Save Original".equals(t)) saveOriginal();
             return true;
@@ -213,8 +236,22 @@ public class OfficeViewerActivity extends Activity {
                     html = renderDocx(sourceFile);
                 } else if (lower.endsWith(".doc")) {
                     html = renderDoc(sourceFile);
+                } else if (lower.endsWith(".pptx")) {
+                    html = renderPptx(sourceFile);
+                } else if (lower.endsWith(".ppt")) {
+                    html = renderPpt(sourceFile);
+                } else if (lower.endsWith(".csv")) {
+                    html = renderCsv(sourceFile);
+                } else if (lower.endsWith(".txt")) {
+                    html = renderTextFile(sourceFile);
+                } else if (lower.endsWith(".rtf")) {
+                    html = renderRtf(sourceFile);
+                } else if (lower.endsWith(".odt") || lower.endsWith(".ods") || lower.endsWith(".odp")) {
+                    html = renderOdf(sourceFile, lower);
+                } else if (lower.endsWith(".ofd")) {
+                    html = renderOfd(sourceFile);
                 } else {
-                    throw new IllegalArgumentException("Unsupported office file type");
+                    throw new IllegalArgumentException("Unsupported document file type");
                 }
 
                 runOnUiThread(() -> {
@@ -226,7 +263,7 @@ public class OfficeViewerActivity extends Activity {
                 runOnUiThread(() -> {
                     status.setVisibility(View.VISIBLE);
                     status.setText("File open नहीं हो पाई");
-                    Toast.makeText(this, "Word/Excel file open नहीं हो पाई", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Document file open नहीं हो पाई", Toast.LENGTH_LONG).show();
                 });
             }
         }, "SFB-Office-Load").start();
@@ -234,7 +271,11 @@ public class OfficeViewerActivity extends Activity {
 
     private String officeKindLabel() {
         String n = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
-        return (n.endsWith(".xls") || n.endsWith(".xlsx")) ? "Excel" : "Word";
+        if (n.endsWith(".xls") || n.endsWith(".xlsx") || n.endsWith(".csv") || n.endsWith(".ods")) return "Excel";
+        if (n.endsWith(".ppt") || n.endsWith(".pptx") || n.endsWith(".odp")) return "PowerPoint";
+        if (n.endsWith(".txt") || n.endsWith(".rtf")) return "Text";
+        if (n.endsWith(".ofd")) return "OFD";
+        return "Word";
     }
 
     // ---------- DOCX ----------
@@ -825,6 +866,246 @@ public class OfficeViewerActivity extends Activity {
         }
     }
 
+
+    // ---------- PPT / PPTX / Text / OpenDocument / OFD ----------
+
+    private String presentationHtmlHead() {
+        return "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=yes,maximum-scale=5'>"
+                + "<style>html,body{margin:0;padding:0;background:#d9dde0;color:#111;font-family:Arial,sans-serif;}"
+                + ".slide{box-sizing:border-box;width:960px;min-height:540px;margin:18px auto;padding:48px 56px;background:#fff;"
+                + "box-shadow:0 2px 12px rgba(0,0,0,.2);font-size:24px;overflow:hidden}.slide p{margin:0 0 18px;line-height:1.3}"
+                + ".slide-title{font-size:36px;font-weight:bold;margin-bottom:28px}.textdoc{box-sizing:border-box;width:794px;min-height:1123px;"
+                + "margin:16px auto;padding:58px 64px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);white-space:pre-wrap;line-height:1.45}"
+                + ".odf-page{box-sizing:border-box;width:794px;min-height:1123px;margin:16px auto;padding:50px 58px;background:#fff;"
+                + "box-shadow:0 2px 12px rgba(0,0,0,.18)}table{border-collapse:collapse;width:100%}td,th{border:1px solid #aaa;padding:5px;vertical-align:top}"
+                + "</style></head><body>";
+    }
+
+    private String renderPptx(File file) throws Exception {
+        try (ZipFile zip = new ZipFile(file)) {
+            Document pres = parseZipXml(zip, "ppt/presentation.xml");
+            Map<String, String> rels = parseRelationships(zip, "ppt/_rels/presentation.xml.rels");
+            List<String> slidePaths = new ArrayList<>();
+            NodeList ids = pres.getElementsByTagNameNS("*", "sldId");
+            for (int i = 0; i < ids.getLength(); i++) {
+                Element e = (Element) ids.item(i);
+                String target = rels.get(attrLocal(e, "id"));
+                if (TextUtils.isEmpty(target)) continue;
+                String p = target.replace("\\", "/");
+                while (p.startsWith("../")) p = p.substring(3);
+                if (p.startsWith("/")) p = p.substring(1);
+                if (!p.startsWith("ppt/")) p = "ppt/" + p;
+                slidePaths.add(p);
+            }
+            StringBuilder out = new StringBuilder(32768);
+            out.append(presentationHtmlHead());
+            int index = 1;
+            for (String path : slidePaths) {
+                Document s = parseZipXml(zip, path);
+                NodeList paras = s.getElementsByTagNameNS("*", "p");
+                out.append("<section class='slide' data-page='").append(index).append("'>");
+                boolean first = true;
+                for (int i = 0; i < paras.getLength(); i++) {
+                    Element p = (Element) paras.item(i);
+                    String text = allText(p).trim();
+                    if (text.isEmpty()) continue;
+                    out.append(first ? "<p class='slide-title'>" : "<p>")
+                            .append(escapeHtml(text)).append("</p>");
+                    first = false;
+                }
+                if (first) out.append("<p>&nbsp;</p>");
+                out.append("</section>");
+                index++;
+            }
+            out.append("</body></html>");
+            return out.toString();
+        }
+    }
+
+    private String renderPpt(File file) throws Exception {
+        StringBuilder out = new StringBuilder(32768);
+        out.append(presentationHtmlHead());
+        try (FileInputStream in = new FileInputStream(file); HSLFSlideShow ppt = new HSLFSlideShow(in)) {
+            int index = 1;
+            for (HSLFSlide slide : ppt.getSlides()) {
+                out.append("<section class='slide' data-page='").append(index++).append("'>");
+                boolean first = true;
+                for (HSLFShape shape : slide.getShapes()) {
+                    if (shape instanceof HSLFTextShape) {
+                        String text = ((HSLFTextShape) shape).getText();
+                        if (text == null || text.trim().isEmpty()) continue;
+                        out.append(first ? "<p class='slide-title'>" : "<p>")
+                                .append(escapeHtml(text.trim()).replace("\n", "<br>")).append("</p>");
+                        first = false;
+                    }
+                }
+                if (first) out.append("<p>&nbsp;</p>");
+                out.append("</section>");
+            }
+        }
+        out.append("</body></html>");
+        return out.toString();
+    }
+
+    private String renderCsv(File file) throws Exception {
+        StringBuilder out = new StringBuilder(32768);
+        out.append(excelHtmlHead()).append("<section id='sheet0' class='sheet active'><div class='sheet-wrap'><table class='excel-table'><tbody>");
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(file), java.nio.charset.StandardCharsets.UTF_8))) {
+            String line;
+            int row = 1;
+            while ((line = br.readLine()) != null) {
+                List<String> cells = parseCsvLine(line);
+                out.append("<tr><th class='rowhead'>").append(row++).append("</th>");
+                for (String cell : cells) out.append("<td>").append(escapeHtml(cell)).append("</td>");
+                out.append("</tr>");
+            }
+        }
+        out.append("</tbody></table></div></section><div class='tabs'><button class='tab active'>Sheet 1</button></div></body></html>");
+        return out.toString();
+    }
+
+    private List<String> parseCsvLine(String line) {
+        List<String> out = new ArrayList<>();
+        if (line == null) return out;
+        StringBuilder cur = new StringBuilder();
+        boolean quote = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '"') {
+                if (quote && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    cur.append('"'); i++;
+                } else quote = !quote;
+            } else if (ch == ',' && !quote) {
+                out.add(cur.toString()); cur.setLength(0);
+            } else cur.append(ch);
+        }
+        out.add(cur.toString());
+        return out;
+    }
+
+    private String renderTextFile(File file) throws Exception {
+        byte[] data;
+        try (InputStream in = new FileInputStream(file)) { data = readAll(in); }
+        String text = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+        return presentationHtmlHead() + "<div class='textdoc'>" + escapeHtml(text) + "</div></body></html>";
+    }
+
+    private String renderRtf(File file) throws Exception {
+        byte[] data;
+        try (InputStream in = new FileInputStream(file)) { data = readAll(in); }
+        String rtf = new String(data, java.nio.charset.StandardCharsets.ISO_8859_1);
+        String plain = rtf.replaceAll("\\\\par[d]?\\b", "\n")
+                .replaceAll("\\\\'[0-9a-fA-F]{2}", " ")
+                .replaceAll("\\\\[a-zA-Z]+-?\\d* ?", "")
+                .replaceAll("[{}]", "");
+        return presentationHtmlHead() + "<div class='textdoc'>" + escapeHtml(plain) + "</div></body></html>";
+    }
+
+    private String renderOdf(File file, String lowerName) throws Exception {
+        try (ZipFile zip = new ZipFile(file)) {
+            Document d = parseZipXml(zip, "content.xml");
+            StringBuilder out = new StringBuilder(32768);
+            out.append(presentationHtmlHead());
+
+            if (lowerName.endsWith(".ods")) {
+                NodeList tables = d.getElementsByTagNameNS("*", "table");
+                int si = 0;
+                for (int t = 0; t < tables.getLength(); t++) {
+                    Element table = (Element) tables.item(t);
+                    String name = attrLocal(table, "name");
+                    out.append("<section id='sheet").append(si).append("' class='sheet").append(si == 0 ? " active" : "")
+                            .append("'><div class='sheet-wrap'><table class='excel-table'><tbody>");
+                    NodeList rows = table.getElementsByTagNameNS("*", "table-row");
+                    for (int r = 0; r < rows.getLength(); r++) {
+                        out.append("<tr><th class='rowhead'>").append(r + 1).append("</th>");
+                        NodeList cells = ((Element) rows.item(r)).getElementsByTagNameNS("*", "table-cell");
+                        for (int cc = 0; cc < cells.getLength(); cc++) {
+                            out.append("<td>").append(escapeHtml(((Element) cells.item(cc)).getTextContent())).append("</td>");
+                        }
+                        out.append("</tr>");
+                    }
+                    out.append("</tbody></table></div></section>");
+                    si++;
+                }
+                out.append("<div class='tabs'>");
+                for (int i = 0; i < Math.max(1, si); i++) {
+                    out.append("<button id='tab").append(i).append("' class='tab").append(i == 0 ? " active" : "")
+                            .append("' onclick='showSheet(").append(i).append(")'>Sheet ").append(i + 1).append("</button>");
+                }
+                out.append("</div><script>function showSheet(n){document.querySelectorAll('.sheet').forEach(function(x){x.classList.remove('active')});"
+                        + "document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});document.getElementById('sheet'+n).classList.add('active');"
+                        + "document.getElementById('tab'+n).classList.add('active');window.scrollTo(0,0);}</script>");
+            } else if (lowerName.endsWith(".odp")) {
+                NodeList pages = d.getElementsByTagNameNS("*", "page");
+                for (int i = 0; i < pages.getLength(); i++) {
+                    Element page = (Element) pages.item(i);
+                    out.append("<section class='slide' data-page='").append(i + 1).append("'>");
+                    NodeList ps = page.getElementsByTagNameNS("*", "p");
+                    for (int j = 0; j < ps.getLength(); j++) {
+                        String txt = ps.item(j).getTextContent();
+                        if (!TextUtils.isEmpty(txt)) out.append("<p>").append(escapeHtml(txt)).append("</p>");
+                    }
+                    out.append("</section>");
+                }
+            } else {
+                out.append("<div class='odf-page'>");
+                Element body = firstDescendant(d.getDocumentElement(), "body");
+                NodeList ps = body == null ? d.getElementsByTagNameNS("*", "p") : body.getElementsByTagNameNS("*", "p");
+                for (int i = 0; i < ps.getLength(); i++) {
+                    out.append("<p>").append(escapeHtml(ps.item(i).getTextContent())).append("</p>");
+                }
+                out.append("</div>");
+            }
+            out.append("</body></html>");
+            return out.toString();
+        }
+    }
+
+    private String renderOfd(File file) throws Exception {
+        try (ZipFile zip = new ZipFile(file)) {
+            List<? extends ZipEntry> entries = Collections.list(zip.entries());
+            List<String> pageXml = new ArrayList<>();
+            for (ZipEntry e : entries) {
+                String n = e.getName().toLowerCase(Locale.ROOT);
+                if (n.endsWith("/content.xml") && n.contains("pages/")) pageXml.add(e.getName());
+            }
+            Collections.sort(pageXml);
+            StringBuilder out = new StringBuilder(32768);
+            out.append(presentationHtmlHead());
+            if (pageXml.isEmpty()) {
+                out.append("<div class='odf-page'>");
+                for (ZipEntry e : entries) {
+                    if (!e.getName().toLowerCase(Locale.ROOT).endsWith(".xml")) continue;
+                    try (InputStream in = zip.getInputStream(e)) {
+                        DocumentBuilderFactory fac = DocumentBuilderFactory.newInstance();
+                        fac.setNamespaceAware(true);
+                        Document d = fac.newDocumentBuilder().parse(in);
+                        NodeList tc = d.getElementsByTagNameNS("*", "TextCode");
+                        for (int i = 0; i < tc.getLength(); i++) out.append("<p>").append(escapeHtml(tc.item(i).getTextContent())).append("</p>");
+                    } catch (Exception ignored) {}
+                }
+                out.append("</div>");
+            } else {
+                int page = 1;
+                for (String p : pageXml) {
+                    ZipEntry e = zip.getEntry(p);
+                    if (e == null) continue;
+                    out.append("<div class='odf-page' data-page='").append(page++).append("'>");
+                    try (InputStream in = zip.getInputStream(e)) {
+                        DocumentBuilderFactory fac = DocumentBuilderFactory.newInstance();
+                        fac.setNamespaceAware(true);
+                        Document d = fac.newDocumentBuilder().parse(in);
+                        NodeList tc = d.getElementsByTagNameNS("*", "TextCode");
+                        for (int i = 0; i < tc.getLength(); i++) out.append("<p>").append(escapeHtml(tc.item(i).getTextContent())).append("</p>");
+                    }
+                    out.append("</div>");
+                }
+            }
+            out.append("</body></html>");
+            return out.toString();
+        }
+    }
+
     // ---------- common XML / helpers ----------
 
     private Document parseZipXml(ZipFile zip, String path) throws Exception {
@@ -968,6 +1249,164 @@ public class OfficeViewerActivity extends Activity {
         }
     }
 
+
+    // ---------- edit + export ----------
+
+    private void setEditMode(boolean enabled) {
+        editing = enabled;
+        String js = "(function(){var on=" + (enabled ? "true" : "false") + ";"
+                + "var q='.doc-page p,.doc-page td,.excel-table td,.slide p,.textdoc,.odf-page p,.odf-page td';"
+                + "document.querySelectorAll(q).forEach(function(x){x.contentEditable=on?'true':'false';"
+                + "x.style.outline=on?'1px dashed #5B7FA3':'none';});document.body.setAttribute('data-editing',on?'1':'0');})();";
+        try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+        Toast.makeText(this, enabled ? "Edit mode ON" : "Edit complete", Toast.LENGTH_SHORT).show();
+    }
+
+    private void chooseImageExportScope(String format) {
+        new AlertDialog.Builder(this)
+                .setTitle("Save As " + format.toUpperCase(Locale.ROOT))
+                .setItems(new String[]{"Current View", "Full Document"}, (d, which) -> {
+                    if (which == 0) exportImage(format, false);
+                    else exportImage(format, true);
+                })
+                .show();
+    }
+
+    private void exportImage(String format, boolean fullDocument) {
+        if (android.os.Build.VERSION.SDK_INT < 29 &&
+                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            pendingExportFormat = format + (fullDocument ? ":full" : ":view");
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+            return;
+        }
+
+        webView.post(() -> {
+            try {
+                int width = Math.max(1, webView.getWidth());
+                int visibleH = Math.max(1, webView.getHeight());
+                int contentH = Math.max(visibleH, Math.round(webView.getContentHeight() * webView.getScale()));
+                int totalH = fullDocument ? contentH : visibleH;
+                int tileH = fullDocument ? Math.min(4096, visibleH * 4) : visibleH;
+                int pages = Math.max(1, (int) Math.ceil(totalH / (double) tileH));
+                int scrollY = webView.getScrollY();
+
+                for (int i = 0; i < pages; i++) {
+                    int y = fullDocument ? i * tileH : scrollY;
+                    int h = fullDocument ? Math.min(tileH, totalH - y) : visibleH;
+                    Bitmap bmp = Bitmap.createBitmap(width, Math.max(1, h), Bitmap.Config.ARGB_8888);
+                    Canvas canvas = new Canvas(bmp);
+                    canvas.drawColor(Color.WHITE);
+                    canvas.translate(0, -y);
+                    webView.draw(canvas);
+                    saveBitmapToDownloads(bmp, format, pages > 1 ? i + 1 : 0);
+                    bmp.recycle();
+                    if (!fullDocument) break;
+                }
+                Toast.makeText(this, "Save As complete", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Image save नहीं हो पाया", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void saveBitmapToDownloads(Bitmap bmp, String format, int pageNo) throws Exception {
+        boolean png = "png".equalsIgnoreCase(format);
+        String base = baseName(fileName);
+        String suffix = pageNo > 0 ? "_Page_" + pageNo : "";
+        String outName = base + suffix + (png ? ".png" : ".jpg");
+        String mime = png ? "image/png" : "image/jpeg";
+        Bitmap.CompressFormat cf = png ? Bitmap.CompressFormat.PNG : Bitmap.CompressFormat.JPEG;
+
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Images.Media.DISPLAY_NAME, outName);
+            v.put(MediaStore.Images.Media.MIME_TYPE, mime);
+            v.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/STS Fast Browser");
+            Uri uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new IllegalStateException("Unable to create image");
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null || !bmp.compress(cf, 100, out)) throw new IllegalStateException("Image encode failed");
+            }
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "STS Fast Browser");
+            if (!dir.exists()) dir.mkdirs();
+            File outFile = uniqueFile(dir, outName);
+            try (OutputStream out = new FileOutputStream(outFile)) {
+                if (!bmp.compress(cf, 100, out)) throw new IllegalStateException("Image encode failed");
+            }
+        }
+    }
+
+    private void exportAsPdf() {
+        if (android.os.Build.VERSION.SDK_INT < 29 &&
+                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            pendingExportFormat = "pdf";
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+            return;
+        }
+
+        webView.post(() -> {
+            PdfDocument doc = new PdfDocument();
+            try {
+                int viewW = Math.max(1, webView.getWidth());
+                int contentH = Math.max(webView.getHeight(), Math.round(webView.getContentHeight() * webView.getScale()));
+                int pageW = 1240;
+                int pageH = 1754;
+                float scale = pageW / (float) viewW;
+                int sourcePageH = Math.max(1, Math.round(pageH / scale));
+                int count = Math.max(1, (int) Math.ceil(contentH / (double) sourcePageH));
+
+                for (int i = 0; i < count; i++) {
+                    PdfDocument.PageInfo info = new PdfDocument.PageInfo.Builder(pageW, pageH, i + 1).create();
+                    PdfDocument.Page page = doc.startPage(info);
+                    Canvas canvas = page.getCanvas();
+                    canvas.drawColor(Color.WHITE);
+                    canvas.save();
+                    canvas.scale(scale, scale);
+                    canvas.translate(0, -(i * sourcePageH));
+                    webView.draw(canvas);
+                    canvas.restore();
+                    doc.finishPage(page);
+                }
+
+                savePdfDocument(doc, baseName(fileName) + ".pdf");
+                Toast.makeText(this, "PDF Downloads में save हो गया", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "PDF save नहीं हो पाया", Toast.LENGTH_SHORT).show();
+            } finally {
+                try { doc.close(); } catch (Exception ignored) {}
+            }
+        });
+    }
+
+    private void savePdfDocument(PdfDocument doc, String outName) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            ContentValues v = new ContentValues();
+            v.put(MediaStore.Downloads.DISPLAY_NAME, outName);
+            v.put(MediaStore.Downloads.MIME_TYPE, "application/pdf");
+            v.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/STS Fast Browser");
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v);
+            if (uri == null) throw new IllegalStateException("Unable to create PDF");
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) throw new IllegalStateException("No PDF output");
+                doc.writeTo(out);
+            }
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "STS Fast Browser");
+            if (!dir.exists()) dir.mkdirs();
+            try (OutputStream out = new FileOutputStream(uniqueFile(dir, outName))) {
+                doc.writeTo(out);
+            }
+        }
+    }
+
+    private String baseName(String name) {
+        if (TextUtils.isEmpty(name)) return "Document";
+        int dot = name.lastIndexOf('.');
+        String b = dot > 0 ? name.substring(0, dot) : name;
+        return sanitizeFileName(b);
+    }
+
     // ---------- original file actions ----------
 
     private void shareOriginal() {
@@ -1095,6 +1534,15 @@ public class OfficeViewerActivity extends Activity {
         if (n.endsWith(".xls")) return "application/vnd.ms-excel";
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         if (n.endsWith(".doc")) return "application/msword";
+        if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (n.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+        if (n.endsWith(".csv")) return "text/csv";
+        if (n.endsWith(".txt")) return "text/plain";
+        if (n.endsWith(".rtf")) return "application/rtf";
+        if (n.endsWith(".odt")) return "application/vnd.oasis.opendocument.text";
+        if (n.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
+        if (n.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
+        if (n.endsWith(".ofd")) return "application/ofd";
         return "application/octet-stream";
     }
 
@@ -1106,9 +1554,20 @@ public class OfficeViewerActivity extends Activity {
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_STORAGE && grantResults.length > 0 &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED && pendingSaveOriginal) {
-            pendingSaveOriginal = false;
-            saveOriginal();
+                grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            if (pendingSaveOriginal) {
+                pendingSaveOriginal = false;
+                saveOriginal();
+            } else if (!TextUtils.isEmpty(pendingExportFormat)) {
+                String action = pendingExportFormat;
+                pendingExportFormat = null;
+                if ("pdf".equals(action)) exportAsPdf();
+                else {
+                    boolean full = action.endsWith(":full");
+                    String format = action.startsWith("png") ? "png" : "jpg";
+                    exportImage(format, full);
+                }
+            }
         }
     }
 
