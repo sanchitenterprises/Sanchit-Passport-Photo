@@ -854,8 +854,11 @@ public class MainActivity extends android.app.Activity {
     private boolean isOfficeCandidate(String url, String typeHint) {
         String type = typeHint == null ? "" : typeHint.toLowerCase(Locale.ROOT);
         if (type.contains("wordprocessingml") || type.contains("spreadsheetml") ||
-                type.contains("application/msword") || type.contains("application/vnd.ms-word") ||
-                type.contains("application/vnd.ms-excel") || type.contains("application/excel")) {
+                type.contains("presentationml") || type.contains("application/msword") ||
+                type.contains("application/vnd.ms-word") || type.contains("application/vnd.ms-excel") ||
+                type.contains("application/excel") || type.contains("application/vnd.ms-powerpoint") ||
+                type.contains("text/csv") || type.contains("text/plain") || type.contains("application/rtf") ||
+                type.contains("text/rtf") || type.contains("opendocument") || type.contains("application/ofd")) {
             return true;
         }
         if (url == null) return false;
@@ -864,10 +867,19 @@ public class MainActivity extends android.app.Activity {
         if (hash >= 0) lower = lower.substring(0, hash);
         return lower.endsWith(".docx") || lower.endsWith(".doc") ||
                 lower.endsWith(".xlsx") || lower.endsWith(".xls") ||
+                lower.endsWith(".pptx") || lower.endsWith(".ppt") ||
+                lower.endsWith(".csv") || lower.endsWith(".txt") || lower.endsWith(".rtf") ||
+                lower.endsWith(".odt") || lower.endsWith(".ods") || lower.endsWith(".odp") || lower.endsWith(".ofd") ||
                 lower.contains(".docx?") || lower.contains(".doc?") ||
                 lower.contains(".xlsx?") || lower.contains(".xls?") ||
+                lower.contains(".pptx?") || lower.contains(".ppt?") ||
+                lower.contains(".csv?") || lower.contains(".txt?") || lower.contains(".rtf?") ||
+                lower.contains(".odt?") || lower.contains(".ods?") || lower.contains(".odp?") || lower.contains(".ofd?") ||
                 lower.contains(".docx&") || lower.contains(".doc&") ||
-                lower.contains(".xlsx&") || lower.contains(".xls&");
+                lower.contains(".xlsx&") || lower.contains(".xls&") ||
+                lower.contains(".pptx&") || lower.contains(".ppt&") ||
+                lower.contains(".csv&") || lower.contains(".txt&") || lower.contains(".rtf&") ||
+                lower.contains(".odt&") || lower.contains(".ods&") || lower.contains(".odp&") || lower.contains(".ofd&");
     }
 
     private String guessOfficeName(String url, String contentDisposition, String mimeType) {
@@ -878,7 +890,17 @@ public class MainActivity extends android.app.Activity {
                 if (l.contains(".xlsx")) mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
                 else if (l.contains(".xls")) mime = "application/vnd.ms-excel";
                 else if (l.contains(".docx")) mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-                else mime = "application/msword";
+                else if (l.contains(".doc")) mime = "application/msword";
+                else if (l.contains(".pptx")) mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+                else if (l.contains(".ppt")) mime = "application/vnd.ms-powerpoint";
+                else if (l.contains(".csv")) mime = "text/csv";
+                else if (l.contains(".txt")) mime = "text/plain";
+                else if (l.contains(".rtf")) mime = "application/rtf";
+                else if (l.contains(".odt")) mime = "application/vnd.oasis.opendocument.text";
+                else if (l.contains(".ods")) mime = "application/vnd.oasis.opendocument.spreadsheet";
+                else if (l.contains(".odp")) mime = "application/vnd.oasis.opendocument.presentation";
+                else if (l.contains(".ofd")) mime = "application/ofd";
+                else mime = "application/octet-stream";
             }
             String guessed = URLUtil.guessFileName(url, contentDisposition, mime);
             if (!TextUtils.isEmpty(guessed)) return guessed;
