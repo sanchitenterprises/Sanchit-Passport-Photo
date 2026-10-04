@@ -28,6 +28,15 @@ public class PdfShareProvider extends ContentProvider {
         if (n.endsWith(".xls")) return "application/vnd.ms-excel";
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
         if (n.endsWith(".doc")) return "application/msword";
+        if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (n.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+        if (n.endsWith(".csv")) return "text/csv";
+        if (n.endsWith(".txt")) return "text/plain";
+        if (n.endsWith(".rtf")) return "application/rtf";
+        if (n.endsWith(".odt")) return "application/vnd.oasis.opendocument.text";
+        if (n.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
+        if (n.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
+        if (n.endsWith(".ofd")) return "application/ofd";
         return "application/pdf";
     }
 
