@@ -874,6 +874,7 @@ public class OfficeViewerActivity extends Activity {
                 + "<style>html,body{margin:0;padding:0;background:#d9dde0;color:#111;font-family:Arial,sans-serif;}"
                 + ".slide{box-sizing:border-box;width:960px;min-height:540px;margin:18px auto;padding:48px 56px;background:#fff;"
                 + "box-shadow:0 2px 12px rgba(0,0,0,.2);font-size:24px;overflow:hidden}.slide p{margin:0 0 18px;line-height:1.3}"
+                + ".slide img{display:block;max-width:100%;max-height:460px;width:auto;height:auto;margin:10px auto;object-fit:contain}"
                 + ".slide-title{font-size:36px;font-weight:bold;margin-bottom:28px}.textdoc{box-sizing:border-box;width:794px;min-height:1123px;"
                 + "margin:16px auto;padding:58px 64px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);white-space:pre-wrap;line-height:1.45}"
                 + ".odf-page{box-sizing:border-box;width:794px;min-height:1123px;margin:16px auto;padding:50px 58px;background:#fff;"
@@ -891,29 +892,92 @@ public class OfficeViewerActivity extends Activity {
                 Element e = (Element) ids.item(i);
                 String target = rels.get(attrLocal(e, "id"));
                 if (TextUtils.isEmpty(target)) continue;
-                String p = target.replace("\\", "/");
-                while (p.startsWith("../")) p = p.substring(3);
-                if (p.startsWith("/")) p = p.substring(1);
-                if (!p.startsWith("ppt/")) p = "ppt/" + p;
-                slidePaths.add(p);
+                slidePaths.add(resolveZipRelative("ppt/presentation.xml", target));
             }
-            StringBuilder out = new StringBuilder(32768);
+
+            StringBuilder out = new StringBuilder(65536);
             out.append(presentationHtmlHead());
             int index = 1;
             for (String path : slidePaths) {
                 Document s = parseZipXml(zip, path);
-                NodeList paras = s.getElementsByTagNameNS("*", "p");
+                String relPath = slideRelationshipPath(path);
+                Map<String, String> slideRels = parseRelationships(zip, relPath);
+
                 out.append("<section class='slide' data-page='").append(index).append("'>");
-                boolean first = true;
+                boolean hadContent = false;
+
+                // Render embedded pictures first. A large number of training PPT/PPTX files
+                // use screenshots/images for most of the visible slide content.
+                NodeList blips = s.getElementsByTagNameNS("*", "blip");
+                java.util.HashSet<String> shown = new java.util.HashSet<>();
+                for (int i = 0; i < blips.getLength(); i++) {
+                    Element blip = (Element) blips.item(i);
+                    String rid = attrLocal(blip, "embed");
+                    if (TextUtils.isEmpty(rid)) rid = attrLocal(blip, "link");
+                    String target = slideRels.get(rid);
+                    if (TextUtils.isEmpty(target)) continue;
+                    String mediaPath = resolveZipRelative(path, target);
+                    if (!shown.add(mediaPath)) continue;
+                    String dataUri = zipEntryDataUri(zip, mediaPath);
+                    if (dataUri != null) {
+                        out.append("<img src='").append(dataUri).append("'>");
+                        hadContent = true;
+                    }
+                }
+
+                // Render text boxes/paragraphs.
+                NodeList paras = s.getElementsByTagNameNS("*", "p");
+                boolean firstText = true;
                 for (int i = 0; i < paras.getLength(); i++) {
                     Element p = (Element) paras.item(i);
                     String text = allText(p).trim();
                     if (text.isEmpty()) continue;
-                    out.append(first ? "<p class='slide-title'>" : "<p>")
-                            .append(escapeHtml(text)).append("</p>");
-                    first = false;
+                    out.append(firstText ? "<p class='slide-title'>" : "<p>")
+                            .append(escapeHtml(text).replace("\n", "<br>")).append("</p>");
+                    firstText = false;
+                    hadContent = true;
                 }
-                if (first) out.append("<p>&nbsp;</p>");
+
+                // Some presentations keep visible images in slide-layout relationships.
+                if (!hadContent) {
+                    String layoutTarget = null;
+                    for (Map.Entry<String, String> e : slideRels.entrySet()) {
+                        String v = e.getValue();
+                        if (v != null && v.toLowerCase(Locale.ROOT).contains("slidelayout")) {
+                            layoutTarget = resolveZipRelative(path, v);
+                            break;
+                        }
+                    }
+                    if (!TextUtils.isEmpty(layoutTarget)) {
+                        try {
+                            Document layout = parseZipXml(zip, layoutTarget);
+                            Map<String, String> layoutRels = parseRelationships(zip, slideRelationshipPath(layoutTarget));
+                            NodeList lbs = layout.getElementsByTagNameNS("*", "blip");
+                            for (int i = 0; i < lbs.getLength(); i++) {
+                                Element blip = (Element) lbs.item(i);
+                                String rid = attrLocal(blip, "embed");
+                                String target = layoutRels.get(rid);
+                                if (TextUtils.isEmpty(target)) continue;
+                                String mediaPath = resolveZipRelative(layoutTarget, target);
+                                String dataUri = zipEntryDataUri(zip, mediaPath);
+                                if (dataUri != null) {
+                                    out.append("<img src='").append(dataUri).append("'>");
+                                    hadContent = true;
+                                }
+                            }
+                            NodeList lps = layout.getElementsByTagNameNS("*", "p");
+                            for (int i = 0; i < lps.getLength(); i++) {
+                                String text = allText((Element) lps.item(i)).trim();
+                                if (!text.isEmpty()) {
+                                    out.append("<p>").append(escapeHtml(text).replace("\n", "<br>")).append("</p>");
+                                    hadContent = true;
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+
+                if (!hadContent) out.append("<p>Slide ").append(index).append("</p>");
                 out.append("</section>");
                 index++;
             }
@@ -923,28 +987,115 @@ public class OfficeViewerActivity extends Activity {
     }
 
     private String renderPpt(File file) throws Exception {
-        StringBuilder out = new StringBuilder(32768);
+        StringBuilder out = new StringBuilder(65536);
         out.append(presentationHtmlHead());
         try (FileInputStream in = new FileInputStream(file); HSLFSlideShow ppt = new HSLFSlideShow(in)) {
             int index = 1;
             for (HSLFSlide slide : ppt.getSlides()) {
                 out.append("<section class='slide' data-page='").append(index++).append("'>");
-                boolean first = true;
+                boolean had = false;
+                boolean firstText = true;
                 for (HSLFShape shape : slide.getShapes()) {
+                    // Keep legacy PPT picture support reflection-based so it works across
+                    // the POI version used by this Android build without tying the code to
+                    // one concrete picture-data API.
+                    try {
+                        java.lang.reflect.Method gpd = shape.getClass().getMethod("getPictureData");
+                        Object pd = gpd.invoke(shape);
+                        if (pd != null) {
+                            java.lang.reflect.Method gd = pd.getClass().getMethod("getData");
+                            byte[] data = (byte[]) gd.invoke(pd);
+                            String mime = "image/jpeg";
+                            try {
+                                java.lang.reflect.Method gm = pd.getClass().getMethod("getContentType");
+                                Object mv = gm.invoke(pd);
+                                if (mv != null) mime = String.valueOf(mv);
+                            } catch (Exception x) {
+                                try {
+                                    java.lang.reflect.Method gm = pd.getClass().getMethod("getMimeType");
+                                    Object mv = gm.invoke(pd);
+                                    if (mv != null) mime = String.valueOf(mv);
+                                } catch (Exception ignored) {}
+                            }
+                            if (data != null && data.length > 0) {
+                                out.append("<img src='data:").append(escapeAttr(mime)).append(";base64,")
+                                        .append(Base64.encodeToString(data, Base64.NO_WRAP)).append("'>");
+                                had = true;
+                            }
+                        }
+                    } catch (Exception ignored) {}
+
                     if (shape instanceof HSLFTextShape) {
                         String text = ((HSLFTextShape) shape).getText();
                         if (text == null || text.trim().isEmpty()) continue;
-                        out.append(first ? "<p class='slide-title'>" : "<p>")
+                        out.append(firstText ? "<p class='slide-title'>" : "<p>")
                                 .append(escapeHtml(text.trim()).replace("\n", "<br>")).append("</p>");
-                        first = false;
+                        firstText = false;
+                        had = true;
                     }
                 }
-                if (first) out.append("<p>&nbsp;</p>");
+                if (!had) out.append("<p>Slide ").append(index - 1).append("</p>");
                 out.append("</section>");
             }
         }
         out.append("</body></html>");
         return out.toString();
+    }
+
+    private String slideRelationshipPath(String partPath) {
+        int slash = partPath.lastIndexOf('/');
+        String dir = slash >= 0 ? partPath.substring(0, slash + 1) : "";
+        String name = slash >= 0 ? partPath.substring(slash + 1) : partPath;
+        return dir + "_rels/" + name + ".rels";
+    }
+
+    private String resolveZipRelative(String basePart, String target) {
+        if (TextUtils.isEmpty(target)) return target;
+        String t = target.replace("\\", "/");
+        if (t.startsWith("/")) t = t.substring(1);
+        if (t.startsWith("ppt/")) return normalizeZipPath(t);
+
+        int slash = basePart.lastIndexOf('/');
+        String baseDir = slash >= 0 ? basePart.substring(0, slash + 1) : "";
+        return normalizeZipPath(baseDir + t);
+    }
+
+    private String normalizeZipPath(String path) {
+        String[] parts = path.replace("\\", "/").split("/");
+        java.util.ArrayDeque<String> stack = new java.util.ArrayDeque<>();
+        for (String p : parts) {
+            if (p.isEmpty() || ".".equals(p)) continue;
+            if ("..".equals(p)) {
+                if (!stack.isEmpty()) stack.removeLast();
+            } else stack.addLast(p);
+        }
+        StringBuilder out = new StringBuilder();
+        for (String p : stack) {
+            if (out.length() > 0) out.append('/');
+            out.append(p);
+        }
+        return out.toString();
+    }
+
+    private String zipEntryDataUri(ZipFile zip, String path) {
+        try {
+            ZipEntry e = zip.getEntry(path);
+            if (e == null) return null;
+            byte[] data = readAll(zip.getInputStream(e));
+            String lower = path.toLowerCase(Locale.ROOT);
+            String mime;
+            if (lower.endsWith(".png")) mime = "image/png";
+            else if (lower.endsWith(".gif")) mime = "image/gif";
+            else if (lower.endsWith(".webp")) mime = "image/webp";
+            else if (lower.endsWith(".bmp")) mime = "image/bmp";
+            else if (lower.endsWith(".svg")) mime = "image/svg+xml";
+            else if (lower.endsWith(".emf")) mime = "image/emf";
+            else if (lower.endsWith(".wmf")) mime = "image/wmf";
+            else mime = "image/jpeg";
+            return "data:" + mime + ";base64," + Base64.encodeToString(data, Base64.NO_WRAP);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String renderCsv(File file) throws Exception {
