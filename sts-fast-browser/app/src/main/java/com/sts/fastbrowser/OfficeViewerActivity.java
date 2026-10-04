@@ -897,7 +897,7 @@ public class OfficeViewerActivity extends Activity {
                 + "<style>html,body{margin:0;padding:0;background:#d9dde0;color:#111;font-family:Arial,sans-serif;}"
                 + ".slide{box-sizing:border-box;width:960px;min-height:540px;margin:18px auto;padding:48px 56px;background:#fff;"
                 + "box-shadow:0 2px 12px rgba(0,0,0,.2);font-size:24px;overflow:hidden}.slide p{margin:0 0 18px;line-height:1.3}"
-                + ".slide img{display:block;max-width:100%;max-height:460px;width:auto;height:auto;margin:10px auto;object-fit:contain}"
+                + ".slide img{display:block;max-width:100%;max-height:460px;width:auto;height:auto;margin:10px auto;object-fit:contain;content-visibility:auto}"
                 + ".video-wrap{margin:10px 0;text-align:center}.video-wrap video{display:block;width:100%;max-height:460px;background:#000;margin:0 auto 6px}"
                 + ".slide-title{font-size:36px;font-weight:bold;margin-bottom:28px}.textdoc{box-sizing:border-box;width:794px;min-height:1123px;"
                 + "margin:16px auto;padding:58px 64px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);white-space:pre-wrap;line-height:1.45}"
@@ -943,9 +943,9 @@ public class OfficeViewerActivity extends Activity {
                     if (TextUtils.isEmpty(target)) continue;
                     String mediaPath = resolveZipRelative(path, target);
                     if (!shown.add(mediaPath)) continue;
-                    String dataUri = zipEntryDataUri(zip, mediaPath);
-                    if (dataUri != null) {
-                        out.append("<img src='").append(dataUri).append("'>");
+                    String mediaUrl = cachePptMedia(zip, mediaPath);
+                    if (mediaUrl != null) {
+                        out.append("<img loading='lazy' src='").append(mediaUrl).append("'>");
                         hadContent = true;
                     }
                 }
@@ -1034,9 +1034,9 @@ public class OfficeViewerActivity extends Activity {
                                 String target = layoutRels.get(rid);
                                 if (TextUtils.isEmpty(target)) continue;
                                 String mediaPath = resolveZipRelative(layoutTarget, target);
-                                String dataUri = zipEntryDataUri(zip, mediaPath);
-                                if (dataUri != null) {
-                                    out.append("<img src='").append(dataUri).append("'>");
+                                String mediaUrl = cachePptMedia(zip, mediaPath);
+                                if (mediaUrl != null) {
+                                    out.append("<img loading='lazy' src='").append(mediaUrl).append("'>");
                                     hadContent = true;
                                 }
                             }
@@ -1404,7 +1404,9 @@ public class OfficeViewerActivity extends Activity {
     private void preparePptMediaDir() {
         File root = new File(getCacheDir(), "office_ppt_media");
         if (!root.exists()) root.mkdirs();
-        pptMediaDir = new File(root, Integer.toHexString((fileName == null ? "ppt" : fileName).hashCode()));
+        String key = (fileName == null ? "ppt" : fileName) + "_" +
+                (sourceFile == null ? "0" : (sourceFile.length() + "_" + sourceFile.lastModified()));
+        pptMediaDir = new File(root, Integer.toHexString(key.hashCode()));
         if (!pptMediaDir.exists()) pptMediaDir.mkdirs();
     }
 
@@ -1439,6 +1441,12 @@ public class OfficeViewerActivity extends Activity {
 
     private String mimeForMediaName(String name) {
         String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".png")) return "image/png";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".gif")) return "image/gif";
+        if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".bmp")) return "image/bmp";
+        if (n.endsWith(".svg")) return "image/svg+xml";
         if (n.endsWith(".mp4") || n.endsWith(".m4v")) return "video/mp4";
         if (n.endsWith(".webm")) return "video/webm";
         if (n.endsWith(".3gp")) return "video/3gpp";
@@ -1446,6 +1454,8 @@ public class OfficeViewerActivity extends Activity {
         if (n.endsWith(".mpeg") || n.endsWith(".mpg")) return "video/mpeg";
         if (n.endsWith(".avi")) return "video/x-msvideo";
         if (n.endsWith(".wmv")) return "video/x-ms-wmv";
+        if (n.endsWith(".emf")) return "image/emf";
+        if (n.endsWith(".wmf")) return "image/wmf";
         return "application/octet-stream";
     }
 
