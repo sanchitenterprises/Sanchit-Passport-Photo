@@ -25,6 +25,9 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebSettings;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebViewClient;
 import android.webkit.WebView;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
@@ -92,6 +95,7 @@ public class OfficeViewerActivity extends Activity {
     private String cookie;
     private String userAgent;
     private File sourceFile;
+    private File pptMediaDir;
     private WebView webView;
     private TextView status;
     private boolean pendingSaveOriginal;
@@ -166,6 +170,25 @@ public class OfficeViewerActivity extends Activity {
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
         s.setAllowFileAccess(false);
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                try {
+                    Uri u = request.getUrl();
+                    if ("sts.local".equalsIgnoreCase(u.getHost()) && u.getPath() != null &&
+                            u.getPath().startsWith("/media/") && pptMediaDir != null) {
+                        String name = Uri.decode(u.getLastPathSegment());
+                        if (!TextUtils.isEmpty(name) && !name.contains("/") && !name.contains("\\")) {
+                            File media = new File(pptMediaDir, name);
+                            if (media.exists() && media.isFile()) {
+                                return new WebResourceResponse(mimeForMediaName(name), null, new FileInputStream(media));
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+                return super.shouldInterceptRequest(view, request);
+            }
+        });
         webView.setBackgroundColor(Color.parseColor("#EEF2F3"));
         root.addView(webView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -875,6 +898,7 @@ public class OfficeViewerActivity extends Activity {
                 + ".slide{box-sizing:border-box;width:960px;min-height:540px;margin:18px auto;padding:48px 56px;background:#fff;"
                 + "box-shadow:0 2px 12px rgba(0,0,0,.2);font-size:24px;overflow:hidden}.slide p{margin:0 0 18px;line-height:1.3}"
                 + ".slide img{display:block;max-width:100%;max-height:460px;width:auto;height:auto;margin:10px auto;object-fit:contain}"
+                + ".video-wrap{margin:10px 0;text-align:center}.video-wrap video{display:block;width:100%;max-height:460px;background:#000;margin:0 auto 6px}"
                 + ".slide-title{font-size:36px;font-weight:bold;margin-bottom:28px}.textdoc{box-sizing:border-box;width:794px;min-height:1123px;"
                 + "margin:16px auto;padding:58px 64px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.18);white-space:pre-wrap;line-height:1.45}"
                 + ".odf-page{box-sizing:border-box;width:794px;min-height:1123px;margin:16px auto;padding:50px 58px;background:#fff;"
@@ -883,6 +907,7 @@ public class OfficeViewerActivity extends Activity {
     }
 
     private String renderPptx(File file) throws Exception {
+        preparePptMediaDir();
         try (ZipFile zip = new ZipFile(file)) {
             Document pres = parseZipXml(zip, "ppt/presentation.xml");
             Map<String, String> rels = parseRelationships(zip, "ppt/_rels/presentation.xml.rels");
@@ -890,7 +915,7 @@ public class OfficeViewerActivity extends Activity {
             NodeList ids = pres.getElementsByTagNameNS("*", "sldId");
             for (int i = 0; i < ids.getLength(); i++) {
                 Element e = (Element) ids.item(i);
-                String target = rels.get(attrLocal(e, "id"));
+                String target = rels.get(relationshipId(e));
                 if (TextUtils.isEmpty(target)) continue;
                 slidePaths.add(resolveZipRelative("ppt/presentation.xml", target));
             }
@@ -922,6 +947,56 @@ public class OfficeViewerActivity extends Activity {
                     if (dataUri != null) {
                         out.append("<img src='").append(dataUri).append("'>");
                         hadContent = true;
+                    }
+                }
+
+                // Render embedded or linked videos found in slide relationships.
+                java.util.HashSet<String> shownVideo = new java.util.HashSet<>();
+                for (Map.Entry<String, String> re : slideRels.entrySet()) {
+                    String target = re.getValue();
+                    if (TextUtils.isEmpty(target) || !isVideoTarget(target)) continue;
+
+                    if (target.startsWith("http://") || target.startsWith("https://")) {
+                        if (shownVideo.add(target)) {
+                            out.append("<div class='video-wrap'><video controls playsinline preload='metadata' src='")
+                                    .append(escapeAttr(target)).append("'></video>")
+                                    .append("<div><a href='").append(escapeAttr(target))
+                                    .append("'>Open linked video</a></div></div>");
+                            hadContent = true;
+                        }
+                    } else {
+                        String mediaPath = resolveZipRelative(path, target);
+                        if (!shownVideo.add(mediaPath)) continue;
+                        String localUrl = cachePptMedia(zip, mediaPath);
+                        if (localUrl != null) {
+                            out.append("<div class='video-wrap'><video controls playsinline preload='metadata' src='")
+                                    .append(localUrl).append("'></video></div>");
+                            hadContent = true;
+                        }
+                    }
+                }
+
+                // Some PPTX files reference video through a:videoFile / p14:media elements.
+                NodeList videoNodes = s.getElementsByTagNameNS("*", "videoFile");
+                for (int i = 0; i < videoNodes.getLength(); i++) {
+                    Element vn = (Element) videoNodes.item(i);
+                    String rid = attrLocal(vn, "link");
+                    if (TextUtils.isEmpty(rid)) rid = attrLocal(vn, "embed");
+                    String target = slideRels.get(rid);
+                    if (TextUtils.isEmpty(target)) continue;
+                    String key = target.startsWith("http") ? target : resolveZipRelative(path, target);
+                    if (!shownVideo.add(key)) continue;
+                    if (target.startsWith("http://") || target.startsWith("https://")) {
+                        out.append("<div class='video-wrap'><video controls playsinline preload='metadata' src='")
+                                .append(escapeAttr(target)).append("'></video></div>");
+                        hadContent = true;
+                    } else {
+                        String localUrl = cachePptMedia(zip, key);
+                        if (localUrl != null) {
+                            out.append("<div class='video-wrap'><video controls playsinline preload='metadata' src='")
+                                    .append(localUrl).append("'></video></div>");
+                            hadContent = true;
+                        }
                     }
                 }
 
@@ -1308,6 +1383,70 @@ public class OfficeViewerActivity extends Activity {
             if (local.equals(localName(n))) return n.getNodeValue();
         }
         return "";
+    }
+
+    private String relationshipId(Element e) {
+        if (e == null) return "";
+        final String relNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        String v = e.getAttributeNS(relNs, "id");
+        if (!TextUtils.isEmpty(v)) return v;
+
+        NamedNodeMap a = e.getAttributes();
+        for (int i = 0; i < a.getLength(); i++) {
+            Node n = a.item(i);
+            String prefix = n.getPrefix();
+            if ("id".equals(n.getLocalName()) && "r".equals(prefix)) return n.getNodeValue();
+            if ("r:id".equals(n.getNodeName())) return n.getNodeValue();
+        }
+        return "";
+    }
+
+    private void preparePptMediaDir() {
+        File root = new File(getCacheDir(), "office_ppt_media");
+        if (!root.exists()) root.mkdirs();
+        pptMediaDir = new File(root, Integer.toHexString((fileName == null ? "ppt" : fileName).hashCode()));
+        if (!pptMediaDir.exists()) pptMediaDir.mkdirs();
+    }
+
+    private boolean isVideoTarget(String target) {
+        if (target == null) return false;
+        String t = target.toLowerCase(Locale.ROOT);
+        int q = t.indexOf('?');
+        if (q >= 0) t = t.substring(0, q);
+        return t.endsWith(".mp4") || t.endsWith(".m4v") || t.endsWith(".mov") ||
+                t.endsWith(".webm") || t.endsWith(".3gp") || t.endsWith(".avi") ||
+                t.endsWith(".wmv") || t.endsWith(".mpeg") || t.endsWith(".mpg");
+    }
+
+    private String cachePptMedia(ZipFile zip, String path) {
+        try {
+            if (pptMediaDir == null) preparePptMediaDir();
+            ZipEntry e = zip.getEntry(path);
+            if (e == null) return null;
+            String leaf = path.substring(path.lastIndexOf('/') + 1);
+            String safe = Integer.toHexString(path.hashCode()) + "_" + sanitizeFileName(leaf);
+            File out = new File(pptMediaDir, safe);
+            if (!out.exists() || out.length() != e.getSize()) {
+                try (InputStream in = zip.getInputStream(e); OutputStream os = new FileOutputStream(out)) {
+                    copy(in, os);
+                }
+            }
+            return "https://sts.local/media/" + Uri.encode(safe);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String mimeForMediaName(String name) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".mp4") || n.endsWith(".m4v")) return "video/mp4";
+        if (n.endsWith(".webm")) return "video/webm";
+        if (n.endsWith(".3gp")) return "video/3gpp";
+        if (n.endsWith(".mov")) return "video/quicktime";
+        if (n.endsWith(".mpeg") || n.endsWith(".mpg")) return "video/mpeg";
+        if (n.endsWith(".avi")) return "video/x-msvideo";
+        if (n.endsWith(".wmv")) return "video/x-ms-wmv";
+        return "application/octet-stream";
     }
 
     private Element firstChild(Element e, String local) {
