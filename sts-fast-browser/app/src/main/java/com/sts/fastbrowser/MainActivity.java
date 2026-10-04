@@ -5,6 +5,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentUris;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -75,6 +76,7 @@ import java.security.MessageDigest;
 public class MainActivity extends android.app.Activity {
     private static final int REQ_LOCATION = 812;
     private static final int REQ_DOCUMENT_ACCESS = 813;
+    private static final int REQ_PHONE_DATA_DELETE = 814;
     private static final String PREFS = "sts_fast_browser_prefs";
     private static final String KEY_SITES = "sites_json";
     private static final String KEY_SITES_D1 = "sites_d1_json";
@@ -2059,6 +2061,8 @@ public class MainActivity extends android.app.Activity {
             Uri collection;
             if ("Photo".equals(mode)) {
                 collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+            } else if ("Audio".equals(mode)) {
+                collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
             } else if ("Video".equals(mode)) {
                 collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
             } else {
@@ -2126,9 +2130,11 @@ public class MainActivity extends android.app.Activity {
     private String categoryForPhoneData(String mode, String name, String mime) {
         if ("Documents".equals(mode)) return documentCategory(name);
         if ("Photo".equals(mode)) return isPhotoCandidate(name, mime) ? "PHOTO" : null;
+        if ("Audio".equals(mode)) return isAudioCandidate(name, mime) ? "AUDIO" : null;
         if ("Video".equals(mode)) return isVideoFileCandidate(name, mime) ? "VIDEO" : null;
         if ("Other Data".equals(mode)) {
-            if (documentCategory(name) != null || isPhotoCandidate(name, mime) || isVideoFileCandidate(name, mime)) {
+            if (documentCategory(name) != null || isPhotoCandidate(name, mime) ||
+                    isAudioCandidate(name, mime) || isVideoFileCandidate(name, mime)) {
                 return null;
             }
             return otherDataCategory(name, mime);
@@ -2169,6 +2175,16 @@ public class MainActivity extends android.app.Activity {
             return null;
         }
 
+        if ("Audio".equals(mode)) {
+            if (n.endsWith(".mp3") || "audio/mpeg".equals(m)) return "MP3";
+            if (n.endsWith(".m4a") || m.contains("mp4a") || "audio/mp4".equals(m)) return "M4A";
+            if (n.endsWith(".aac") || "audio/aac".equals(m)) return "AAC";
+            if (n.endsWith(".wav") || "audio/wav".equals(m) || "audio/x-wav".equals(m)) return "WAV";
+            if (n.endsWith(".ogg") || "audio/ogg".equals(m)) return "OGG";
+            if (n.endsWith(".flac") || "audio/flac".equals(m)) return "FLAC";
+            return "OTHER";
+        }
+
         if ("Video".equals(mode)) {
             if (n.endsWith(".mp4") || "video/mp4".equals(m)) return "MP4";
             if (n.endsWith(".mkv") || m.contains("matroska")) return "MKV";
@@ -2183,8 +2199,6 @@ public class MainActivity extends android.app.Activity {
         }
 
         if ("Other Data".equals(mode)) {
-            if (m.startsWith("audio/") || n.endsWith(".mp3") || n.endsWith(".wav") ||
-                    n.endsWith(".aac") || n.endsWith(".m4a") || n.endsWith(".ogg") || n.endsWith(".flac")) return "AUDIO";
             if (n.endsWith(".apk")) return "APK";
             if (n.endsWith(".zip")) return "ZIP";
             if (n.endsWith(".rar")) return "RAR";
@@ -2215,6 +2229,14 @@ public class MainActivity extends android.app.Activity {
                 n.endsWith(".heic") || n.endsWith(".heif") || n.endsWith(".avif");
     }
 
+    private boolean isAudioCandidate(String name, String mime) {
+        String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        if (m.startsWith("audio/")) return true;
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        return n.endsWith(".mp3") || n.endsWith(".m4a") || n.endsWith(".aac") ||
+                n.endsWith(".wav") || n.endsWith(".ogg") || n.endsWith(".flac");
+    }
+
     private boolean isVideoFileCandidate(String name, String mime) {
         String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
         if (m.startsWith("video/")) return true;
@@ -2228,8 +2250,6 @@ public class MainActivity extends android.app.Activity {
     private String otherDataCategory(String name, String mime) {
         String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
         String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
-        if (m.startsWith("audio/") || n.endsWith(".mp3") || n.endsWith(".wav") ||
-                n.endsWith(".aac") || n.endsWith(".m4a") || n.endsWith(".ogg") || n.endsWith(".flac")) return "AUDIO";
         if (n.endsWith(".apk")) return "APK";
         if (n.endsWith(".zip") || n.endsWith(".rar") || n.endsWith(".7z") ||
                 n.endsWith(".tar") || n.endsWith(".gz")) return "ZIP";
@@ -2265,7 +2285,11 @@ public class MainActivity extends android.app.Activity {
         if (n.endsWith(".mkv")) return "video/x-matroska";
         if (n.endsWith(".mov")) return "video/quicktime";
         if (n.endsWith(".mp3")) return "audio/mpeg";
+        if (n.endsWith(".m4a")) return "audio/mp4";
+        if (n.endsWith(".aac")) return "audio/aac";
         if (n.endsWith(".wav")) return "audio/wav";
+        if (n.endsWith(".ogg")) return "audio/ogg";
+        if (n.endsWith(".flac")) return "audio/flac";
         if (n.endsWith(".apk")) return "application/vnd.android.package-archive";
         if (n.endsWith(".zip")) return "application/zip";
         return "application/octet-stream";
@@ -2293,7 +2317,7 @@ public class MainActivity extends android.app.Activity {
             rows.append("<div class='doc-item' data-cat='").append(d.filterType)
                     .append("' data-name='").append(escapeDocsAttr(d.name.toLowerCase(Locale.ROOT))).append("'")
                     .append(" data-size='").append(d.size).append("'")
-                    .append(" data-modified='").append(d.modified).append("' onclick='openDoc(this)'")
+                    .append(" data-modified='").append(d.modified).append("' onclick='handleItemTap(this,event)'")
                     .append(" data-uri='").append(escapeDocsAttr(d.uri)).append("'")
                     .append(" data-filename='").append(escapeDocsAttr(d.name)).append("'")
                     .append(" data-mime='").append(escapeDocsAttr(d.mime)).append("'>");
@@ -2326,15 +2350,15 @@ public class MainActivity extends android.app.Activity {
                 "<style>" +
                 "*{box-sizing:border-box}html,body{margin:0;background:#050505;color:#f4f4f4;font-family:Arial,sans-serif;min-height:100%}" +
                 ".header{position:sticky;top:0;z-index:10;background:#050505;padding:16px 16px 0;border-bottom:1px solid #111}" +
-                ".title-row{display:flex;align-items:center;height:48px}.mode-title{flex:1;border:0;background:transparent;color:#fff;text-align:left;font-size:25px;font-weight:700;padding:0;white-space:nowrap}.top-count{font-size:13px;color:#a8a8a8;white-space:nowrap;margin-right:4px}.mode-menu{display:none;position:fixed;left:12px;top:58px;z-index:55;width:max-content;min-width:150px;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.mode-menu.show{display:block}.mode-option{display:block;width:100%;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.mode-option:active{background:#303030}" +
+                ".title-row{display:flex;align-items:center;height:48px}.mode-title{flex:1;border:0;background:transparent;color:#fff;text-align:left;font-size:25px;font-weight:700;padding:0;white-space:nowrap}.top-count{font-size:13px;color:#a8a8a8;white-space:nowrap;margin-right:4px}.selected-count{display:none;font-size:13px;color:#fff;white-space:nowrap;margin-right:4px;font-weight:700}.mode-menu{display:none;position:fixed;left:12px;top:58px;z-index:55;width:max-content;min-width:150px;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.mode-menu.show{display:block}.mode-option{display:block;width:100%;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.mode-option:active{background:#303030}" +
                 ".head-btn{width:44px;height:44px;border:0;background:transparent;color:#fff;font-size:28px;border-radius:22px}" +
                 ".head-btn:active{background:#242424}.tabs{display:flex;overflow-x:auto;gap:4px;height:58px;align-items:flex-end;padding:0 4px}" +
                 ".tab{border:0;background:transparent;color:#8c8c8c;font-size:18px;padding:16px 13px 13px;white-space:nowrap;border-bottom:3px solid transparent}" +
                 ".tab.active{color:#fff;border-bottom-color:#fff;font-weight:700}.search{display:none;padding:0 0 12px}.search.show{display:block}" +
                 ".search input{width:100%;height:42px;border-radius:10px;border:1px solid #555;background:#171717;color:#fff;padding:0 12px;font-size:16px}" +
-                ".doc-menu{display:none;position:fixed;right:12px;top:58px;z-index:50;width:max-content;max-width:72vw;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.doc-menu.show{display:block}.menu-item,.sort-option{display:block;width:100%;min-width:0;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.menu-item:active,.sort-option:active{background:#303030}.sort-sub{display:none;background:#121212}.sort-sub.show{display:block}.sort-sub .sort-option{padding-left:28px;color:#ddd}" +
+                ".doc-menu{display:none;position:fixed;right:12px;top:58px;z-index:50;width:max-content;max-width:72vw;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.doc-menu.show{display:block}.selection-menu{display:none}.menu-item,.sort-option{display:block;width:100%;min-width:0;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.menu-item:active,.sort-option:active{background:#303030}.sort-sub{display:none;background:#121212}.sort-sub.show{display:block}.sort-sub .sort-option{padding-left:28px;color:#ddd}" +
                 ".date-group{font-size:22px;font-weight:700;padding:14px 16px 10px}.doc-list{padding-bottom:28px}" +
-                ".doc-item{display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020}" +
+                ".doc-item{position:relative;display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020}.doc-item.selected{outline:2px solid #4F8F8B;outline-offset:-2px;background:#16302e}.doc-item.selected:after{content:'✓';position:absolute;right:7px;top:7px;width:22px;height:22px;border-radius:50%;background:#4F8F8B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;z-index:4}" +
                 ".doc-item:active{background:#181818}.file-icon{width:54px;height:66px;margin-right:16px;display:flex;align-items:center;justify-content:center;" +
                 "border-radius:4px 4px 3px 3px;color:#fff;font-weight:700;font-size:18px;clip-path:polygon(0 0,76% 0,100% 20%,100% 100%,0 100%)}" +
                 ".file-icon.pdf{background:#e34d4d}.file-icon.doc{background:#3778c2}.file-icon.xls{background:#388e4a}" +
@@ -2355,15 +2379,18 @@ public class MainActivity extends android.app.Activity {
                 "<div class='header'><div class='title-row'>" +
                 "<button id='modeButton' class='mode-title' onclick='toggleModeMenu(event)'>" + escapeDocsHtml(mode) + " ▾</button>" +
                 "<div class='top-count'><span id='shownCount'>" + count + "</span> items</div>" +
+                "<div id='selectedCount' class='selected-count'>0 selected</div>" +
                 "<button class='head-btn' onclick='toggleSearch()'>⌕</button>" +
                 "<button id='menuButton' class='head-btn' onclick='toggleDocMenu(event)'>⋮</button></div>" +
                 "<div id='searchBox' class='search'><input id='q' placeholder='Search " + escapeDocsAttr(mode.toLowerCase(Locale.ROOT)) + "' oninput='applyFilter()'></div>" +
                 "<div class='tabs'>" + phoneDataTabsHtml(mode) + "</div></div>" +
                 "<div id='modeMenu' class='mode-menu'>" +
                 modeOptionHtml("Documents", mode) + modeOptionHtml("Photo", mode) +
-                modeOptionHtml("Video", mode) + modeOptionHtml("Other Data", mode) +
+                modeOptionHtml("Audio", mode) + modeOptionHtml("Video", mode) +
+                modeOptionHtml("Other Data", mode) +
                 "</div>" +
                 "<div id='docMenu' class='doc-menu'>" +
+                "<div id='normalMenu'>" +
                 "<button class='menu-item' onclick='STSDocuments.refresh()'>Refresh</button>" +
                 "<button id='gridMenuItem' class='menu-item' onclick='toggleGridFromMenu()'>" +
                 (isMediaMode(mode) ? "List view" : "Grid view") + "</button>" +
@@ -2375,14 +2402,26 @@ public class MainActivity extends android.app.Activity {
                 "<button class='sort-option' onclick=\"sortDocs('nameDesc')\">Name Z–A</button>" +
                 "<button class='sort-option' onclick=\"sortDocs('sizeDesc')\">Largest first</button>" +
                 "<button class='sort-option' onclick=\"sortDocs('sizeAsc')\">Smallest first</button>" +
-                "</div>" +
-                "</div>" +
+                "</div></div>" +
+                "<div id='selectionMenu' class='selection-menu'>" +
+                "<button class='menu-item' onclick='shareSelected()'>Share</button>" +
+                "<button class='menu-item' onclick='deleteSelected()'>Delete</button>" +
+                "</div></div>" +
                 body +
                 "<script>" +
-                "var cat='All';" +
+                "var cat='All',selected=new Set(),pressTimer=null,startX=0,startY=0;" +
                 "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
                 "function toggleModeMenu(e){if(e)e.stopPropagation();document.getElementById('docMenu').classList.remove('show');document.getElementById('sortSub').classList.remove('show');document.getElementById('modeMenu').classList.toggle('show');}" +
                 "function chooseMode(v){document.getElementById('modeMenu').classList.remove('show');STSDocuments.selectMode(v);}" +
+                "function syncSelectionUi(){var n=selected.size,s=document.getElementById('selectedCount'),normal=document.getElementById('normalMenu'),sel=document.getElementById('selectionMenu');if(s){s.textContent=n+' selected';s.style.display=n?'block':'none';}if(normal)normal.style.display=n?'none':'block';if(sel)sel.style.display=n?'block':'none';var sub=document.getElementById('sortSub');if(n&&sub)sub.classList.remove('show');}" +
+                "function setSelected(x,on){if(on){selected.add(x);x.classList.add('selected');}else{selected.delete(x);x.classList.remove('selected');}syncSelectionUi();}" +
+                "function toggleSelected(x,forceOn){setSelected(x,forceOn===true?true:!selected.has(x));}" +
+                "function handleItemTap(x,e){if(x.dataset.longpress==='1'){x.dataset.longpress='';return;}if(selected.size){toggleSelected(x,false);return;}openDoc(x);}" +
+                "function clearPress(){if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}}" +
+                "function installSelection(){document.querySelectorAll('.doc-item').forEach(function(x){x.addEventListener('touchstart',function(e){if(!e.touches||e.touches.length!==1)return;startX=e.touches[0].clientX;startY=e.touches[0].clientY;clearTimeout(pressTimer);pressTimer=setTimeout(function(){x.dataset.longpress='1';toggleSelected(x,true);pressTimer=null;},520);},{passive:true});x.addEventListener('touchmove',function(e){if(!pressTimer||!e.touches||!e.touches.length)return;var dx=e.touches[0].clientX-startX,dy=e.touches[0].clientY-startY;if(dx*dx+dy*dy>100)clearPress();},{passive:true});x.addEventListener('touchend',clearPress,{passive:true});x.addEventListener('touchcancel',clearPress,{passive:true});x.addEventListener('contextmenu',function(e){e.preventDefault();if(x.dataset.longpress!=='1'){x.dataset.longpress='1';toggleSelected(x,true);}return false;});});}" +
+                "function selectedUris(){return Array.from(selected).map(function(x){return x.dataset.uri;});}" +
+                "function shareSelected(){var a=selectedUris();document.getElementById('docMenu').classList.remove('show');if(a.length)STSDocuments.shareSelected(JSON.stringify(a));}" +
+                "function deleteSelected(){var a=selectedUris();document.getElementById('docMenu').classList.remove('show');if(a.length)STSDocuments.removeSelected(JSON.stringify(a));}" +
                 "function toggleDocMenu(e){if(e)e.stopPropagation();document.getElementById('modeMenu').classList.remove('show');var m=document.getElementById('docMenu');m.classList.toggle('show');if(!m.classList.contains('show'))document.getElementById('sortSub').classList.remove('show');}" +
                 "function toggleGridFromMenu(){var media=document.body.classList.contains('media-grid');if(media){document.body.classList.toggle('media-grid');document.body.classList.toggle('grid',document.body.classList.contains('media-grid'));}else{document.body.classList.toggle('grid');}" +
                 "var b=document.getElementById('gridMenuItem');if(b)b.textContent=(document.body.classList.contains('grid')||document.body.classList.contains('media-grid'))?'List view':'Grid view';document.getElementById('docMenu').classList.remove('show');}" +
@@ -2405,6 +2444,7 @@ public class MainActivity extends android.app.Activity {
                 "document.getElementById('shownCount').textContent=n;document.querySelectorAll('.date-group').forEach(function(g){var x=g.nextElementSibling;var any=false;" +
                 "while(x&&!x.classList.contains('date-group')){if(x.classList.contains('doc-item')&&!x.classList.contains('hide')){any=true;break;}x=x.nextElementSibling;}g.classList.toggle('hide',!any);});}" +
                 "function openDoc(x){STSDocuments.open(x.dataset.uri,x.dataset.filename,x.dataset.mime);}" +
+                "installSelection();syncSelectionUi();" +
                 "</script></body></html>";
     }
 
@@ -2477,6 +2517,16 @@ public class MainActivity extends android.app.Activity {
                     tabHtml("BMP", false) +
                     tabHtml("AVIF", false);
         }
+        if ("Audio".equals(mode)) {
+            return tabHtml("All", true) +
+                    tabHtml("MP3", false) +
+                    tabHtml("M4A", false) +
+                    tabHtml("AAC", false) +
+                    tabHtml("WAV", false) +
+                    tabHtml("OGG", false) +
+                    tabHtml("FLAC", false) +
+                    tabHtml("OTHER", false);
+        }
         if ("Video".equals(mode)) {
             return tabHtml("All", true) +
                     tabHtml("MP4", false) +
@@ -2491,7 +2541,6 @@ public class MainActivity extends android.app.Activity {
         }
         if ("Other Data".equals(mode)) {
             return tabHtml("All", true) +
-                    tabHtml("AUDIO", false) +
                     tabHtml("APK", false) +
                     tabHtml("ZIP", false) +
                     tabHtml("RAR", false) +
@@ -2583,6 +2632,93 @@ public class MainActivity extends android.app.Activity {
         });
     }
 
+    private ArrayList<Uri> parsePhoneDataUris(String json) {
+        ArrayList<Uri> uris = new ArrayList<>();
+        try {
+            JSONArray arr = new JSONArray(json == null ? "[]" : json);
+            for (int i = 0; i < arr.length(); i++) {
+                String raw = arr.optString(i, "");
+                if (TextUtils.isEmpty(raw)) continue;
+                Uri uri = Uri.parse(raw);
+                if ("content".equalsIgnoreCase(uri.getScheme())) uris.add(uri);
+            }
+        } catch (Exception ignored) {}
+        return uris;
+    }
+
+    private void shareSelectedPhoneData(String json) {
+        runOnUiThread(() -> {
+            ArrayList<Uri> uris = parsePhoneDataUris(json);
+            if (uris.isEmpty()) return;
+            try {
+                Intent share = new Intent(uris.size() == 1 ? Intent.ACTION_SEND : Intent.ACTION_SEND_MULTIPLE);
+                share.setType("*/*");
+                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (uris.size() == 1) {
+                    share.putExtra(Intent.EXTRA_STREAM, uris.get(0));
+                } else {
+                    share.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris);
+                }
+                ClipData clip = ClipData.newRawUri("Phone Data", uris.get(0));
+                for (int i = 1; i < uris.size(); i++) clip.addItem(new ClipData.Item(uris.get(i)));
+                share.setClipData(clip);
+                startActivity(Intent.createChooser(share, "Share selected"));
+            } catch (Exception e) {
+                Toast.makeText(this, "Share नहीं हो पाया", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void requestDeleteSelectedPhoneData(String json) {
+        final ArrayList<Uri> uris = parsePhoneDataUris(json);
+        if (uris.isEmpty()) return;
+        runOnUiThread(() -> new AlertDialog.Builder(this)
+                .setTitle("Delete selected")
+                .setMessage(uris.size() + (uris.size() == 1 ? " item delete करना है?" : " items delete करने हैं?"))
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Delete", (d, w) -> performDeleteSelectedPhoneData(uris))
+                .show());
+    }
+
+    private void performDeleteSelectedPhoneData(ArrayList<Uri> uris) {
+        new Thread(() -> {
+            ArrayList<Uri> needApproval = new ArrayList<>();
+            int deleted = 0;
+            for (Uri uri : uris) {
+                try {
+                    int result = getContentResolver().delete(uri, null, null);
+                    if (result > 0) deleted++;
+                    else needApproval.add(uri);
+                } catch (Exception e) {
+                    needApproval.add(uri);
+                }
+            }
+
+            final int deletedNow = deleted;
+            if (!needApproval.isEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runOnUiThread(() -> {
+                    try {
+                        android.app.PendingIntent request = MediaStore.createDeleteRequest(
+                                getContentResolver(), needApproval);
+                        startIntentSenderForResult(request.getIntentSender(), REQ_PHONE_DATA_DELETE,
+                                null, 0, 0, 0);
+                    } catch (Exception e) {
+                        if (deletedNow > 0 && slot1DocumentsHome) showDocumentsHome();
+                        Toast.makeText(this, "कुछ files delete नहीं हो पाईं", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                return;
+            }
+
+            runOnUiThread(() -> {
+                if (slot1DocumentsHome) showDocumentsHome();
+                if (!needApproval.isEmpty()) {
+                    Toast.makeText(this, "कुछ files delete नहीं हो पाईं", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }, "SFB-Phone-Data-Delete").start();
+    }
+
     private class DocumentsBridge {
         @JavascriptInterface
         public void open(String uri, String name, String mime) {
@@ -2594,9 +2730,22 @@ public class MainActivity extends android.app.Activity {
         public void selectMode(String mode) {
             if (!slot1DocumentsHome) return;
             if (!"Documents".equals(mode) && !"Photo".equals(mode) &&
-                    !"Video".equals(mode) && !"Other Data".equals(mode)) return;
+                    !"Audio".equals(mode) && !"Video".equals(mode) &&
+                    !"Other Data".equals(mode)) return;
             phoneDataMode = mode;
             runOnUiThread(MainActivity.this::showDocumentsHome);
+        }
+
+        @JavascriptInterface
+        public void shareSelected(String json) {
+            if (!slot1DocumentsHome) return;
+            shareSelectedPhoneData(json);
+        }
+
+        @JavascriptInterface
+        public void removeSelected(String json) {
+            if (!slot1DocumentsHome) return;
+            requestDeleteSelectedPhoneData(json);
         }
 
         @JavascriptInterface
@@ -2616,6 +2765,14 @@ public class MainActivity extends android.app.Activity {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_PHONE_DATA_DELETE) {
+            if (slot1DocumentsHome) showDocumentsHome();
+        }
     }
 
     @Override
