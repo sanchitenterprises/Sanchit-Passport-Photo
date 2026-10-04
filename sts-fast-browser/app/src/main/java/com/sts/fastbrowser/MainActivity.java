@@ -1808,8 +1808,8 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void updateSlotLabels() {
-        if (slot1Button != null) slot1Button.setText(slot1Name + " ▾");
-        if (slot2Button != null) slot2Button.setText(slot2Name + " ▾");
+        if (slot1Button != null) slot1Button.setText((activeSlot == 1 ? "● " : "") + slot1Name + " ▾");
+        if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + " ▾");
     }
 
     private List<Site> getSites(int slot) {
@@ -2171,7 +2171,7 @@ public class MainActivity extends android.app.Activity {
                 ".tab{border:0;background:transparent;color:#8c8c8c;font-size:18px;padding:16px 13px 13px;white-space:nowrap;border-bottom:3px solid transparent}" +
                 ".tab.active{color:#fff;border-bottom-color:#fff;font-weight:700}.search{display:none;padding:0 0 12px}.search.show{display:block}" +
                 ".search input{width:100%;height:42px;border-radius:10px;border:1px solid #555;background:#171717;color:#fff;padding:0 12px;font-size:16px}" +
-                ".summary{position:relative;display:flex;align-items:center;padding:20px 16px 14px;color:#aaa;font-weight:600}.summary .count{flex:1}.sort-btn{border:0;background:transparent;color:#ddd;font-size:16px;font-weight:600;padding:8px 0 8px 12px}.sort-menu{display:none;position:absolute;right:12px;top:54px;z-index:30;min-width:190px;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 5px 20px rgba(0,0,0,.5)}.sort-menu.show{display:block}.sort-option{display:block;width:100%;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:14px 16px;font-size:15px}.sort-option:active{background:#303030}" +
+                ".summary{display:flex;align-items:center;padding:20px 16px 14px;color:#aaa;font-weight:600}.summary .count{flex:1}.doc-menu{display:none;position:fixed;right:12px;top:58px;z-index:50;min-width:210px;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.doc-menu.show{display:block}.menu-item,.sort-option{display:block;width:100%;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:14px 16px;font-size:15px}.menu-item:active,.sort-option:active{background:#303030}.sort-sub{display:none;background:#121212}.sort-sub.show{display:block}.sort-sub .sort-option{padding-left:28px;color:#ddd}" +
                 ".date-group{font-size:22px;font-weight:700;padding:14px 16px 10px}.doc-list{padding-bottom:28px}" +
                 ".doc-item{display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020}" +
                 ".doc-item:active{background:#181818}.file-icon{width:54px;height:66px;margin-right:16px;display:flex;align-items:center;justify-content:center;" +
@@ -2189,41 +2189,44 @@ public class MainActivity extends android.app.Activity {
                 "</style></head><body>" +
                 "<div class='header'><div class='title-row'><div class='title'>Documents</div>" +
                 "<button class='head-btn' onclick='toggleSearch()'>⌕</button>" +
-                "<button class='head-btn' onclick='toggleGrid()'>▦</button>" +
-                "<button class='head-btn' onclick='STSDocuments.refresh()'>⋮</button></div>" +
+                "<button id='menuButton' class='head-btn' onclick='toggleDocMenu(event)'>⋮</button></div>" +
                 "<div id='searchBox' class='search'><input id='q' placeholder='Search documents' oninput='applyFilter()'></div>" +
                 "<div class='tabs'>" +
                 tabHtml("All", true) + tabHtml("DOC", false) + tabHtml("XLS", false) + tabHtml("PPT", false) +
                 tabHtml("PDF", false) + tabHtml("OFD", false) + tabHtml("TXT", false) +
                 "</div></div>" +
-                "<div class='summary'><div class='count'><span id='shownCount'>" + count + "</span> items in total</div>" +
-                "<button id='sortBtn' class='sort-btn' onclick='toggleSortMenu()'>Sort by ▾</button>" +
-                "<div id='sortMenu' class='sort-menu'>" +
-                "<button class='sort-option' onclick=\"sortDocs('dateDesc','Date modified')\">Date modified</button>" +
-                "<button class='sort-option' onclick=\"sortDocs('dateAsc','Oldest first')\">Oldest first</button>" +
-                "<button class='sort-option' onclick=\"sortDocs('nameAsc','Name A–Z')\">Name A–Z</button>" +
-                "<button class='sort-option' onclick=\"sortDocs('nameDesc','Name Z–A')\">Name Z–A</button>" +
-                "<button class='sort-option' onclick=\"sortDocs('sizeDesc','Largest first')\">Largest first</button>" +
-                "<button class='sort-option' onclick=\"sortDocs('sizeAsc','Smallest first')\">Smallest first</button>" +
-                "</div></div>" +
+                "<div class='summary'><div class='count'><span id='shownCount'>" + count + "</span> items in total</div></div>" +
+                "<div id='docMenu' class='doc-menu'>" +
+                "<button id='gridMenuItem' class='menu-item' onclick='toggleGridFromMenu()'>Grid view</button>" +
+                "<button class='menu-item' onclick='toggleSortSub(event)'>Sort by ▸</button>" +
+                "<div id='sortSub' class='sort-sub'>" +
+                "<button class='sort-option' onclick=\"sortDocs('dateDesc')\">Date modified</button>" +
+                "<button class='sort-option' onclick=\"sortDocs('dateAsc')\">Oldest first</button>" +
+                "<button class='sort-option' onclick=\"sortDocs('nameAsc')\">Name A–Z</button>" +
+                "<button class='sort-option' onclick=\"sortDocs('nameDesc')\">Name Z–A</button>" +
+                "<button class='sort-option' onclick=\"sortDocs('sizeDesc')\">Largest first</button>" +
+                "<button class='sort-option' onclick=\"sortDocs('sizeAsc')\">Smallest first</button>" +
+                "</div>" +
+                "<button class='menu-item' onclick='STSDocuments.refresh()'>Refresh</button>" +
+                "</div>" +
                 body +
                 "<script>" +
                 "var cat='All';" +
                 "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
-                "function toggleGrid(){document.body.classList.toggle('grid');}" +
-                "function toggleSortMenu(){document.getElementById('sortMenu').classList.toggle('show');}" +
+                "function toggleDocMenu(e){if(e)e.stopPropagation();var m=document.getElementById('docMenu');m.classList.toggle('show');if(!m.classList.contains('show'))document.getElementById('sortSub').classList.remove('show');}" +
+                "function toggleGridFromMenu(){document.body.classList.toggle('grid');var b=document.getElementById('gridMenuItem');if(b)b.textContent=document.body.classList.contains('grid')?'List view':'Grid view';document.getElementById('docMenu').classList.remove('show');}" +
+                "function toggleSortSub(e){if(e)e.stopPropagation();document.getElementById('sortSub').classList.toggle('show');}" +
                 "function dateGroup(ms){var d=new Date(Number(ms)||0);if(!d.getTime())return 'Unknown date';" +
                 "var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return y+'/'+m+'/'+day;}" +
-                "function sortDocs(mode,label){var list=document.getElementById('docList');if(!list)return;" +
+                "function sortDocs(mode){var list=document.getElementById('docList');if(!list)return;" +
                 "var items=Array.from(list.querySelectorAll('.doc-item'));list.querySelectorAll('.date-group').forEach(function(x){x.remove();});" +
                 "items.sort(function(a,b){if(mode==='nameAsc'||mode==='nameDesc'){var x=a.dataset.name||'',y=b.dataset.name||'';var r=x.localeCompare(y);return mode==='nameAsc'?r:-r;}" +
                 "if(mode==='sizeDesc'||mode==='sizeAsc'){var x=Number(a.dataset.size)||0,y=Number(b.dataset.size)||0;return mode==='sizeDesc'?(y-x):(x-y);}" +
                 "var x=Number(a.dataset.modified)||0,y=Number(b.dataset.modified)||0;return mode==='dateAsc'?(x-y):(y-x);});" +
                 "var dateMode=(mode==='dateDesc'||mode==='dateAsc'),last='';items.forEach(function(x){if(dateMode){var g=dateGroup(x.dataset.modified);" +
                 "if(g!==last){var h=document.createElement('div');h.className='date-group';h.textContent=g;list.appendChild(h);last=g;}}list.appendChild(x);});" +
-                "document.getElementById('sortBtn').textContent='Sort by ▾';document.getElementById('sortBtn').title=label;" +
-                "document.getElementById('sortMenu').classList.remove('show');applyFilter();}" +
-                "document.addEventListener('click',function(e){var m=document.getElementById('sortMenu'),b=document.getElementById('sortBtn');if(m&&b&&!m.contains(e.target)&&e.target!==b)m.classList.remove('show');});" +
+                "document.getElementById('sortSub').classList.remove('show');document.getElementById('docMenu').classList.remove('show');applyFilter();}" +
+                "document.addEventListener('click',function(e){var m=document.getElementById('docMenu'),b=document.getElementById('menuButton');if(m&&b&&!m.contains(e.target)&&e.target!==b){m.classList.remove('show');document.getElementById('sortSub').classList.remove('show');}});" +
                 "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');applyFilter();}" +
                 "function applyFilter(){var q=(document.getElementById('q').value||'').toLowerCase();var n=0;" +
                 "document.querySelectorAll('.doc-item').forEach(function(x){var ok=(cat==='All'||x.dataset.cat===cat)&&(!q||x.dataset.name.indexOf(q)>=0);x.classList.toggle('hide',!ok);if(ok)n++;});" +
