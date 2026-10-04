@@ -48,8 +48,12 @@ public class MediaPlayerActivity extends Activity {
     private TextView elapsedView;
     private TextView durationView;
     private SeekBar seekBar;
+    private View videoTopBar;
+    private View videoControlPanel;
+    private boolean videoControlsVisible = true;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable hideVideoControlsRunnable = this::hideVideoControls;
     private boolean userSeeking = false;
     private boolean firstStart = true;
     private long resumePosition = 0L;
@@ -101,16 +105,14 @@ public class MediaPlayerActivity extends Activity {
         }
 
         setTitle(fileName);
+        if (videoMode) enterVideoImmersive();
         setContentView(buildUi());
         initializePlayer();
+        if (videoMode) scheduleVideoControlsHide();
         handler.post(progressUpdater);
     }
 
     private View buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.BLACK);
-
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -120,8 +122,6 @@ public class MediaPlayerActivity extends Activity {
                 new int[]{Color.parseColor("#D9F0EE"), Color.parseColor("#E3EAF4"), Color.parseColor("#EEE8F4")}
         );
         topBar.setBackground(topBg);
-        root.addView(topBar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
 
         TextView back = makeTopButton("‹", 30);
         back.setContentDescription("Back");
@@ -141,19 +141,22 @@ public class MediaPlayerActivity extends Activity {
 
         TextView menu = makeTopButton("⋮", 26);
         menu.setContentDescription("Menu");
-        menu.setOnClickListener(this::showMenu);
+        menu.setOnClickListener(v -> {
+            showVideoControls();
+            showMenu(v);
+        });
         topBar.addView(menu, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
 
         mediaStage = new FrameLayout(this);
         mediaStage.setBackgroundColor(Color.BLACK);
-        root.addView(mediaStage, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         if (videoMode) {
             playerView = new PlayerView(this);
             playerView.setUseController(false);
             playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
             playerView.setBackgroundColor(Color.BLACK);
+            playerView.setClickable(true);
+            playerView.setOnClickListener(v -> toggleVideoControls());
             mediaStage.addView(playerView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -165,9 +168,9 @@ public class MediaPlayerActivity extends Activity {
         LinearLayout controlPanel = new LinearLayout(this);
         controlPanel.setOrientation(LinearLayout.VERTICAL);
         controlPanel.setPadding(dp(12), dp(8), dp(12), dp(12));
-        controlPanel.setBackgroundColor(Color.parseColor("#101010"));
-        root.addView(controlPanel, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        controlPanel.setBackgroundColor(videoMode
+                ? Color.parseColor("#CC101010")
+                : Color.parseColor("#101010"));
 
         seekBar = new SeekBar(this);
         seekBar.setMax(1);
@@ -199,9 +202,18 @@ public class MediaPlayerActivity extends Activity {
         playPauseButton = makeControlButton("▶", 28);
         TextView forward = makeControlButton("10 ↷", 16);
 
-        rewind.setOnClickListener(v -> seekRelative(-10000L));
-        playPauseButton.setOnClickListener(v -> togglePlayback());
-        forward.setOnClickListener(v -> seekRelative(10000L));
+        rewind.setOnClickListener(v -> {
+            seekRelative(-10000L);
+            showVideoControls();
+        });
+        playPauseButton.setOnClickListener(v -> {
+            togglePlayback();
+            showVideoControls();
+        });
+        forward.setOnClickListener(v -> {
+            seekRelative(10000L);
+            showVideoControls();
+        });
 
         buttons.addView(rewind, new LinearLayout.LayoutParams(dp(90), dp(52)));
         LinearLayout.LayoutParams centerLp = new LinearLayout.LayoutParams(dp(72), dp(56));
@@ -222,18 +234,54 @@ public class MediaPlayerActivity extends Activity {
             @Override
             public void onStartTrackingTouch(SeekBar bar) {
                 userSeeking = true;
+                showVideoControls();
             }
 
             @Override
             public void onStopTrackingTouch(SeekBar bar) {
                 userSeeking = false;
-                if (player == null) return;
-                long dur = player.getDuration();
-                if (dur == C.TIME_UNSET || dur <= 0L) return;
-                player.seekTo(seekToPosition(bar.getProgress(), bar.getMax(), dur));
+                if (player != null) {
+                    long dur = player.getDuration();
+                    if (dur != C.TIME_UNSET && dur > 0L) {
+                        player.seekTo(seekToPosition(bar.getProgress(), bar.getMax(), dur));
+                    }
+                }
+                scheduleVideoControlsHide();
             }
         });
 
+        if (videoMode) {
+            FrameLayout root = new FrameLayout(this);
+            root.setBackgroundColor(Color.BLACK);
+            root.addView(mediaStage, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            FrameLayout.LayoutParams topLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(44), Gravity.TOP);
+            root.addView(topBar, topLp);
+
+            FrameLayout.LayoutParams controlsLp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM);
+            root.addView(controlPanel, controlsLp);
+
+            videoTopBar = topBar;
+            videoControlPanel = controlPanel;
+            return root;
+        }
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.BLACK);
+        root.addView(topBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+        root.addView(mediaStage, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(controlPanel, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         return root;
     }
 
@@ -284,6 +332,55 @@ public class MediaPlayerActivity extends Activity {
                 Gravity.CENTER));
     }
 
+    private void enterVideoImmersive() {
+        if (!videoMode) return;
+        getWindow().setStatusBarColor(Color.BLACK);
+        getWindow().setNavigationBarColor(Color.BLACK);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY |
+                View.SYSTEM_UI_FLAG_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN |
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION |
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        );
+    }
+
+    private void showVideoControls() {
+        if (!videoMode || videoTopBar == null || videoControlPanel == null) return;
+        handler.removeCallbacks(hideVideoControlsRunnable);
+        videoControlsVisible = true;
+        videoTopBar.setVisibility(View.VISIBLE);
+        videoControlPanel.setVisibility(View.VISIBLE);
+        videoTopBar.animate().alpha(1f).setDuration(140).start();
+        videoControlPanel.animate().alpha(1f).setDuration(140).start();
+        scheduleVideoControlsHide();
+    }
+
+    private void hideVideoControls() {
+        if (!videoMode || videoTopBar == null || videoControlPanel == null || userSeeking) return;
+        videoControlsVisible = false;
+        videoTopBar.animate().alpha(0f).setDuration(180).withEndAction(() -> {
+            if (!videoControlsVisible) videoTopBar.setVisibility(View.GONE);
+        }).start();
+        videoControlPanel.animate().alpha(0f).setDuration(180).withEndAction(() -> {
+            if (!videoControlsVisible) videoControlPanel.setVisibility(View.GONE);
+        }).start();
+        enterVideoImmersive();
+    }
+
+    private void toggleVideoControls() {
+        if (!videoMode) return;
+        if (videoControlsVisible) hideVideoControls();
+        else showVideoControls();
+    }
+
+    private void scheduleVideoControlsHide() {
+        if (!videoMode) return;
+        handler.removeCallbacks(hideVideoControlsRunnable);
+        handler.postDelayed(hideVideoControlsRunnable, 2600L);
+    }
+
     private void initializePlayer() {
         if (sourceUri == null) {
             Toast.makeText(this, "Media file नहीं मिली", Toast.LENGTH_SHORT).show();
@@ -323,6 +420,10 @@ public class MediaPlayerActivity extends Activity {
             public void onIsPlayingChanged(boolean isPlaying) {
                 updatePlayButton();
                 setKeepScreenOn(videoMode && isPlaying);
+                if (videoMode) {
+                    if (isPlaying) scheduleVideoControlsHide();
+                    else showVideoControls();
+                }
             }
 
             @Override
@@ -520,6 +621,12 @@ public class MediaPlayerActivity extends Activity {
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && videoMode) enterVideoImmersive();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         if (player != null) {
@@ -561,6 +668,7 @@ public class MediaPlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        handler.removeCallbacks(hideVideoControlsRunnable);
         handler.removeCallbacksAndMessages(null);
         setKeepScreenOn(false);
         releasePlayer();
