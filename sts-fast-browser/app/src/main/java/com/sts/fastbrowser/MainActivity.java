@@ -1808,7 +1808,10 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void updateSlotLabels() {
-        if (slot1Button != null) slot1Button.setText((activeSlot == 1 ? "● " : "") + slot1Name + " ▾");
+        if (slot1Button != null) {
+            String d1Label = slot1DocumentsHome ? "Documents" : slot1Name;
+            slot1Button.setText((activeSlot == 1 ? "● " : "") + d1Label + " ▾");
+        }
         if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + " ▾");
     }
 
@@ -1961,6 +1964,7 @@ public class MainActivity extends android.app.Activity {
     private void showDocumentsHome() {
         slot1DocumentsHome = true;
         showWebView(1);
+        updateSlotLabels();
         final int generation = ++documentsLoadGeneration;
 
         String loading = documentsShellHtml(
@@ -2197,6 +2201,7 @@ public class MainActivity extends android.app.Activity {
                 tabHtml("PDF", false) + tabHtml("OFD", false) + tabHtml("TXT", false) +
                 "</div></div>" +
                 "<div id='docMenu' class='doc-menu'>" +
+                "<button class='menu-item' onclick='STSDocuments.refresh()'>Refresh</button>" +
                 "<button id='gridMenuItem' class='menu-item' onclick='toggleGridFromMenu()'>Grid view</button>" +
                 "<button class='menu-item' onclick='toggleSortSub(event)'>Sort by ▸</button>" +
                 "<div id='sortSub' class='sort-sub'>" +
@@ -2207,7 +2212,6 @@ public class MainActivity extends android.app.Activity {
                 "<button class='sort-option' onclick=\"sortDocs('sizeDesc')\">Largest first</button>" +
                 "<button class='sort-option' onclick=\"sortDocs('sizeAsc')\">Smallest first</button>" +
                 "</div>" +
-                "<button class='menu-item' onclick='STSDocuments.refresh()'>Refresh</button>" +
                 "</div>" +
                 body +
                 "<script>" +
