@@ -1162,6 +1162,7 @@ public class MainActivity extends android.app.Activity {
         String previousSelectedUrl = slot == 2 ? slot2Url : slot1Url;
         boolean sameSelection = previousSelectedUrl != null &&
                 previousSelectedUrl.equalsIgnoreCase(site.url);
+        boolean wasDocumentsHome = slot == 1 && slot1DocumentsHome;
 
         if (slot == 1) {
             slot1DocumentsHome = false;
@@ -1178,7 +1179,7 @@ public class MainActivity extends android.app.Activity {
         WebView target = webViewForSlot(slot);
         // Selecting the same dropdown site is only a slot switch: keep its exact live page,
         // history, forms and scroll state. A different site selection is an explicit navigation.
-        if (!sameSelection || target.getUrl() == null) {
+        if (wasDocumentsHome || !sameSelection || target.getUrl() == null) {
             target.animate().alpha(0.82f).setDuration(80).setListener(new AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(Animator animation) {
                     target.loadUrl(site.url);
@@ -2130,9 +2131,9 @@ public class MainActivity extends android.app.Activity {
 
             rows.append("<div class='doc-item' data-cat='").append(d.category)
                     .append("' data-name='").append(escapeDocsAttr(d.name.toLowerCase(Locale.ROOT))).append("' onclick='openDoc(this)'")
-                    .append(" data-uri=").append(JSONObject.quote(d.uri))
-                    .append(" data-filename=").append(JSONObject.quote(d.name))
-                    .append(" data-mime=").append(JSONObject.quote(d.mime)).append(">")
+                    .append(" data-uri='").append(escapeDocsAttr(d.uri)).append("'")
+                    .append(" data-filename='").append(escapeDocsAttr(d.name)).append("'")
+                    .append(" data-mime='").append(escapeDocsAttr(d.mime)).append("'>")
                     .append("<div class='file-icon ").append(d.category.toLowerCase(Locale.ROOT)).append("'><span>")
                     .append(escapeDocsHtml(iconText(d.category))).append("</span></div>")
                     .append("<div class='file-body'><div class='file-name'>").append(escapeDocsHtml(d.name)).append("</div>")
