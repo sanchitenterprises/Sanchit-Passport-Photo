@@ -115,6 +115,7 @@ public class MainActivity extends android.app.Activity {
     private String slot2Name = GOOGLE_NAME;
     private String slot2Url = GOOGLE_URL;
     private volatile boolean slot1DocumentsHome = true;
+    private volatile String phoneDataMode = "Documents";
     private volatile boolean documentAccessRequested = false;
     private int documentsLoadGeneration = 0;
 
@@ -1088,13 +1089,13 @@ public class MainActivity extends android.app.Activity {
         popup.setAnimationStyle(android.R.style.Animation_Dialog);
 
         if (slot == 1) {
-            TextView documents = makePopupItem("Documents");
-            documents.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-            documents.setOnClickListener(v -> {
+            TextView phoneData = makePopupItem("Phone Data");
+            phoneData.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            phoneData.setOnClickListener(v -> {
                 popup.dismiss();
                 showDocumentsHome();
             });
-            box.addView(documents, new LinearLayout.LayoutParams(
+            box.addView(phoneData, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
         }
 
@@ -1809,7 +1810,7 @@ public class MainActivity extends android.app.Activity {
 
     private void updateSlotLabels() {
         if (slot1Button != null) {
-            String d1Label = slot1DocumentsHome ? "Documents" : slot1Name;
+            String d1Label = slot1DocumentsHome ? "Phone Data" : slot1Name;
             slot1Button.setText((activeSlot == 1 ? "● " : "") + d1Label + " ▾");
         }
         if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + " ▾");
@@ -1966,10 +1967,11 @@ public class MainActivity extends android.app.Activity {
         showWebView(1);
         updateSlotLabels();
         final int generation = ++documentsLoadGeneration;
+        final String selectedMode = phoneDataMode;
 
         String loading = documentsShellHtml(
-                "<div class='center'><div class='spinner'></div><div>Documents loading...</div></div>",
-                0, false);
+                "<div class='center'><div class='spinner'></div><div>" + escapeDocsHtml(selectedMode) + " loading...</div></div>",
+                0, false, selectedMode);
         webView1.loadDataWithBaseURL("https://sts.documents/", loading, "text/html", "UTF-8", null);
 
         new Thread(() -> {
@@ -1977,20 +1979,21 @@ public class MainActivity extends android.app.Activity {
             if (!hasDocumentAccess()) {
                 html = documentsShellHtml(
                         "<div class='permission'><div class='folder'>▣</div>" +
-                        "<h2>Phone Documents</h2>" +
-                        "<p>PDF, Word, Excel, PPT, OFD और TXT files दिखाने के लिए file access Allow करें।</p>" +
+                        "<h2>Phone Data</h2>" +
+                        "<p>Documents, photos, videos और other files दिखाने के लिए file access Allow करें।</p>" +
                         "<button onclick='STSDocuments.requestAccess()'>Allow File Access</button></div>",
-                        0, true);
+                        0, true, selectedMode);
             } else {
-                List<DocumentEntry> docs = queryDocuments();
-                html = buildDocumentsHtml(docs);
+                List<DocumentEntry> entries = queryPhoneData(selectedMode);
+                html = buildPhoneDataHtml(entries, selectedMode);
             }
 
             runOnUiThread(() -> {
-                if (!slot1DocumentsHome || generation != documentsLoadGeneration || isFinishing()) return;
+                if (!slot1DocumentsHome || generation != documentsLoadGeneration || isFinishing() ||
+                        !selectedMode.equals(phoneDataMode)) return;
                 webView1.loadDataWithBaseURL("https://sts.documents/", html, "text/html", "UTF-8", null);
             });
-        }, "SFB-Documents-Home").start();
+        }, "SFB-Phone-Data").start();
     }
 
     private boolean hasDocumentAccess() {
@@ -2041,7 +2044,7 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
-    private List<DocumentEntry> queryDocuments() {
+    private List<DocumentEntry> queryPhoneData(String mode) {
         List<DocumentEntry> out = new ArrayList<>();
         Cursor cursor = null;
         try {
@@ -2071,18 +2074,25 @@ public class MainActivity extends android.app.Activity {
 
             while (cursor.moveToNext()) {
                 String name = cursor.getString(nameCol);
-                String category = documentCategory(name);
+                if (TextUtils.isEmpty(name)) continue;
+                String mime = mimeCol >= 0 ? cursor.getString(mimeCol) : null;
+                String category = categoryForPhoneData(mode, name, mime);
                 if (category == null) continue;
 
                 long id = cursor.getLong(idCol);
-                String mime = mimeCol >= 0 ? cursor.getString(mimeCol) : null;
                 long size = sizeCol >= 0 ? cursor.getLong(sizeCol) : 0L;
                 long modifiedSec = dateCol >= 0 ? cursor.getLong(dateCol) : 0L;
+
+                // Skip folder-like MediaStore rows from Other Data.
+                if ("Other Data".equals(mode) && TextUtils.isEmpty(mime) && size <= 0L && name.indexOf('.') < 0) {
+                    continue;
+                }
+
                 Uri uri = ContentUris.withAppendedId(collection, id);
                 out.add(new DocumentEntry(
                         uri.toString(),
-                        name == null ? "Document" : name,
-                        TextUtils.isEmpty(mime) ? mimeForDocumentName(name) : mime,
+                        name,
+                        TextUtils.isEmpty(mime) ? mimeForPhoneDataName(name) : mime,
                         category,
                         Math.max(0L, size),
                         Math.max(0L, modifiedSec) * 1000L
@@ -2093,6 +2103,19 @@ public class MainActivity extends android.app.Activity {
             if (cursor != null) cursor.close();
         }
         return out;
+    }
+
+    private String categoryForPhoneData(String mode, String name, String mime) {
+        if ("Documents".equals(mode)) return documentCategory(name);
+        if ("Photo".equals(mode)) return isPhotoCandidate(name, mime) ? "PHOTO" : null;
+        if ("Video".equals(mode)) return isVideoFileCandidate(name, mime) ? "VIDEO" : null;
+        if ("Other Data".equals(mode)) {
+            if (documentCategory(name) != null || isPhotoCandidate(name, mime) || isVideoFileCandidate(name, mime)) {
+                return null;
+            }
+            return otherDataCategory(name, mime);
+        }
+        return null;
     }
 
     private String documentCategory(String name) {
@@ -2106,7 +2129,37 @@ public class MainActivity extends android.app.Activity {
         return null;
     }
 
-    private String mimeForDocumentName(String name) {
+    private boolean isPhotoCandidate(String name, String mime) {
+        String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        if (m.startsWith("image/")) return true;
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        return n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") ||
+                n.endsWith(".webp") || n.endsWith(".gif") || n.endsWith(".bmp") ||
+                n.endsWith(".heic") || n.endsWith(".heif") || n.endsWith(".avif");
+    }
+
+    private boolean isVideoFileCandidate(String name, String mime) {
+        String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        if (m.startsWith("video/")) return true;
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        return n.endsWith(".mp4") || n.endsWith(".mkv") || n.endsWith(".webm") ||
+                n.endsWith(".3gp") || n.endsWith(".mov") || n.endsWith(".avi") ||
+                n.endsWith(".wmv") || n.endsWith(".m4v") || n.endsWith(".mpeg") ||
+                n.endsWith(".mpg");
+    }
+
+    private String otherDataCategory(String name, String mime) {
+        String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (m.startsWith("audio/") || n.endsWith(".mp3") || n.endsWith(".wav") ||
+                n.endsWith(".aac") || n.endsWith(".m4a") || n.endsWith(".ogg") || n.endsWith(".flac")) return "AUDIO";
+        if (n.endsWith(".apk")) return "APK";
+        if (n.endsWith(".zip") || n.endsWith(".rar") || n.endsWith(".7z") ||
+                n.endsWith(".tar") || n.endsWith(".gz")) return "ZIP";
+        return "FILE";
+    }
+
+    private String mimeForPhoneDataName(String name) {
         String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
         if (n.endsWith(".pdf")) return "application/pdf";
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -2122,10 +2175,26 @@ public class MainActivity extends android.app.Activity {
         if (n.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
         if (n.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
         if (n.endsWith(".ofd")) return "application/ofd";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".png")) return "image/png";
+        if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".gif")) return "image/gif";
+        if (n.endsWith(".bmp")) return "image/bmp";
+        if (n.endsWith(".heic") || n.endsWith(".heif")) return "image/heic";
+        if (n.endsWith(".avif")) return "image/avif";
+        if (n.endsWith(".mp4") || n.endsWith(".m4v")) return "video/mp4";
+        if (n.endsWith(".webm")) return "video/webm";
+        if (n.endsWith(".3gp")) return "video/3gpp";
+        if (n.endsWith(".mkv")) return "video/x-matroska";
+        if (n.endsWith(".mov")) return "video/quicktime";
+        if (n.endsWith(".mp3")) return "audio/mpeg";
+        if (n.endsWith(".wav")) return "audio/wav";
+        if (n.endsWith(".apk")) return "application/vnd.android.package-archive";
+        if (n.endsWith(".zip")) return "application/zip";
         return "application/octet-stream";
     }
 
-    private String buildDocumentsHtml(List<DocumentEntry> docs) {
+    private String buildPhoneDataHtml(List<DocumentEntry> docs, String mode) {
         StringBuilder rows = new StringBuilder(Math.max(8192, docs.size() * 340));
         SimpleDateFormat groupFmt = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
         SimpleDateFormat itemFmt = new SimpleDateFormat("d MMMM", Locale.getDefault());
@@ -2159,17 +2228,17 @@ public class MainActivity extends android.app.Activity {
 
         String body = "<div class='doc-list' id='docList'>" + rows + "</div>" +
                 (docs.isEmpty()
-                        ? "<div class='empty'>कोई supported document नहीं मिला।</div>"
+                        ? "<div class='empty'>कोई " + escapeDocsHtml(mode) + " data नहीं मिला।</div>"
                         : "");
-        return documentsShellHtml(body, docs.size(), false);
+        return documentsShellHtml(body, docs.size(), false, mode);
     }
 
-    private String documentsShellHtml(String body, int count, boolean permissionPage) {
+    private String documentsShellHtml(String body, int count, boolean permissionPage, String mode) {
         return "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>" +
                 "<style>" +
                 "*{box-sizing:border-box}html,body{margin:0;background:#050505;color:#f4f4f4;font-family:Arial,sans-serif;min-height:100%}" +
                 ".header{position:sticky;top:0;z-index:10;background:#050505;padding:16px 16px 0;border-bottom:1px solid #111}" +
-                ".title-row{display:flex;align-items:center;height:48px}.title{font-size:25px;font-weight:700;flex:1}.top-count{font-size:13px;color:#a8a8a8;white-space:nowrap;margin-right:4px}" +
+                ".title-row{display:flex;align-items:center;height:48px}.mode-title{flex:1;border:0;background:transparent;color:#fff;text-align:left;font-size:25px;font-weight:700;padding:0;white-space:nowrap}.top-count{font-size:13px;color:#a8a8a8;white-space:nowrap;margin-right:4px}.mode-menu{display:none;position:fixed;left:12px;top:58px;z-index:55;width:max-content;min-width:150px;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.mode-menu.show{display:block}.mode-option{display:block;width:100%;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.mode-option:active{background:#303030}" +
                 ".head-btn{width:44px;height:44px;border:0;background:transparent;color:#fff;font-size:28px;border-radius:22px}" +
                 ".head-btn:active{background:#242424}.tabs{display:flex;overflow-x:auto;gap:4px;height:58px;align-items:flex-end;padding:0 4px}" +
                 ".tab{border:0;background:transparent;color:#8c8c8c;font-size:18px;padding:16px 13px 13px;white-space:nowrap;border-bottom:3px solid transparent}" +
@@ -2181,7 +2250,7 @@ public class MainActivity extends android.app.Activity {
                 ".doc-item:active{background:#181818}.file-icon{width:54px;height:66px;margin-right:16px;display:flex;align-items:center;justify-content:center;" +
                 "border-radius:4px 4px 3px 3px;color:#fff;font-weight:700;font-size:18px;clip-path:polygon(0 0,76% 0,100% 20%,100% 100%,0 100%)}" +
                 ".file-icon.pdf{background:#e34d4d}.file-icon.doc{background:#3778c2}.file-icon.xls{background:#388e4a}" +
-                ".file-icon.ppt{background:#f05b23}.file-icon.ofd{background:#7856a8}.file-icon.txt{background:#6f7780}" +
+                ".file-icon.ppt{background:#f05b23}.file-icon.ofd{background:#7856a8}.file-icon.txt{background:#6f7780}.file-icon.photo{background:#5B7FA3}.file-icon.video{background:#7C7399}.file-icon.audio{background:#4F8F8B}.file-icon.apk{background:#7E9B76}.file-icon.zip{background:#B39B7A}.file-icon.file{background:#6f7780}" +
                 ".file-body{min-width:0;flex:1}.file-name{font-size:18px;font-weight:700;line-height:1.28;word-break:break-word}" +
                 ".file-meta{font-size:14px;color:#8f8f8f;margin-top:5px}.empty,.center,.permission{text-align:center;padding:70px 24px;color:#aaa}" +
                 ".permission{padding-top:100px}.permission h2{color:#fff}.permission p{line-height:1.5}.permission button{margin-top:14px;border:0;" +
@@ -2191,15 +2260,17 @@ public class MainActivity extends android.app.Activity {
                 "body.grid .date-group{grid-column:1/-1}body.grid .doc-item{display:block;min-height:170px;text-align:center;padding:16px 8px}" +
                 "body.grid .file-icon{margin:0 auto 10px}.hide{display:none!important}" +
                 "</style></head><body>" +
-                "<div class='header'><div class='title-row'><div class='title'>Documents</div>" +
+                "<div class='header'><div class='title-row'>" +
+                "<button id='modeButton' class='mode-title' onclick='toggleModeMenu(event)'>" + escapeDocsHtml(mode) + " ▾</button>" +
                 "<div class='top-count'><span id='shownCount'>" + count + "</span> items</div>" +
                 "<button class='head-btn' onclick='toggleSearch()'>⌕</button>" +
                 "<button id='menuButton' class='head-btn' onclick='toggleDocMenu(event)'>⋮</button></div>" +
-                "<div id='searchBox' class='search'><input id='q' placeholder='Search documents' oninput='applyFilter()'></div>" +
-                "<div class='tabs'>" +
-                tabHtml("All", true) + tabHtml("DOC", false) + tabHtml("XLS", false) + tabHtml("PPT", false) +
-                tabHtml("PDF", false) + tabHtml("OFD", false) + tabHtml("TXT", false) +
-                "</div></div>" +
+                "<div id='searchBox' class='search'><input id='q' placeholder='Search " + escapeDocsAttr(mode.toLowerCase(Locale.ROOT)) + "' oninput='applyFilter()'></div>" +
+                "<div class='tabs'>" + phoneDataTabsHtml(mode) + "</div></div>" +
+                "<div id='modeMenu' class='mode-menu'>" +
+                modeOptionHtml("Documents", mode) + modeOptionHtml("Photo", mode) +
+                modeOptionHtml("Video", mode) + modeOptionHtml("Other Data", mode) +
+                "</div>" +
                 "<div id='docMenu' class='doc-menu'>" +
                 "<button class='menu-item' onclick='STSDocuments.refresh()'>Refresh</button>" +
                 "<button id='gridMenuItem' class='menu-item' onclick='toggleGridFromMenu()'>Grid view</button>" +
@@ -2217,7 +2288,9 @@ public class MainActivity extends android.app.Activity {
                 "<script>" +
                 "var cat='All';" +
                 "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
-                "function toggleDocMenu(e){if(e)e.stopPropagation();var m=document.getElementById('docMenu');m.classList.toggle('show');if(!m.classList.contains('show'))document.getElementById('sortSub').classList.remove('show');}" +
+                "function toggleModeMenu(e){if(e)e.stopPropagation();document.getElementById('docMenu').classList.remove('show');document.getElementById('sortSub').classList.remove('show');document.getElementById('modeMenu').classList.toggle('show');}" +
+                "function chooseMode(v){document.getElementById('modeMenu').classList.remove('show');STSDocuments.selectMode(v);}" +
+                "function toggleDocMenu(e){if(e)e.stopPropagation();document.getElementById('modeMenu').classList.remove('show');var m=document.getElementById('docMenu');m.classList.toggle('show');if(!m.classList.contains('show'))document.getElementById('sortSub').classList.remove('show');}" +
                 "function toggleGridFromMenu(){document.body.classList.toggle('grid');var b=document.getElementById('gridMenuItem');if(b)b.textContent=document.body.classList.contains('grid')?'List view':'Grid view';document.getElementById('docMenu').classList.remove('show');}" +
                 "function toggleSortSub(e){if(e)e.stopPropagation();document.getElementById('sortSub').classList.toggle('show');}" +
                 "function dateGroup(ms){var d=new Date(Number(ms)||0);if(!d.getTime())return 'Unknown date';" +
@@ -2230,7 +2303,8 @@ public class MainActivity extends android.app.Activity {
                 "var dateMode=(mode==='dateDesc'||mode==='dateAsc'),last='';items.forEach(function(x){if(dateMode){var g=dateGroup(x.dataset.modified);" +
                 "if(g!==last){var h=document.createElement('div');h.className='date-group';h.textContent=g;list.appendChild(h);last=g;}}list.appendChild(x);});" +
                 "document.getElementById('sortSub').classList.remove('show');document.getElementById('docMenu').classList.remove('show');applyFilter();}" +
-                "document.addEventListener('click',function(e){var m=document.getElementById('docMenu'),b=document.getElementById('menuButton');if(m&&b&&!m.contains(e.target)&&e.target!==b){m.classList.remove('show');document.getElementById('sortSub').classList.remove('show');}});" +
+                "document.addEventListener('click',function(e){var m=document.getElementById('docMenu'),b=document.getElementById('menuButton');if(m&&b&&!m.contains(e.target)&&e.target!==b){m.classList.remove('show');document.getElementById('sortSub').classList.remove('show');}" +
+                "var mm=document.getElementById('modeMenu'),mb=document.getElementById('modeButton');if(mm&&mb&&!mm.contains(e.target)&&e.target!==mb)mm.classList.remove('show');});" +
                 "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');applyFilter();}" +
                 "function applyFilter(){var q=(document.getElementById('q').value||'').toLowerCase();var n=0;" +
                 "document.querySelectorAll('.doc-item').forEach(function(x){var ok=(cat==='All'||x.dataset.cat===cat)&&(!q||x.dataset.name.indexOf(q)>=0);x.classList.toggle('hide',!ok);if(ok)n++;});" +
@@ -2238,6 +2312,21 @@ public class MainActivity extends android.app.Activity {
                 "while(x&&!x.classList.contains('date-group')){if(x.classList.contains('doc-item')&&!x.classList.contains('hide')){any=true;break;}x=x.nextElementSibling;}g.classList.toggle('hide',!any);});}" +
                 "function openDoc(x){STSDocuments.open(x.dataset.uri,x.dataset.filename,x.dataset.mime);}" +
                 "</script></body></html>";
+    }
+
+    private String phoneDataTabsHtml(String mode) {
+        if ("Documents".equals(mode)) {
+            return tabHtml("All", true) + tabHtml("DOC", false) + tabHtml("XLS", false) +
+                    tabHtml("PPT", false) + tabHtml("PDF", false) + tabHtml("OFD", false) +
+                    tabHtml("TXT", false);
+        }
+        return tabHtml("All", true);
+    }
+
+    private String modeOptionHtml(String label, String selected) {
+        String shown = label.equals(selected) ? "✓ " + label : label;
+        return "<button class='mode-option' onclick=\"chooseMode('" + escapeDocsAttr(label) + "')\">" +
+                escapeDocsHtml(shown) + "</button>";
     }
 
     private String tabHtml(String label, boolean active) {
@@ -2251,7 +2340,13 @@ public class MainActivity extends android.app.Activity {
         if ("XLS".equals(category)) return "X";
         if ("PPT".equals(category)) return "P";
         if ("OFD".equals(category)) return "O";
-        return "TXT";
+        if ("TXT".equals(category)) return "TXT";
+        if ("PHOTO".equals(category)) return "IMG";
+        if ("VIDEO".equals(category)) return "VID";
+        if ("AUDIO".equals(category)) return "AUD";
+        if ("APK".equals(category)) return "APK";
+        if ("ZIP".equals(category)) return "ZIP";
+        return "FILE";
     }
 
     private String formatDocumentSize(long bytes) {
@@ -2281,21 +2376,30 @@ public class MainActivity extends android.app.Activity {
                 String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
                 Intent intent;
 
-                if (lower.endsWith(".pdf") || "application/pdf".equalsIgnoreCase(mime)) {
+                if (isPhotoCandidate(name, mime)) {
+                    intent = new Intent(this, ImageViewerActivity.class);
+                    intent.setData(uri);
+                } else if (lower.endsWith(".pdf") || "application/pdf".equalsIgnoreCase(mime)) {
                     intent = new Intent(this, PdfViewerActivity.class);
                     intent.putExtra("pdf_name", name);
                     intent.putExtra("pdf_slot", 1);
-                } else {
+                    intent.setData(uri);
+                } else if (documentCategory(name) != null) {
                     intent = new Intent(this, OfficeViewerActivity.class);
                     intent.putExtra("office_name", name);
+                    intent.setData(uri);
+                } else {
+                    intent = new Intent(Intent.ACTION_VIEW);
+                    intent.setDataAndType(uri, TextUtils.isEmpty(mime) ? mimeForPhoneDataName(name) : mime);
                 }
 
-                intent.setData(uri);
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
                         Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
                 startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(this, "इस file के लिए viewer नहीं मिला", Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
-                Toast.makeText(this, "Document open नहीं हो पाया", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "File open नहीं हो पाई", Toast.LENGTH_SHORT).show();
             }
         });
     }
@@ -2305,6 +2409,15 @@ public class MainActivity extends android.app.Activity {
         public void open(String uri, String name, String mime) {
             if (!slot1DocumentsHome) return;
             openDocumentFromHome(uri, name, mime);
+        }
+
+        @JavascriptInterface
+        public void selectMode(String mode) {
+            if (!slot1DocumentsHome) return;
+            if (!"Documents".equals(mode) && !"Photo".equals(mode) &&
+                    !"Video".equals(mode) && !"Other Data".equals(mode)) return;
+            phoneDataMode = mode;
+            runOnUiThread(MainActivity.this::showDocumentsHome);
         }
 
         @JavascriptInterface
