@@ -5,6 +5,7 @@ import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.ContentUris;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -14,10 +15,13 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.database.Cursor;
 import android.net.Uri;
 import android.webkit.URLUtil;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -61,11 +65,14 @@ import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Date;
+import java.text.SimpleDateFormat;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
 public class MainActivity extends android.app.Activity {
     private static final int REQ_LOCATION = 812;
+    private static final int REQ_DOCUMENT_ACCESS = 813;
     private static final String PREFS = "sts_fast_browser_prefs";
     private static final String KEY_SITES = "sites_json";
     private static final String KEY_SITES_D1 = "sites_d1_json";
@@ -107,6 +114,9 @@ public class MainActivity extends android.app.Activity {
     private String slot1Url = GOOGLE_URL;
     private String slot2Name = GOOGLE_NAME;
     private String slot2Url = GOOGLE_URL;
+    private volatile boolean slot1DocumentsHome = true;
+    private volatile boolean documentAccessRequested = false;
+    private int documentsLoadGeneration = 0;
 
     private final String[] blockedHosts = new String[] {
             "doubleclick.net", "googlesyndication.com", "googleadservices.com",
@@ -418,6 +428,9 @@ public class MainActivity extends android.app.Activity {
 
         targetWebView.addJavascriptInterface(new PdfBridge(), "STSPdf");
         targetWebView.addJavascriptInterface(new RdBridge(), "STSRD");
+        if (targetWebView == webView1) {
+            targetWebView.addJavascriptInterface(new DocumentsBridge(), "STSDocuments");
+        }
 
         targetWebView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -1058,7 +1071,7 @@ public class MainActivity extends android.app.Activity {
 
     private void showSitePopup(View anchor, int slot) {
         showWebView(slot);
-        ensureSlotPageLoaded(slot);
+        if (!(slot == 1 && slot1DocumentsHome)) ensureSlotPageLoaded(slot);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(dp(4), dp(5), dp(4), dp(5));
@@ -1151,6 +1164,8 @@ public class MainActivity extends android.app.Activity {
                 previousSelectedUrl.equalsIgnoreCase(site.url);
 
         if (slot == 1) {
+            slot1DocumentsHome = false;
+            documentsLoadGeneration++;
             slot1Name = site.name;
             slot1Url = site.url;
         } else {
@@ -1174,8 +1189,7 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void loadInitialPage() {
-        showWebView(1);
-        ensureSlotPageLoaded(1);
+        showDocumentsHome();
     }
 
     private void showSitePasswordDialog(Site site, Runnable onSuccess) {
@@ -1361,6 +1375,10 @@ public class MainActivity extends android.app.Activity {
 
         int slot = intent.getIntExtra("browser_slot", activeSlot);
         if (slot != 2) slot = 1;
+        if (slot == 1) {
+            slot1DocumentsHome = false;
+            documentsLoadGeneration++;
+        }
         showWebView(slot);
         WebView target = webViewForSlot(slot);
         target.loadUrl(url);
@@ -1375,13 +1393,20 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void goHome(int slot) {
-        showWebView(slot);
-        WebView target = webViewForSlot(slot);
-        String url = slot == 1 ? slot1Url : slot2Url;
-        target.loadUrl(url);
+        if (slot == 1) {
+            showDocumentsHome();
+            return;
+        }
+        showWebView(2);
+        WebView target = webViewForSlot(2);
+        target.loadUrl(slot2Url);
     }
 
     private void refreshSlot(int slot) {
+        if (slot == 1 && slot1DocumentsHome) {
+            showDocumentsHome();
+            return;
+        }
         showWebView(slot);
         WebView target = webViewForSlot(slot);
         if (target.getUrl() == null) {
@@ -1918,6 +1943,340 @@ public class MainActivity extends android.app.Activity {
         return Color.rgb(r, g, b);
     }
 
+
+    // ---------------- Built-in D1 Documents home ----------------
+
+    private void showDocumentsHome() {
+        slot1DocumentsHome = true;
+        showWebView(1);
+        final int generation = ++documentsLoadGeneration;
+
+        String loading = documentsShellHtml(
+                "<div class='center'><div class='spinner'></div><div>Documents loading...</div></div>",
+                0, false);
+        webView1.loadDataWithBaseURL("https://sts.documents/", loading, "text/html", "UTF-8", null);
+
+        new Thread(() -> {
+            final String html;
+            if (!hasDocumentAccess()) {
+                html = documentsShellHtml(
+                        "<div class='permission'><div class='folder'>▣</div>" +
+                        "<h2>Phone Documents</h2>" +
+                        "<p>PDF, Word, Excel, PPT, OFD और TXT files दिखाने के लिए file access Allow करें।</p>" +
+                        "<button onclick='STSDocuments.requestAccess()'>Allow File Access</button></div>",
+                        0, true);
+            } else {
+                List<DocumentEntry> docs = queryDocuments();
+                html = buildDocumentsHtml(docs);
+            }
+
+            runOnUiThread(() -> {
+                if (!slot1DocumentsHome || generation != documentsLoadGeneration || isFinishing()) return;
+                webView1.loadDataWithBaseURL("https://sts.documents/", html, "text/html", "UTF-8", null);
+            });
+        }, "SFB-Documents-Home").start();
+    }
+
+    private boolean hasDocumentAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            return Environment.isExternalStorageManager();
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+        }
+        return true;
+    }
+
+    private void requestDocumentAccess() {
+        runOnUiThread(() -> {
+            try {
+                documentAccessRequested = true;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                            Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    requestPermissions(new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQ_DOCUMENT_ACCESS);
+                } else {
+                    documentAccessRequested = false;
+                    showDocumentsHome();
+                }
+            } catch (Exception first) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                    } else {
+                        documentAccessRequested = false;
+                    }
+                } catch (Exception ignored) {
+                    documentAccessRequested = false;
+                    Toast.makeText(this, "File access settings नहीं खुल पाई", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (documentAccessRequested && slot1DocumentsHome && webView1 != null) {
+            documentAccessRequested = false;
+            webView1.postDelayed(this::showDocumentsHome, 250);
+        }
+    }
+
+    private List<DocumentEntry> queryDocuments() {
+        List<DocumentEntry> out = new ArrayList<>();
+        Cursor cursor = null;
+        try {
+            Uri collection = MediaStore.Files.getContentUri("external");
+            String[] projection = new String[] {
+                    MediaStore.Files.FileColumns._ID,
+                    MediaStore.Files.FileColumns.DISPLAY_NAME,
+                    MediaStore.Files.FileColumns.MIME_TYPE,
+                    MediaStore.Files.FileColumns.SIZE,
+                    MediaStore.Files.FileColumns.DATE_MODIFIED
+            };
+
+            cursor = getContentResolver().query(
+                    collection,
+                    projection,
+                    null,
+                    null,
+                    MediaStore.Files.FileColumns.DATE_MODIFIED + " DESC"
+            );
+            if (cursor == null) return out;
+
+            int idCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID);
+            int nameCol = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME);
+            int mimeCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.MIME_TYPE);
+            int sizeCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE);
+            int dateCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_MODIFIED);
+
+            while (cursor.moveToNext()) {
+                String name = cursor.getString(nameCol);
+                String category = documentCategory(name);
+                if (category == null) continue;
+
+                long id = cursor.getLong(idCol);
+                String mime = mimeCol >= 0 ? cursor.getString(mimeCol) : null;
+                long size = sizeCol >= 0 ? cursor.getLong(sizeCol) : 0L;
+                long modifiedSec = dateCol >= 0 ? cursor.getLong(dateCol) : 0L;
+                Uri uri = ContentUris.withAppendedId(collection, id);
+                out.add(new DocumentEntry(
+                        uri.toString(),
+                        name == null ? "Document" : name,
+                        TextUtils.isEmpty(mime) ? mimeForDocumentName(name) : mime,
+                        category,
+                        Math.max(0L, size),
+                        Math.max(0L, modifiedSec) * 1000L
+                ));
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        return out;
+    }
+
+    private String documentCategory(String name) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".pdf")) return "PDF";
+        if (n.endsWith(".doc") || n.endsWith(".docx") || n.endsWith(".odt") || n.endsWith(".rtf")) return "DOC";
+        if (n.endsWith(".xls") || n.endsWith(".xlsx") || n.endsWith(".csv") || n.endsWith(".ods")) return "XLS";
+        if (n.endsWith(".ppt") || n.endsWith(".pptx") || n.endsWith(".odp")) return "PPT";
+        if (n.endsWith(".ofd")) return "OFD";
+        if (n.endsWith(".txt")) return "TXT";
+        return null;
+    }
+
+    private String mimeForDocumentName(String name) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".pdf")) return "application/pdf";
+        if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (n.endsWith(".doc")) return "application/msword";
+        if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (n.endsWith(".xls")) return "application/vnd.ms-excel";
+        if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (n.endsWith(".ppt")) return "application/vnd.ms-powerpoint";
+        if (n.endsWith(".csv")) return "text/csv";
+        if (n.endsWith(".txt")) return "text/plain";
+        if (n.endsWith(".rtf")) return "application/rtf";
+        if (n.endsWith(".odt")) return "application/vnd.oasis.opendocument.text";
+        if (n.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
+        if (n.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
+        if (n.endsWith(".ofd")) return "application/ofd";
+        return "application/octet-stream";
+    }
+
+    private String buildDocumentsHtml(List<DocumentEntry> docs) {
+        StringBuilder rows = new StringBuilder(Math.max(8192, docs.size() * 340));
+        SimpleDateFormat groupFmt = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
+        SimpleDateFormat itemFmt = new SimpleDateFormat("d MMMM", Locale.getDefault());
+        String lastGroup = "";
+
+        for (DocumentEntry d : docs) {
+            String group = d.modified > 0 ? groupFmt.format(new Date(d.modified)) : "Unknown date";
+            if (!group.equals(lastGroup)) {
+                rows.append("<div class='date-group' data-group='").append(escapeDocsAttr(group)).append("'>")
+                        .append(escapeDocsHtml(group)).append("</div>");
+                lastGroup = group;
+            }
+
+            String size = formatDocumentSize(d.size);
+            String itemDate = d.modified > 0 ? itemFmt.format(new Date(d.modified)) : "";
+            String sub = size;
+            if (!TextUtils.isEmpty(itemDate)) sub += "  |  " + itemDate;
+
+            rows.append("<div class='doc-item' data-cat='").append(d.category)
+                    .append("' data-name='").append(escapeDocsAttr(d.name.toLowerCase(Locale.ROOT))).append("' onclick='openDoc(this)'")
+                    .append(" data-uri=").append(JSONObject.quote(d.uri))
+                    .append(" data-filename=").append(JSONObject.quote(d.name))
+                    .append(" data-mime=").append(JSONObject.quote(d.mime)).append(">")
+                    .append("<div class='file-icon ").append(d.category.toLowerCase(Locale.ROOT)).append("'><span>")
+                    .append(escapeDocsHtml(iconText(d.category))).append("</span></div>")
+                    .append("<div class='file-body'><div class='file-name'>").append(escapeDocsHtml(d.name)).append("</div>")
+                    .append("<div class='file-meta'>").append(escapeDocsHtml(sub)).append("</div></div></div>");
+        }
+
+        String body = "<div class='doc-list' id='docList'>" + rows + "</div>" +
+                (docs.isEmpty()
+                        ? "<div class='empty'>कोई supported document नहीं मिला।</div>"
+                        : "");
+        return documentsShellHtml(body, docs.size(), false);
+    }
+
+    private String documentsShellHtml(String body, int count, boolean permissionPage) {
+        return "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1,user-scalable=no'>" +
+                "<style>" +
+                "*{box-sizing:border-box}html,body{margin:0;background:#050505;color:#f4f4f4;font-family:Arial,sans-serif;min-height:100%}" +
+                ".header{position:sticky;top:0;z-index:10;background:#050505;padding:16px 16px 0;border-bottom:1px solid #111}" +
+                ".title-row{display:flex;align-items:center;height:48px}.title{font-size:25px;font-weight:700;flex:1}" +
+                ".head-btn{width:44px;height:44px;border:0;background:transparent;color:#fff;font-size:28px;border-radius:22px}" +
+                ".head-btn:active{background:#242424}.tabs{display:flex;overflow-x:auto;gap:4px;height:58px;align-items:flex-end;padding:0 4px}" +
+                ".tab{border:0;background:transparent;color:#8c8c8c;font-size:18px;padding:16px 13px 13px;white-space:nowrap;border-bottom:3px solid transparent}" +
+                ".tab.active{color:#fff;border-bottom-color:#fff;font-weight:700}.search{display:none;padding:0 0 12px}.search.show{display:block}" +
+                ".search input{width:100%;height:42px;border-radius:10px;border:1px solid #555;background:#171717;color:#fff;padding:0 12px;font-size:16px}" +
+                ".summary{display:flex;align-items:center;padding:20px 16px 14px;color:#aaa;font-weight:600}.summary .count{flex:1}.summary .sort{color:#ddd}" +
+                ".date-group{font-size:22px;font-weight:700;padding:14px 16px 10px}.doc-list{padding-bottom:28px}" +
+                ".doc-item{display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020}" +
+                ".doc-item:active{background:#181818}.file-icon{width:54px;height:66px;margin-right:16px;display:flex;align-items:center;justify-content:center;" +
+                "border-radius:4px 4px 3px 3px;color:#fff;font-weight:700;font-size:18px;clip-path:polygon(0 0,76% 0,100% 20%,100% 100%,0 100%)}" +
+                ".file-icon.pdf{background:#e34d4d}.file-icon.doc{background:#3778c2}.file-icon.xls{background:#388e4a}" +
+                ".file-icon.ppt{background:#f05b23}.file-icon.ofd{background:#7856a8}.file-icon.txt{background:#6f7780}" +
+                ".file-body{min-width:0;flex:1}.file-name{font-size:18px;font-weight:700;line-height:1.28;word-break:break-word}" +
+                ".file-meta{font-size:14px;color:#8f8f8f;margin-top:5px}.empty,.center,.permission{text-align:center;padding:70px 24px;color:#aaa}" +
+                ".permission{padding-top:100px}.permission h2{color:#fff}.permission p{line-height:1.5}.permission button{margin-top:14px;border:0;" +
+                "border-radius:10px;padding:13px 20px;background:#4F8F8B;color:#fff;font-size:16px;font-weight:700}.folder{font-size:54px;color:#f0a348}" +
+                ".spinner{width:34px;height:34px;border:4px solid #333;border-top-color:#eee;border-radius:50%;margin:0 auto 14px;animation:r 1s linear infinite}" +
+                "@keyframes r{to{transform:rotate(360deg)}}body.grid .doc-list{display:grid;grid-template-columns:1fr 1fr;gap:1px}" +
+                "body.grid .date-group{grid-column:1/-1}body.grid .doc-item{display:block;min-height:170px;text-align:center;padding:16px 8px}" +
+                "body.grid .file-icon{margin:0 auto 10px}.hide{display:none!important}" +
+                "</style></head><body>" +
+                "<div class='header'><div class='title-row'><div class='title'>Documents</div>" +
+                "<button class='head-btn' onclick='toggleSearch()'>⌕</button>" +
+                "<button class='head-btn' onclick='toggleGrid()'>▦</button>" +
+                "<button class='head-btn' onclick='STSDocuments.refresh()'>⋮</button></div>" +
+                "<div id='searchBox' class='search'><input id='q' placeholder='Search documents' oninput='applyFilter()'></div>" +
+                "<div class='tabs'>" +
+                tabHtml("All", true) + tabHtml("DOC", false) + tabHtml("XLS", false) + tabHtml("PPT", false) +
+                tabHtml("PDF", false) + tabHtml("OFD", false) + tabHtml("TXT", false) +
+                "</div></div>" +
+                "<div class='summary'><div class='count'><span id='shownCount'>" + count + "</span> items in total</div><div class='sort'>Date modified ↕</div></div>" +
+                body +
+                "<script>" +
+                "var cat='All';" +
+                "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
+                "function toggleGrid(){document.body.classList.toggle('grid');}" +
+                "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');applyFilter();}" +
+                "function applyFilter(){var q=(document.getElementById('q').value||'').toLowerCase();var n=0;" +
+                "document.querySelectorAll('.doc-item').forEach(function(x){var ok=(cat==='All'||x.dataset.cat===cat)&&(!q||x.dataset.name.indexOf(q)>=0);x.classList.toggle('hide',!ok);if(ok)n++;});" +
+                "document.getElementById('shownCount').textContent=n;document.querySelectorAll('.date-group').forEach(function(g){var x=g.nextElementSibling;var any=false;" +
+                "while(x&&!x.classList.contains('date-group')){if(x.classList.contains('doc-item')&&!x.classList.contains('hide')){any=true;break;}x=x.nextElementSibling;}g.classList.toggle('hide',!any);});}" +
+                "function openDoc(x){STSDocuments.open(x.dataset.uri,x.dataset.filename,x.dataset.mime);}" +
+                "</script></body></html>";
+    }
+
+    private String tabHtml(String label, boolean active) {
+        return "<button class='tab" + (active ? " active" : "") + "' onclick=\"setCat('" +
+                label + "',this)\">" + label + "</button>";
+    }
+
+    private String iconText(String category) {
+        if ("PDF".equals(category)) return "PDF";
+        if ("DOC".equals(category)) return "W";
+        if ("XLS".equals(category)) return "X";
+        if ("PPT".equals(category)) return "P";
+        if ("OFD".equals(category)) return "O";
+        return "TXT";
+    }
+
+    private String formatDocumentSize(long bytes) {
+        if (bytes < 1024L) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024.0) return String.format(Locale.getDefault(), "%.0f KB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024.0) return String.format(Locale.getDefault(), "%.1f MB", mb);
+        return String.format(Locale.getDefault(), "%.1f GB", mb / 1024.0);
+    }
+
+    private String escapeDocsHtml(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                .replace("\"", "&quot;").replace("'", "&#39;");
+    }
+
+    private String escapeDocsAttr(String s) {
+        return escapeDocsHtml(s);
+    }
+
+    private void openDocumentFromHome(String uriString, String name, String mime) {
+        runOnUiThread(() -> {
+            if (!slot1DocumentsHome) return;
+            try {
+                Uri uri = Uri.parse(uriString);
+                String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
+                Intent intent;
+
+                if (lower.endsWith(".pdf") || "application/pdf".equalsIgnoreCase(mime)) {
+                    intent = new Intent(this, PdfViewerActivity.class);
+                    intent.putExtra("pdf_name", name);
+                    intent.putExtra("pdf_slot", 1);
+                } else {
+                    intent = new Intent(this, OfficeViewerActivity.class);
+                    intent.putExtra("office_name", name);
+                }
+
+                intent.setData(uri);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                        Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+                startActivity(intent);
+            } catch (Exception e) {
+                Toast.makeText(this, "Document open नहीं हो पाया", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private class DocumentsBridge {
+        @JavascriptInterface
+        public void open(String uri, String name, String mime) {
+            if (!slot1DocumentsHome) return;
+            openDocumentFromHome(uri, name, mime);
+        }
+
+        @JavascriptInterface
+        public void requestAccess() {
+            if (!slot1DocumentsHome) return;
+            requestDocumentAccess();
+        }
+
+        @JavascriptInterface
+        public void refresh() {
+            if (!slot1DocumentsHome) return;
+            runOnUiThread(MainActivity.this::showDocumentsHome);
+        }
+    }
+
     private boolean hasLocationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -1927,6 +2286,13 @@ public class MainActivity extends android.app.Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == REQ_DOCUMENT_ACCESS) {
+            documentAccessRequested = false;
+            if (slot1DocumentsHome) showDocumentsHome();
+            return;
+        }
+
         if (requestCode != REQ_LOCATION) return;
 
         boolean granted = hasLocationPermission();
@@ -1983,6 +2349,24 @@ public class MainActivity extends android.app.Activity {
         webView2 = null;
         webView = null;
         super.onDestroy();
+    }
+
+    private static class DocumentEntry {
+        final String uri;
+        final String name;
+        final String mime;
+        final String category;
+        final long size;
+        final long modified;
+
+        DocumentEntry(String uri, String name, String mime, String category, long size, long modified) {
+            this.uri = uri;
+            this.name = name;
+            this.mime = mime;
+            this.category = category;
+            this.size = size;
+            this.modified = modified;
+        }
     }
 
     private static class Site {
