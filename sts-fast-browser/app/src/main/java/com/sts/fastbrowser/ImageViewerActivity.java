@@ -60,6 +60,7 @@ import java.util.Locale;
 
 public class ImageViewerActivity extends Activity {
     private static final int REQ_STORAGE = 801;
+    private static final int REQ_DELETE_IMAGE = 802;
 
     private Uri sourceUri;
     private String fileName;
@@ -338,22 +339,24 @@ public class ImageViewerActivity extends Activity {
 
     private void showMenu(View anchor) {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
+        pm.getMenu().add("Edit");
+        pm.getMenu().add("Save");
+        pm.getMenu().add("Save As");
         pm.getMenu().add("Share");
         pm.getMenu().add("Print");
-        pm.getMenu().add("Replace Original");
-        pm.getMenu().add("Save");
-        pm.getMenu().add("Edit");
+        pm.getMenu().add("Delete");
         pm.setOnMenuItemClickListener(item -> {
             if (bitmap == null) {
                 Toast.makeText(this, "Image अभी तैयार हो रही है", Toast.LENGTH_SHORT).show();
                 return true;
             }
             String t = String.valueOf(item.getTitle());
-            if ("Share".equals(t)) shareImage();
+            if ("Edit".equals(t)) enterEditMode();
+            else if ("Save".equals(t)) replaceOriginalImage();
+            else if ("Save As".equals(t)) showSaveFormats();
+            else if ("Share".equals(t)) shareImage();
             else if ("Print".equals(t)) printImage();
-            else if ("Replace Original".equals(t)) replaceOriginalImage();
-            else if ("Save".equals(t)) showSaveFormats();
-            else if ("Edit".equals(t)) enterEditMode();
+            else if ("Delete".equals(t)) confirmDeleteImage();
             return true;
         });
         pm.show();
@@ -690,9 +693,74 @@ public class ImageViewerActivity extends Activity {
         pm.print(fileName, new ImagePrintAdapter(this, bitmap, fileName), new PrintAttributes.Builder().build());
     }
 
+    private void confirmDeleteImage() {
+        if (sourceUri == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Delete Image")
+                .setMessage("यह photo permanently delete करनी है?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Delete", (d, w) -> deleteOriginalImage())
+                .show();
+    }
+
+    private void deleteOriginalImage() {
+        try {
+            if ("file".equalsIgnoreCase(sourceUri.getScheme())) {
+                String path = sourceUri.getPath();
+                if (!TextUtils.isEmpty(path) && new File(path).delete()) {
+                    Toast.makeText(this, "Photo delete हो गई", Toast.LENGTH_SHORT).show();
+                    finish();
+                    return;
+                }
+                Toast.makeText(this, "Photo delete नहीं हो पाई", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            int deleted = getContentResolver().delete(sourceUri, null, null);
+            if (deleted > 0) {
+                Toast.makeText(this, "Photo delete हो गई", Toast.LENGTH_SHORT).show();
+                finish();
+                return;
+            }
+            requestSystemDeleteForImage();
+        } catch (SecurityException e) {
+            if (android.os.Build.VERSION.SDK_INT == 29 &&
+                    e instanceof android.app.RecoverableSecurityException) {
+                try {
+                    android.app.RecoverableSecurityException rse =
+                            (android.app.RecoverableSecurityException) e;
+                    startIntentSenderForResult(
+                            rse.getUserAction().getActionIntent().getIntentSender(),
+                            REQ_DELETE_IMAGE, null, 0, 0, 0);
+                    return;
+                } catch (Exception ignored) {}
+            }
+            requestSystemDeleteForImage();
+        } catch (Exception e) {
+            Toast.makeText(this, "Photo delete नहीं हो पाई", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void requestSystemDeleteForImage() {
+        if (android.os.Build.VERSION.SDK_INT >= 30 &&
+                "content".equalsIgnoreCase(sourceUri.getScheme())) {
+            try {
+                ArrayList<Uri> uris = new ArrayList<>();
+                uris.add(sourceUri);
+                android.app.PendingIntent request =
+                        MediaStore.createDeleteRequest(getContentResolver(), uris);
+                startIntentSenderForResult(
+                        request.getIntentSender(), REQ_DELETE_IMAGE,
+                        null, 0, 0, 0);
+                return;
+            } catch (Exception ignored) {}
+        }
+        Toast.makeText(this, "Photo delete नहीं हो पाई", Toast.LENGTH_SHORT).show();
+    }
+
     private void showSaveFormats() {
         new AlertDialog.Builder(this)
-                .setTitle("Save Image")
+                .setTitle("Save As")
                 .setItems(new String[]{"JPG", "PNG", "PDF"}, (d, which) -> {
                     if (which == 0) saveCurrentAs("jpg");
                     else if (which == 1) saveCurrentAs("png");
@@ -740,19 +808,19 @@ public class ImageViewerActivity extends Activity {
 
                 runOnUiThread(() -> Toast.makeText(
                         this,
-                        "Original image replace हो गई",
+                        "Image save हो गई",
                         Toast.LENGTH_LONG
                 ).show());
             } catch (SecurityException e) {
                 runOnUiThread(() -> Toast.makeText(
                         this,
-                        "Original file पर write permission नहीं है",
+                        "Original image पर write permission नहीं है",
                         Toast.LENGTH_LONG
                 ).show());
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(
                         this,
-                        "Original image replace नहीं हो पाई",
+                        "Image save नहीं हो पाई",
                         Toast.LENGTH_LONG
                 ).show());
             }
@@ -971,6 +1039,15 @@ public class ImageViewerActivity extends Activity {
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_DELETE_IMAGE && resultCode == RESULT_OK) {
+            Toast.makeText(this, "Photo delete हो गई", Toast.LENGTH_SHORT).show();
+            finish();
+        }
     }
 
     @Override
