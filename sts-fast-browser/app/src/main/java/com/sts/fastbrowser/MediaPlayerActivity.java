@@ -6,8 +6,6 @@ import android.content.Intent;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioAttributes;
-import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,8 +13,6 @@ import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.view.Gravity;
-import android.view.SurfaceHolder;
-import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -27,40 +23,49 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.media3.ui.PlayerView;
+
 import java.util.Locale;
 
-public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callback {
+@UnstableApi
+public class MediaPlayerActivity extends Activity {
     private Uri sourceUri;
     private String fileName;
     private String mimeType;
     private boolean videoMode;
 
-    private MediaPlayer mediaPlayer;
-    private SurfaceView surfaceView;
+    private ExoPlayer player;
+    private PlayerView playerView;
     private FrameLayout mediaStage;
-    private TextView audioArtwork;
-    private TextView titleView;
     private TextView playPauseButton;
     private TextView elapsedView;
     private TextView durationView;
     private SeekBar seekBar;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private boolean prepared = false;
     private boolean userSeeking = false;
     private boolean firstStart = true;
-    private int resumePosition = 0;
+    private long resumePosition = 0L;
     private boolean resumePlaying = true;
 
     private final Runnable progressUpdater = new Runnable() {
         @Override
         public void run() {
-            if (prepared && mediaPlayer != null && !userSeeking) {
+            if (player != null && !userSeeking) {
                 try {
-                    int pos = mediaPlayer.getCurrentPosition();
-                    int dur = mediaPlayer.getDuration();
-                    seekBar.setMax(Math.max(1, dur));
-                    seekBar.setProgress(Math.max(0, Math.min(pos, dur)));
+                    long pos = Math.max(0L, player.getCurrentPosition());
+                    long dur = player.getDuration();
+                    if (dur == C.TIME_UNSET || dur < 0L) dur = 0L;
+                    int max = durationToSeekMax(dur);
+                    seekBar.setMax(Math.max(1, max));
+                    seekBar.setProgress(positionToSeek(pos, dur, max));
                     elapsedView.setText(formatTime(pos));
                     durationView.setText(formatTime(dur));
                 } catch (Exception ignored) {}
@@ -78,28 +83,27 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
         sourceUri = getIntent().getData();
         mimeType = getIntent().getType();
         if (TextUtils.isEmpty(mimeType)) mimeType = getIntent().getStringExtra("media_mime");
+
         fileName = getIntent().getStringExtra("media_name");
         if (TextUtils.isEmpty(fileName)) fileName = resolveDisplayName(sourceUri);
         if (TextUtils.isEmpty(fileName)) fileName = "Media";
 
         String requestedMode = getIntent().getStringExtra("media_mode");
         videoMode = "video".equalsIgnoreCase(requestedMode) ||
-                (!TextUtils.isEmpty(mimeType) && mimeType.toLowerCase(Locale.ROOT).startsWith("video/")) ||
+                (!TextUtils.isEmpty(mimeType) &&
+                        mimeType.toLowerCase(Locale.ROOT).startsWith("video/")) ||
                 looksLikeVideo(fileName);
 
         if (savedInstanceState != null) {
-            resumePosition = savedInstanceState.getInt("position", 0);
+            resumePosition = savedInstanceState.getLong("position", 0L);
             resumePlaying = savedInstanceState.getBoolean("playing", true);
             firstStart = false;
         }
 
         setTitle(fileName);
         setContentView(buildUi());
+        initializePlayer();
         handler.post(progressUpdater);
-
-        if (!videoMode) {
-            prepareMedia(null);
-        }
     }
 
     private View buildUi() {
@@ -124,15 +128,15 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
         back.setOnClickListener(v -> finish());
         topBar.addView(back, new LinearLayout.LayoutParams(dp(42), ViewGroup.LayoutParams.MATCH_PARENT));
 
-        titleView = new TextView(this);
-        titleView.setText(fileName);
-        titleView.setTextColor(Color.parseColor("#162326"));
-        titleView.setTextSize(14);
-        titleView.setSingleLine(true);
-        titleView.setEllipsize(TextUtils.TruncateAt.END);
-        titleView.setGravity(Gravity.CENTER_VERTICAL);
-        titleView.setPadding(dp(6), 0, dp(8), 0);
-        topBar.addView(titleView, new LinearLayout.LayoutParams(
+        TextView title = new TextView(this);
+        title.setText(fileName);
+        title.setTextColor(Color.parseColor("#162326"));
+        title.setTextSize(14);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        title.setPadding(dp(6), 0, dp(8), 0);
+        topBar.addView(title, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
         TextView menu = makeTopButton("⋮", 26);
@@ -146,13 +150,14 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         if (videoMode) {
-            surfaceView = new SurfaceView(this);
-            surfaceView.setBackgroundColor(Color.BLACK);
-            mediaStage.addView(surfaceView, new FrameLayout.LayoutParams(
+            playerView = new PlayerView(this);
+            playerView.setUseController(false);
+            playerView.setResizeMode(AspectRatioFrameLayout.RESIZE_MODE_FIT);
+            playerView.setBackgroundColor(Color.BLACK);
+            mediaStage.addView(playerView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     Gravity.CENTER));
-            surfaceView.getHolder().addCallback(this);
         } else {
             buildAudioStage();
         }
@@ -178,8 +183,10 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
 
         elapsedView = makeTimeText("0:00", Gravity.START);
         durationView = makeTimeText("0:00", Gravity.END);
-        timeRow.addView(elapsedView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-        timeRow.addView(durationView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        timeRow.addView(elapsedView, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        timeRow.addView(durationView, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
         LinearLayout buttons = new LinearLayout(this);
         buttons.setOrientation(LinearLayout.HORIZONTAL);
@@ -192,9 +199,9 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
         playPauseButton = makeControlButton("▶", 28);
         TextView forward = makeControlButton("10 ↷", 16);
 
-        rewind.setOnClickListener(v -> seekRelative(-10000));
+        rewind.setOnClickListener(v -> seekRelative(-10000L));
         playPauseButton.setOnClickListener(v -> togglePlayback());
-        forward.setOnClickListener(v -> seekRelative(10000));
+        forward.setOnClickListener(v -> seekRelative(10000L));
 
         buttons.addView(rewind, new LinearLayout.LayoutParams(dp(90), dp(52)));
         LinearLayout.LayoutParams centerLp = new LinearLayout.LayoutParams(dp(72), dp(56));
@@ -203,19 +210,27 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
         buttons.addView(forward, new LinearLayout.LayoutParams(dp(90), dp(52)));
 
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (fromUser) elapsedView.setText(formatTime(progress));
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (!fromUser || player == null) return;
+                long dur = player.getDuration();
+                if (dur == C.TIME_UNSET || dur <= 0L) return;
+                long pos = seekToPosition(progress, bar.getMax(), dur);
+                elapsedView.setText(formatTime(pos));
             }
 
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {
                 userSeeking = true;
             }
 
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
                 userSeeking = false;
-                if (prepared && mediaPlayer != null) {
-                    try { mediaPlayer.seekTo(seekBar.getProgress()); } catch (Exception ignored) {}
-                }
+                if (player == null) return;
+                long dur = player.getDuration();
+                if (dur == C.TIME_UNSET || dur <= 0L) return;
+                player.seekTo(seekToPosition(bar.getProgress(), bar.getMax(), dur));
             }
         });
 
@@ -228,20 +243,18 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
         audioPanel.setGravity(Gravity.CENTER);
         audioPanel.setPadding(dp(28), dp(24), dp(28), dp(24));
 
-        audioArtwork = new TextView(this);
-        audioArtwork.setText("♫");
-        audioArtwork.setTextColor(Color.WHITE);
-        audioArtwork.setTextSize(84);
-        audioArtwork.setGravity(Gravity.CENTER);
+        TextView artwork = new TextView(this);
+        artwork.setText("♫");
+        artwork.setTextColor(Color.WHITE);
+        artwork.setTextSize(84);
+        artwork.setGravity(Gravity.CENTER);
 
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
         circle.setColor(Color.parseColor("#252525"));
         circle.setStroke(dp(2), Color.parseColor("#5B7FA3"));
-        audioArtwork.setBackground(circle);
-
-        LinearLayout.LayoutParams artLp = new LinearLayout.LayoutParams(dp(190), dp(190));
-        audioPanel.addView(audioArtwork, artLp);
+        artwork.setBackground(circle);
+        audioPanel.addView(artwork, new LinearLayout.LayoutParams(dp(190), dp(190)));
 
         TextView name = new TextView(this);
         name.setText(fileName);
@@ -269,6 +282,115 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 Gravity.CENTER));
+    }
+
+    private void initializePlayer() {
+        if (sourceUri == null) {
+            Toast.makeText(this, "Media file नहीं मिली", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        releasePlayer();
+
+        player = new ExoPlayer.Builder(this).build();
+        if (playerView != null) playerView.setPlayer(player);
+
+        player.addListener(new Player.Listener() {
+            @Override
+            public void onPlaybackStateChanged(int playbackState) {
+                if (playbackState == Player.STATE_READY) {
+                    long dur = player.getDuration();
+                    if (dur == C.TIME_UNSET || dur < 0L) dur = 0L;
+                    seekBar.setMax(Math.max(1, durationToSeekMax(dur)));
+                    durationView.setText(formatTime(dur));
+
+                    if (resumePosition > 0L) {
+                        player.seekTo(resumePosition);
+                        resumePosition = 0L;
+                    }
+
+                    boolean shouldPlay = firstStart || resumePlaying;
+                    firstStart = false;
+                    player.setPlayWhenReady(shouldPlay);
+                    updatePlayButton();
+                } else if (playbackState == Player.STATE_ENDED) {
+                    updatePlayButton();
+                    setKeepScreenOn(false);
+                }
+            }
+
+            @Override
+            public void onIsPlayingChanged(boolean isPlaying) {
+                updatePlayButton();
+                setKeepScreenOn(videoMode && isPlaying);
+            }
+
+            @Override
+            public void onPlayerError(PlaybackException error) {
+                Toast.makeText(MediaPlayerActivity.this,
+                        "यह video/audio format इस device पर play नहीं हो पाया",
+                        Toast.LENGTH_SHORT).show();
+                updatePlayButton();
+                setKeepScreenOn(false);
+            }
+        });
+
+        MediaItem item = new MediaItem.Builder()
+                .setUri(sourceUri)
+                .setMimeType(TextUtils.isEmpty(mimeType) ? null : mimeType)
+                .build();
+        player.setMediaItem(item);
+        player.prepare();
+    }
+
+    private void togglePlayback() {
+        if (player == null) return;
+        int state = player.getPlaybackState();
+        if (state == Player.STATE_ENDED) player.seekTo(0L);
+        if (player.isPlaying()) player.pause();
+        else player.play();
+        updatePlayButton();
+    }
+
+    private void updatePlayButton() {
+        if (playPauseButton == null) return;
+        boolean playing = player != null && player.isPlaying();
+        playPauseButton.setText(playing ? "❚❚" : "▶");
+    }
+
+    private void seekRelative(long deltaMs) {
+        if (player == null) return;
+        long duration = player.getDuration();
+        long current = player.getCurrentPosition();
+        long max = (duration == C.TIME_UNSET || duration < 0L)
+                ? Math.max(current, current + Math.max(0L, deltaMs))
+                : duration;
+        long target = Math.max(0L, Math.min(max, current + deltaMs));
+        player.seekTo(target);
+        elapsedView.setText(formatTime(target));
+    }
+
+    private int durationToSeekMax(long duration) {
+        if (duration <= 0L) return 1;
+        return duration > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) duration;
+    }
+
+    private int positionToSeek(long position, long duration, int seekMax) {
+        if (duration <= 0L || seekMax <= 0) return 0;
+        if (duration <= Integer.MAX_VALUE) {
+            return (int) Math.max(0L, Math.min(position, duration));
+        }
+        return (int) Math.max(0L,
+                Math.min(seekMax, Math.round((position / (double) duration) * seekMax)));
+    }
+
+    private long seekToPosition(int progress, int seekMax, long duration) {
+        if (duration <= 0L || seekMax <= 0) return 0L;
+        if (duration <= Integer.MAX_VALUE) {
+            return Math.max(0L, Math.min((long) progress, duration));
+        }
+        return Math.max(0L,
+                Math.min(duration, Math.round((progress / (double) seekMax) * duration)));
     }
 
     private TextView makeTopButton(String text, int textSize) {
@@ -306,141 +428,6 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
         v.setTextSize(12);
         v.setGravity(gravity | Gravity.CENTER_VERTICAL);
         return v;
-    }
-
-    private void prepareMedia(SurfaceHolder holder) {
-        releasePlayer();
-        if (sourceUri == null) {
-            Toast.makeText(this, "Media file नहीं मिली", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        try {
-            mediaPlayer = new MediaPlayer();
-            mediaPlayer.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(videoMode
-                            ? AudioAttributes.CONTENT_TYPE_MOVIE
-                            : AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build());
-            if (videoMode && holder != null) mediaPlayer.setDisplay(holder);
-            mediaPlayer.setDataSource(this, sourceUri);
-
-            mediaPlayer.setOnPreparedListener(mp -> {
-                prepared = true;
-                int duration = 0;
-                try { duration = mp.getDuration(); } catch (Exception ignored) {}
-                seekBar.setMax(Math.max(1, duration));
-                durationView.setText(formatTime(duration));
-
-                if (resumePosition > 0) {
-                    try { mp.seekTo(Math.min(resumePosition, Math.max(0, duration - 1))); } catch (Exception ignored) {}
-                }
-
-                if (videoMode) {
-                    try { fitVideoSurface(mp.getVideoWidth(), mp.getVideoHeight()); } catch (Exception ignored) {}
-                }
-
-                boolean shouldPlay = firstStart || resumePlaying;
-                firstStart = false;
-                if (shouldPlay) startPlayback();
-                else updatePlayButton();
-            });
-
-            mediaPlayer.setOnVideoSizeChangedListener((mp, width, height) -> {
-                if (videoMode) fitVideoSurface(width, height);
-            });
-
-            mediaPlayer.setOnCompletionListener(mp -> {
-                try {
-                    seekBar.setProgress(seekBar.getMax());
-                    elapsedView.setText(durationView.getText());
-                } catch (Exception ignored) {}
-                updatePlayButton();
-                setKeepScreenOn(false);
-            });
-
-            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
-                Toast.makeText(this, "Media play नहीं हो पाया", Toast.LENGTH_SHORT).show();
-                updatePlayButton();
-                setKeepScreenOn(false);
-                return true;
-            });
-
-            mediaPlayer.prepareAsync();
-        } catch (Exception e) {
-            releasePlayer();
-            Toast.makeText(this, "Media open नहीं हो पाया", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    private void startPlayback() {
-        if (!prepared || mediaPlayer == null) return;
-        try {
-            mediaPlayer.start();
-            updatePlayButton();
-            setKeepScreenOn(videoMode);
-        } catch (Exception ignored) {}
-    }
-
-    private void togglePlayback() {
-        if (!prepared || mediaPlayer == null) return;
-        try {
-            if (mediaPlayer.isPlaying()) {
-                mediaPlayer.pause();
-                setKeepScreenOn(false);
-            } else {
-                if (mediaPlayer.getCurrentPosition() >= Math.max(0, mediaPlayer.getDuration() - 500)) {
-                    mediaPlayer.seekTo(0);
-                }
-                mediaPlayer.start();
-                setKeepScreenOn(videoMode);
-            }
-            updatePlayButton();
-        } catch (Exception ignored) {}
-    }
-
-    private void updatePlayButton() {
-        if (playPauseButton == null) return;
-        boolean playing = false;
-        try { playing = prepared && mediaPlayer != null && mediaPlayer.isPlaying(); } catch (Exception ignored) {}
-        playPauseButton.setText(playing ? "❚❚" : "▶");
-    }
-
-    private void seekRelative(int deltaMs) {
-        if (!prepared || mediaPlayer == null) return;
-        try {
-            int duration = mediaPlayer.getDuration();
-            int target = Math.max(0, Math.min(duration, mediaPlayer.getCurrentPosition() + deltaMs));
-            mediaPlayer.seekTo(target);
-            seekBar.setProgress(target);
-            elapsedView.setText(formatTime(target));
-        } catch (Exception ignored) {}
-    }
-
-    private void fitVideoSurface(int videoWidth, int videoHeight) {
-        if (!videoMode || surfaceView == null || mediaStage == null || videoWidth <= 0 || videoHeight <= 0) return;
-        mediaStage.post(() -> {
-            int availableW = mediaStage.getWidth();
-            int availableH = mediaStage.getHeight();
-            if (availableW <= 0 || availableH <= 0) return;
-
-            float videoRatio = videoWidth / (float) videoHeight;
-            float stageRatio = availableW / (float) availableH;
-
-            int targetW;
-            int targetH;
-            if (videoRatio > stageRatio) {
-                targetW = availableW;
-                targetH = Math.max(1, Math.round(availableW / videoRatio));
-            } else {
-                targetH = availableH;
-                targetW = Math.max(1, Math.round(availableH * videoRatio));
-            }
-
-            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(targetW, targetH, Gravity.CENTER);
-            surfaceView.setLayoutParams(lp);
-        });
     }
 
     private void showMenu(View anchor) {
@@ -516,12 +503,14 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
                 n.endsWith(".mpg");
     }
 
-    private String formatTime(int ms) {
-        int total = Math.max(0, ms / 1000);
-        int hours = total / 3600;
-        int minutes = (total % 3600) / 60;
-        int seconds = total % 60;
-        if (hours > 0) return String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds);
+    private String formatTime(long ms) {
+        long total = Math.max(0L, ms / 1000L);
+        long hours = total / 3600L;
+        long minutes = (total % 3600L) / 60L;
+        long seconds = total % 60L;
+        if (hours > 0L) {
+            return String.format(Locale.getDefault(), "%d:%02d:%02d", hours, minutes, seconds);
+        }
         return String.format(Locale.getDefault(), "%d:%02d", minutes, seconds);
     }
 
@@ -531,37 +520,12 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
     }
 
     @Override
-    public void surfaceCreated(SurfaceHolder holder) {
-        if (videoMode && mediaPlayer == null) prepareMedia(holder);
-        else if (videoMode && mediaPlayer != null) {
-            try { mediaPlayer.setDisplay(holder); } catch (Exception ignored) {}
-        }
-    }
-
-    @Override
-    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        if (videoMode && prepared && mediaPlayer != null) {
-            try { fitVideoSurface(mediaPlayer.getVideoWidth(), mediaPlayer.getVideoHeight()); } catch (Exception ignored) {}
-        }
-    }
-
-    @Override
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        if (videoMode && mediaPlayer != null) {
-            try { mediaPlayer.setDisplay(null); } catch (Exception ignored) {}
-        }
-    }
-
-    @Override
     protected void onPause() {
         super.onPause();
-        if (prepared && mediaPlayer != null) {
-            try {
-                resumePlaying = mediaPlayer.isPlaying();
-                resumePosition = mediaPlayer.getCurrentPosition();
-                if (mediaPlayer.isPlaying()) mediaPlayer.pause();
-            } catch (Exception ignored) {}
-            updatePlayButton();
+        if (player != null) {
+            resumePlaying = player.isPlaying();
+            resumePosition = player.getCurrentPosition();
+            player.pause();
         }
         setKeepScreenOn(false);
     }
@@ -569,31 +533,29 @@ public class MediaPlayerActivity extends Activity implements SurfaceHolder.Callb
     @Override
     protected void onResume() {
         super.onResume();
-        if (prepared && mediaPlayer != null && resumePlaying && !firstStart) {
-            startPlayback();
+        if (player != null && resumePlaying && !firstStart &&
+                player.getPlaybackState() == Player.STATE_READY) {
+            player.play();
         }
     }
 
     @Override
     protected void onSaveInstanceState(Bundle outState) {
-        if (prepared && mediaPlayer != null) {
-            try {
-                outState.putInt("position", mediaPlayer.getCurrentPosition());
-                outState.putBoolean("playing", mediaPlayer.isPlaying());
-            } catch (Exception ignored) {}
+        if (player != null) {
+            outState.putLong("position", player.getCurrentPosition());
+            outState.putBoolean("playing", player.isPlaying());
         } else {
-            outState.putInt("position", resumePosition);
+            outState.putLong("position", resumePosition);
             outState.putBoolean("playing", resumePlaying);
         }
         super.onSaveInstanceState(outState);
     }
 
     private void releasePlayer() {
-        prepared = false;
-        if (mediaPlayer != null) {
-            try { mediaPlayer.reset(); } catch (Exception ignored) {}
-            try { mediaPlayer.release(); } catch (Exception ignored) {}
-            mediaPlayer = null;
+        if (playerView != null) playerView.setPlayer(null);
+        if (player != null) {
+            player.release();
+            player = null;
         }
     }
 
