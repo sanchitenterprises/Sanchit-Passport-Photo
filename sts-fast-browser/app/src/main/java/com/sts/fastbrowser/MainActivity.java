@@ -2607,6 +2607,12 @@ public class MainActivity extends android.app.Activity {
                 if (isPhotoCandidate(name, mime)) {
                     intent = new Intent(this, ImageViewerActivity.class);
                     intent.setData(uri);
+                } else if (isAudioCandidate(name, mime) || isVideoFileCandidate(name, mime)) {
+                    intent = new Intent(this, MediaPlayerActivity.class);
+                    intent.setData(uri);
+                    intent.putExtra("media_name", name);
+                    intent.putExtra("media_mime", TextUtils.isEmpty(mime) ? mimeForPhoneDataName(name) : mime);
+                    intent.putExtra("media_mode", isVideoFileCandidate(name, mime) ? "video" : "audio");
                 } else if (lower.endsWith(".pdf") || "application/pdf".equalsIgnoreCase(mime)) {
                     intent = new Intent(this, PdfViewerActivity.class);
                     intent.putExtra("pdf_name", name);
