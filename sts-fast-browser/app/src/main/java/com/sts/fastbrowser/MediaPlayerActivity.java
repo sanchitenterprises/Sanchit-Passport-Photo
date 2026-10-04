@@ -1,6 +1,7 @@
 package com.sts.fastbrowser;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.database.Cursor;
@@ -11,6 +12,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
+import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
@@ -32,10 +34,14 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
+import java.io.File;
+import java.util.ArrayList;
 import java.util.Locale;
 
 @UnstableApi
 public class MediaPlayerActivity extends Activity {
+    private static final int REQ_DELETE_MEDIA = 910;
+
     private Uri sourceUri;
     private String fileName;
     private String mimeType;
@@ -198,12 +204,12 @@ public class MediaPlayerActivity extends Activity {
         controlPanel.addView(buttons, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(62)));
 
-        TextView rewind = makeControlButton("↶ 10", 16);
+        TextView rewind = makeControlButton("↶ 20", 16);
         playPauseButton = makeControlButton("▶", 28);
-        TextView forward = makeControlButton("10 ↷", 16);
+        TextView forward = makeControlButton("20 ↷", 16);
 
         rewind.setOnClickListener(v -> {
-            seekRelative(-10000L);
+            seekRelative(-20000L);
             showVideoControls();
         });
         playPauseButton.setOnClickListener(v -> {
@@ -211,7 +217,7 @@ public class MediaPlayerActivity extends Activity {
             showVideoControls();
         });
         forward.setOnClickListener(v -> {
-            seekRelative(10000L);
+            seekRelative(20000L);
             showVideoControls();
         });
 
@@ -390,6 +396,9 @@ public class MediaPlayerActivity extends Activity {
         releasePlayer();
 
         player = new ExoPlayer.Builder(this).build();
+        if (!videoMode) {
+            player.setWakeMode(C.WAKE_MODE_LOCAL);
+        }
         if (playerView != null) playerView.setPlayer(player);
 
         player.addListener(new Player.Listener() {
@@ -420,6 +429,7 @@ public class MediaPlayerActivity extends Activity {
             public void onIsPlayingChanged(boolean isPlaying) {
                 updatePlayButton();
                 setKeepScreenOn(videoMode && isPlaying);
+                if (playerView != null) playerView.setKeepScreenOn(videoMode && isPlaying);
                 if (videoMode) {
                     if (isPlaying) scheduleVideoControlsHide();
                     else showVideoControls();
@@ -535,6 +545,7 @@ public class MediaPlayerActivity extends Activity {
         PopupMenu popup = new PopupMenu(this, anchor);
         popup.getMenu().add("Share");
         popup.getMenu().add("Open with another app");
+        popup.getMenu().add("Delete");
         popup.setOnMenuItemClickListener(item -> {
             String title = String.valueOf(item.getTitle());
             if ("Share".equals(title)) {
@@ -545,9 +556,78 @@ public class MediaPlayerActivity extends Activity {
                 openExternally();
                 return true;
             }
+            if ("Delete".equals(title)) {
+                confirmDeleteMedia();
+                return true;
+            }
             return false;
         });
         popup.show();
+    }
+
+    private void confirmDeleteMedia() {
+        if (sourceUri == null) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Delete")
+                .setMessage((videoMode ? "यह video" : "यह audio") + " permanently delete करना है?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Delete", (d, w) -> deleteMedia())
+                .show();
+    }
+
+    private void deleteMedia() {
+        try {
+            if ("file".equalsIgnoreCase(sourceUri.getScheme())) {
+                String path = sourceUri.getPath();
+                if (!TextUtils.isEmpty(path) && new File(path).delete()) {
+                    Toast.makeText(this, "File delete हो गई", Toast.LENGTH_SHORT).show();
+                    finish();
+                    return;
+                }
+                Toast.makeText(this, "File delete नहीं हो पाई", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            int deleted = getContentResolver().delete(sourceUri, null, null);
+            if (deleted > 0) {
+                Toast.makeText(this, "File delete हो गई", Toast.LENGTH_SHORT).show();
+                finish();
+                return;
+            }
+            requestSystemDeleteForMedia();
+        } catch (SecurityException e) {
+            if (android.os.Build.VERSION.SDK_INT == 29 &&
+                    e instanceof android.app.RecoverableSecurityException) {
+                try {
+                    android.app.RecoverableSecurityException rse =
+                            (android.app.RecoverableSecurityException) e;
+                    startIntentSenderForResult(
+                            rse.getUserAction().getActionIntent().getIntentSender(),
+                            REQ_DELETE_MEDIA, null, 0, 0, 0);
+                    return;
+                } catch (Exception ignored) {}
+            }
+            requestSystemDeleteForMedia();
+        } catch (Exception e) {
+            Toast.makeText(this, "File delete नहीं हो पाई", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void requestSystemDeleteForMedia() {
+        if (android.os.Build.VERSION.SDK_INT >= 30 &&
+                "content".equalsIgnoreCase(sourceUri.getScheme())) {
+            try {
+                ArrayList<Uri> uris = new ArrayList<>();
+                uris.add(sourceUri);
+                android.app.PendingIntent request =
+                        MediaStore.createDeleteRequest(getContentResolver(), uris);
+                startIntentSenderForResult(
+                        request.getIntentSender(), REQ_DELETE_MEDIA,
+                        null, 0, 0, 0);
+                return;
+            } catch (Exception ignored) {}
+        }
+        Toast.makeText(this, "File delete नहीं हो पाई", Toast.LENGTH_SHORT).show();
     }
 
     private void shareMedia() {
@@ -621,6 +701,15 @@ public class MediaPlayerActivity extends Activity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_DELETE_MEDIA && resultCode == RESULT_OK) {
+            Toast.makeText(this, "File delete हो गई", Toast.LENGTH_SHORT).show();
+            finish();
+        }
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus && videoMode) enterVideoImmersive();
@@ -632,18 +721,21 @@ public class MediaPlayerActivity extends Activity {
         if (player != null) {
             resumePlaying = player.isPlaying();
             resumePosition = player.getCurrentPosition();
-            player.pause();
+            if (videoMode) {
+                player.pause();
+            }
         }
-        setKeepScreenOn(false);
+        if (videoMode) setKeepScreenOn(false);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (player != null && resumePlaying && !firstStart &&
+        if (videoMode && player != null && resumePlaying && !firstStart &&
                 player.getPlaybackState() == Player.STATE_READY) {
             player.play();
         }
+        if (videoMode) enterVideoImmersive();
     }
 
     @Override
