@@ -2165,13 +2165,13 @@ public class MainActivity extends android.app.Activity {
                 "<style>" +
                 "*{box-sizing:border-box}html,body{margin:0;background:#050505;color:#f4f4f4;font-family:Arial,sans-serif;min-height:100%}" +
                 ".header{position:sticky;top:0;z-index:10;background:#050505;padding:16px 16px 0;border-bottom:1px solid #111}" +
-                ".title-row{display:flex;align-items:center;height:48px}.title{font-size:25px;font-weight:700;flex:1}" +
+                ".title-row{display:flex;align-items:center;height:48px}.title{font-size:25px;font-weight:700;flex:1}.top-count{font-size:13px;color:#a8a8a8;white-space:nowrap;margin-right:4px}" +
                 ".head-btn{width:44px;height:44px;border:0;background:transparent;color:#fff;font-size:28px;border-radius:22px}" +
                 ".head-btn:active{background:#242424}.tabs{display:flex;overflow-x:auto;gap:4px;height:58px;align-items:flex-end;padding:0 4px}" +
                 ".tab{border:0;background:transparent;color:#8c8c8c;font-size:18px;padding:16px 13px 13px;white-space:nowrap;border-bottom:3px solid transparent}" +
                 ".tab.active{color:#fff;border-bottom-color:#fff;font-weight:700}.search{display:none;padding:0 0 12px}.search.show{display:block}" +
                 ".search input{width:100%;height:42px;border-radius:10px;border:1px solid #555;background:#171717;color:#fff;padding:0 12px;font-size:16px}" +
-                ".summary{display:flex;align-items:center;padding:20px 16px 14px;color:#aaa;font-weight:600}.summary .count{flex:1}.doc-menu{display:none;position:fixed;right:12px;top:58px;z-index:50;min-width:210px;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.doc-menu.show{display:block}.menu-item,.sort-option{display:block;width:100%;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:14px 16px;font-size:15px}.menu-item:active,.sort-option:active{background:#303030}.sort-sub{display:none;background:#121212}.sort-sub.show{display:block}.sort-sub .sort-option{padding-left:28px;color:#ddd}" +
+                ".doc-menu{display:none;position:fixed;right:12px;top:58px;z-index:50;width:max-content;max-width:72vw;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.doc-menu.show{display:block}.menu-item,.sort-option{display:block;width:100%;min-width:0;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.menu-item:active,.sort-option:active{background:#303030}.sort-sub{display:none;background:#121212}.sort-sub.show{display:block}.sort-sub .sort-option{padding-left:28px;color:#ddd}" +
                 ".date-group{font-size:22px;font-weight:700;padding:14px 16px 10px}.doc-list{padding-bottom:28px}" +
                 ".doc-item{display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020}" +
                 ".doc-item:active{background:#181818}.file-icon{width:54px;height:66px;margin-right:16px;display:flex;align-items:center;justify-content:center;" +
@@ -2188,6 +2188,7 @@ public class MainActivity extends android.app.Activity {
                 "body.grid .file-icon{margin:0 auto 10px}.hide{display:none!important}" +
                 "</style></head><body>" +
                 "<div class='header'><div class='title-row'><div class='title'>Documents</div>" +
+                "<div class='top-count'><span id='shownCount'>" + count + "</span> items</div>" +
                 "<button class='head-btn' onclick='toggleSearch()'>⌕</button>" +
                 "<button id='menuButton' class='head-btn' onclick='toggleDocMenu(event)'>⋮</button></div>" +
                 "<div id='searchBox' class='search'><input id='q' placeholder='Search documents' oninput='applyFilter()'></div>" +
@@ -2195,7 +2196,6 @@ public class MainActivity extends android.app.Activity {
                 tabHtml("All", true) + tabHtml("DOC", false) + tabHtml("XLS", false) + tabHtml("PPT", false) +
                 tabHtml("PDF", false) + tabHtml("OFD", false) + tabHtml("TXT", false) +
                 "</div></div>" +
-                "<div class='summary'><div class='count'><span id='shownCount'>" + count + "</span> items in total</div></div>" +
                 "<div id='docMenu' class='doc-menu'>" +
                 "<button id='gridMenuItem' class='menu-item' onclick='toggleGridFromMenu()'>Grid view</button>" +
                 "<button class='menu-item' onclick='toggleSortSub(event)'>Sort by ▸</button>" +
