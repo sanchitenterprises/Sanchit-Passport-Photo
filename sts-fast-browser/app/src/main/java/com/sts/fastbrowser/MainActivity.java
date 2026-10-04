@@ -2093,6 +2093,8 @@ public class MainActivity extends android.app.Activity {
                 String mime = mimeCol >= 0 ? cursor.getString(mimeCol) : null;
                 String category = categoryForPhoneData(mode, name, mime);
                 if (category == null) continue;
+                String filterType = filterTypeForPhoneData(mode, name, mime);
+                if (filterType == null) continue;
 
                 long id = cursor.getLong(idCol);
                 long size = sizeCol >= 0 ? cursor.getLong(sizeCol) : 0L;
@@ -2109,6 +2111,7 @@ public class MainActivity extends android.app.Activity {
                         name,
                         TextUtils.isEmpty(mime) ? mimeForPhoneDataName(name) : mime,
                         category,
+                        filterType,
                         Math.max(0L, size),
                         Math.max(0L, modifiedSec) * 1000L
                 ));
@@ -2129,6 +2132,65 @@ public class MainActivity extends android.app.Activity {
                 return null;
             }
             return otherDataCategory(name, mime);
+        }
+        return null;
+    }
+
+    private String filterTypeForPhoneData(String mode, String name, String mime) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+
+        if ("Documents".equals(mode)) {
+            if (n.endsWith(".pdf")) return "PDF";
+            if (n.endsWith(".docx")) return "DOCX";
+            if (n.endsWith(".xlsx")) return "XLSX";
+            if (n.endsWith(".pptx")) return "PPTX";
+            if (n.endsWith(".doc")) return "DOC";
+            if (n.endsWith(".xls")) return "XLS";
+            if (n.endsWith(".ppt")) return "PPT";
+            if (n.endsWith(".txt")) return "TXT";
+            if (n.endsWith(".csv")) return "CSV";
+            if (n.endsWith(".rtf")) return "RTF";
+            if (n.endsWith(".odt")) return "ODT";
+            if (n.endsWith(".ods")) return "ODS";
+            if (n.endsWith(".odp")) return "ODP";
+            if (n.endsWith(".ofd")) return "OFD";
+            return null;
+        }
+
+        if ("Photo".equals(mode)) {
+            if (n.endsWith(".jpg") || n.endsWith(".jpeg") || "image/jpeg".equals(m)) return "JPG";
+            if (n.endsWith(".png") || "image/png".equals(m)) return "PNG";
+            if (n.endsWith(".webp") || "image/webp".equals(m)) return "WEBP";
+            if (n.endsWith(".heic") || n.endsWith(".heif") || m.contains("heic") || m.contains("heif")) return "HEIC";
+            if (n.endsWith(".gif") || "image/gif".equals(m)) return "GIF";
+            if (n.endsWith(".bmp") || "image/bmp".equals(m)) return "BMP";
+            if (n.endsWith(".avif") || "image/avif".equals(m)) return "AVIF";
+            return null;
+        }
+
+        if ("Video".equals(mode)) {
+            if (n.endsWith(".mp4") || "video/mp4".equals(m)) return "MP4";
+            if (n.endsWith(".mkv") || m.contains("matroska")) return "MKV";
+            if (n.endsWith(".webm") || "video/webm".equals(m)) return "WEBM";
+            if (n.endsWith(".3gp") || "video/3gpp".equals(m)) return "3GP";
+            if (n.endsWith(".mov") || "video/quicktime".equals(m)) return "MOV";
+            if (n.endsWith(".avi") || m.contains("msvideo")) return "AVI";
+            if (n.endsWith(".wmv") || m.contains("ms-wmv")) return "WMV";
+            if (n.endsWith(".m4v")) return "M4V";
+            if (n.endsWith(".mpeg") || n.endsWith(".mpg") || "video/mpeg".equals(m)) return "MPEG/MPG";
+            return null;
+        }
+
+        if ("Other Data".equals(mode)) {
+            if (m.startsWith("audio/") || n.endsWith(".mp3") || n.endsWith(".wav") ||
+                    n.endsWith(".aac") || n.endsWith(".m4a") || n.endsWith(".ogg") || n.endsWith(".flac")) return "AUDIO";
+            if (n.endsWith(".apk")) return "APK";
+            if (n.endsWith(".zip")) return "ZIP";
+            if (n.endsWith(".rar")) return "RAR";
+            if (n.endsWith(".7z")) return "7Z";
+            if (n.endsWith(".tar") || n.endsWith(".gz") || n.endsWith(".tgz")) return "TAR/GZ";
+            return "OTHER";
         }
         return null;
     }
@@ -2228,7 +2290,7 @@ public class MainActivity extends android.app.Activity {
             String sub = size;
             if (!TextUtils.isEmpty(itemDate)) sub += "  |  " + itemDate;
 
-            rows.append("<div class='doc-item' data-cat='").append(d.category)
+            rows.append("<div class='doc-item' data-cat='").append(d.filterType)
                     .append("' data-name='").append(escapeDocsAttr(d.name.toLowerCase(Locale.ROOT))).append("'")
                     .append(" data-size='").append(d.size).append("'")
                     .append(" data-modified='").append(d.modified).append("' onclick='openDoc(this)'")
@@ -2389,9 +2451,53 @@ public class MainActivity extends android.app.Activity {
 
     private String phoneDataTabsHtml(String mode) {
         if ("Documents".equals(mode)) {
-            return tabHtml("All", true) + tabHtml("DOC", false) + tabHtml("XLS", false) +
-                    tabHtml("PPT", false) + tabHtml("PDF", false) + tabHtml("OFD", false) +
-                    tabHtml("TXT", false);
+            return tabHtml("All", true) +
+                    tabHtml("PDF", false) +
+                    tabHtml("DOCX", false) +
+                    tabHtml("XLSX", false) +
+                    tabHtml("PPTX", false) +
+                    tabHtml("DOC", false) +
+                    tabHtml("XLS", false) +
+                    tabHtml("PPT", false) +
+                    tabHtml("TXT", false) +
+                    tabHtml("CSV", false) +
+                    tabHtml("RTF", false) +
+                    tabHtml("ODT", false) +
+                    tabHtml("ODS", false) +
+                    tabHtml("ODP", false) +
+                    tabHtml("OFD", false);
+        }
+        if ("Photo".equals(mode)) {
+            return tabHtml("All", true) +
+                    tabHtml("JPG", false) +
+                    tabHtml("PNG", false) +
+                    tabHtml("WEBP", false) +
+                    tabHtml("HEIC", false) +
+                    tabHtml("GIF", false) +
+                    tabHtml("BMP", false) +
+                    tabHtml("AVIF", false);
+        }
+        if ("Video".equals(mode)) {
+            return tabHtml("All", true) +
+                    tabHtml("MP4", false) +
+                    tabHtml("MKV", false) +
+                    tabHtml("WEBM", false) +
+                    tabHtml("3GP", false) +
+                    tabHtml("MOV", false) +
+                    tabHtml("AVI", false) +
+                    tabHtml("WMV", false) +
+                    tabHtml("M4V", false) +
+                    tabHtml("MPEG/MPG", false);
+        }
+        if ("Other Data".equals(mode)) {
+            return tabHtml("All", true) +
+                    tabHtml("AUDIO", false) +
+                    tabHtml("APK", false) +
+                    tabHtml("ZIP", false) +
+                    tabHtml("RAR", false) +
+                    tabHtml("7Z", false) +
+                    tabHtml("TAR/GZ", false) +
+                    tabHtml("OTHER", false);
         }
         return tabHtml("All", true);
     }
@@ -2585,14 +2691,16 @@ public class MainActivity extends android.app.Activity {
         final String name;
         final String mime;
         final String category;
+        final String filterType;
         final long size;
         final long modified;
 
-        DocumentEntry(String uri, String name, String mime, String category, long size, long modified) {
+        DocumentEntry(String uri, String name, String mime, String category, String filterType, long size, long modified) {
             this.uri = uri;
             this.name = name;
             this.mime = mime;
             this.category = category;
+            this.filterType = filterType;
             this.size = size;
             this.modified = modified;
         }
