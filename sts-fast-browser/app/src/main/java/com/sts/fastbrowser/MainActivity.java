@@ -81,7 +81,13 @@ public class MainActivity extends android.app.Activity {
     private static final int REQ_LOCATION = 812;
     private static final int REQ_DOCUMENT_ACCESS = 813;
     private static final int REQ_PHONE_DATA_DELETE = 814;
+    private static final int REQ_EXPORT_SETTINGS = 815;
+    private static final int REQ_IMPORT_SETTINGS = 816;
     private static final String PREFS = "sts_fast_browser_prefs";
+    private static final String KEY_STARTUP_PENDING = "startup_pending";
+    private static final String KEY_LAST_GOOD_CONFIG = "last_good_config";
+    private static final String KEY_LAST_HEALTH_WEBVIEW = "last_health_webview";
+    private static final String KEY_LAST_HEALTH_TIME = "last_health_time";
     private static final String KEY_SITES = "sites_json";
     private static final String KEY_SITES_D1 = "sites_d1_json";
     private static final String KEY_SITES_D2 = "sites_d2_json";
@@ -157,17 +163,35 @@ public class MainActivity extends android.app.Activity {
         w.setNavigationBarColor(Color.parseColor("#F2F5F4"));
 
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        adBlockEnabled = prefs.getBoolean(KEY_ADBLOCK, true);
-        hardAdBlockEnabled = prefs.getBoolean(KEY_HARD_ADBLOCK, true);
-        loadSites();
-        loadSlots();
-        setContentView(buildUi());
-        configureWebView(webView1);
-        configureWebView(webView2);
-        showWebView(1);
-        updateSlotLabels();
-        if (!handleBrowserIntent(getIntent())) {
-            loadInitialPage();
+
+        // If the previous launch died before startup completed, restore only the last
+        // known-good app configuration. User files and WebView data are never wiped.
+        boolean previousStartupIncomplete = prefs.getBoolean(KEY_STARTUP_PENDING, false);
+        if (previousStartupIncomplete) {
+            String lastGood = prefs.getString(KEY_LAST_GOOD_CONFIG, "");
+            if (!TextUtils.isEmpty(lastGood)) {
+                applyBackupJsonToPrefs(lastGood);
+            }
+        }
+        prefs.edit().putBoolean(KEY_STARTUP_PENDING, true).commit();
+
+        try {
+            adBlockEnabled = prefs.getBoolean(KEY_ADBLOCK, true);
+            hardAdBlockEnabled = prefs.getBoolean(KEY_HARD_ADBLOCK, true);
+            loadSites();
+            loadSlots();
+            setContentView(buildUi());
+            configureWebView(webView1);
+            configureWebView(webView2);
+            showWebView(1);
+            updateSlotLabels();
+            if (!handleBrowserIntent(getIntent())) {
+                loadInitialPage();
+            }
+            markStartupHealthy();
+            runSilentHealthCheck();
+        } catch (Exception | LinkageError startupError) {
+            showSafeStartupScreen();
         }
     }
 
@@ -1463,6 +1487,8 @@ public class MainActivity extends android.app.Activity {
         pm.getMenu().add(hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF");
         pm.getMenu().add("Add Website");
         pm.getMenu().add("Manage Websites");
+        pm.getMenu().add("Backup Settings");
+        pm.getMenu().add("Restore Settings");
         pm.getMenu().add("About");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
@@ -1480,6 +1506,14 @@ public class MainActivity extends android.app.Activity {
             }
             if (t.equals("Manage Websites")) {
                 showManageSitesDialog();
+                return true;
+            }
+            if (t.equals("Backup Settings")) {
+                exportSettingsBackup();
+                return true;
+            }
+            if (t.equals("Restore Settings")) {
+                importSettingsBackup();
                 return true;
             }
             if (t.equals("About")) {
@@ -1791,11 +1825,254 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void showAboutDialog() {
+        String webViewVersion = prefs == null ? "" : prefs.getString(KEY_LAST_HEALTH_WEBVIEW, "");
+        String health = TextUtils.isEmpty(webViewVersion)
+                ? "WebView health: available"
+                : "WebView: " + webViewVersion;
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version 1.0.27\n\nSimple • Fast • Two Quick Slots\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
+                .setMessage("Version " + BuildConfig.VERSION_NAME +
+                        "\n\nSimple • Fast • Two Quick Slots" +
+                        "\nLong-Life protection: ON" +
+                        "\n" + health +
+                        "\n\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
                 .setPositiveButton("OK", null)
                 .show();
+    }
+
+    private String buildBackupJson() {
+        try {
+            JSONObject root = new JSONObject();
+            root.put("format", "STS_FAST_BROWSER_BACKUP");
+            root.put("schema", 1);
+            root.put("appVersion", BuildConfig.VERSION_NAME);
+            root.put("sitesD1", new JSONArray(prefs.getString(KEY_SITES_D1, "[]")));
+            root.put("sitesD2", new JSONArray(prefs.getString(KEY_SITES_D2, "[]")));
+            root.put("slot1Name", prefs.getString(KEY_SLOT1_NAME, GOOGLE_NAME));
+            root.put("slot1Url", prefs.getString(KEY_SLOT1_URL, GOOGLE_URL));
+            root.put("slot2Name", prefs.getString(KEY_SLOT2_NAME, GOOGLE_NAME));
+            root.put("slot2Url", prefs.getString(KEY_SLOT2_URL, GOOGLE_URL));
+            root.put("adBlock", prefs.getBoolean(KEY_ADBLOCK, true));
+            root.put("hardAdBlock", prefs.getBoolean(KEY_HARD_ADBLOCK, true));
+            return root.toString(2);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private JSONArray sanitizeBackupSites(JSONArray input) {
+        JSONArray clean = new JSONArray();
+        if (input == null) return clean;
+        int limit = Math.min(input.length(), 500);
+        for (int i = 0; i < limit; i++) {
+            JSONObject item = input.optJSONObject(i);
+            if (item == null) continue;
+            String name = item.optString("name", "").trim();
+            String url = normalizeUrl(item.optString("url", "").trim());
+            String passwordHash = item.optString("passwordHash", "");
+            if (name.length() > 120) name = name.substring(0, 120);
+            if (passwordHash.length() > 256) passwordHash = "";
+            if (name.isEmpty() || url == null || GOOGLE_URL.equalsIgnoreCase(url)) continue;
+            try {
+                JSONObject safe = new JSONObject();
+                safe.put("name", name);
+                safe.put("url", url);
+                safe.put("passwordHash", passwordHash);
+                clean.put(safe);
+            } catch (Exception ignored) {}
+        }
+        return clean;
+    }
+
+    private boolean applyBackupJsonToPrefs(String json) {
+        if (prefs == null || TextUtils.isEmpty(json)) return false;
+        try {
+            JSONObject root = new JSONObject(json);
+            if (!"STS_FAST_BROWSER_BACKUP".equals(root.optString("format", ""))) return false;
+            if (root.optInt("schema", 0) < 1) return false;
+
+            JSONArray d1 = sanitizeBackupSites(root.optJSONArray("sitesD1"));
+            JSONArray d2 = sanitizeBackupSites(root.optJSONArray("sitesD2"));
+
+            String s1Name = root.optString("slot1Name", GOOGLE_NAME).trim();
+            String s2Name = root.optString("slot2Name", GOOGLE_NAME).trim();
+            if (s1Name.isEmpty() || s1Name.length() > 120) s1Name = GOOGLE_NAME;
+            if (s2Name.isEmpty() || s2Name.length() > 120) s2Name = GOOGLE_NAME;
+
+            String s1Url = normalizeUrl(root.optString("slot1Url", GOOGLE_URL));
+            String s2Url = normalizeUrl(root.optString("slot2Url", GOOGLE_URL));
+            if (s1Url == null) s1Url = GOOGLE_URL;
+            if (s2Url == null) s2Url = GOOGLE_URL;
+
+            prefs.edit()
+                    .putString(KEY_SITES_D1, d1.toString())
+                    .putString(KEY_SITES_D2, d2.toString())
+                    .putString(KEY_SLOT1_NAME, s1Name)
+                    .putString(KEY_SLOT1_URL, s1Url)
+                    .putString(KEY_SLOT2_NAME, s2Name)
+                    .putString(KEY_SLOT2_URL, s2Url)
+                    .putBoolean(KEY_ADBLOCK, root.optBoolean("adBlock", true))
+                    .putBoolean(KEY_HARD_ADBLOCK, root.optBoolean("hardAdBlock", true))
+                    .putBoolean(KEY_SITES_MIGRATED, true)
+                    .commit();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void markStartupHealthy() {
+        String backup = buildBackupJson();
+        SharedPreferences.Editor editor = prefs.edit().putBoolean(KEY_STARTUP_PENDING, false);
+        if (!TextUtils.isEmpty(backup)) {
+            editor.putString(KEY_LAST_GOOD_CONFIG, backup);
+        }
+        editor.apply();
+    }
+
+    private void runSilentHealthCheck() {
+        new Thread(() -> {
+            String webViewInfo = "available";
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    android.content.pm.PackageInfo info = WebView.getCurrentWebViewPackage();
+                    if (info != null) {
+                        webViewInfo = info.packageName + " " + info.versionName;
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            try {
+                long usable = getFilesDir().getUsableSpace();
+                String finalWebViewInfo = usable < (20L * 1024L * 1024L)
+                        ? webViewInfo + " • low storage"
+                        : webViewInfo;
+                prefs.edit()
+                        .putString(KEY_LAST_HEALTH_WEBVIEW, finalWebViewInfo)
+                        .putLong(KEY_LAST_HEALTH_TIME, System.currentTimeMillis())
+                        .apply();
+            } catch (Exception ignored) {}
+        }, "SFB-Health").start();
+    }
+
+    private void showSafeStartupScreen() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER);
+        root.setPadding(dp(28), dp(28), dp(28), dp(28));
+        root.setBackgroundColor(Color.parseColor("#F2F5F4"));
+
+        TextView title = new TextView(this);
+        title.setText("STS Fast Browser");
+        title.setTextSize(24);
+        title.setTextColor(Color.parseColor("#172326"));
+        title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setGravity(Gravity.CENTER);
+        root.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView message = new TextView(this);
+        message.setText("Browser component अभी start नहीं हो पाया। App data delete नहीं किया गया है। Retry करने पर last known good settings के साथ फिर से start होगा।");
+        message.setTextSize(14);
+        message.setTextColor(Color.parseColor("#39484B"));
+        message.setGravity(Gravity.CENTER);
+        message.setPadding(0, dp(16), 0, dp(18));
+        root.addView(message, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView retry = makeTopButton("Retry", Color.parseColor("#BFE3DF"));
+        retry.setOnClickListener(v -> recreate());
+        LinearLayout.LayoutParams retryLp = new LinearLayout.LayoutParams(dp(150), dp(48));
+        retryLp.gravity = Gravity.CENTER_HORIZONTAL;
+        root.addView(retry, retryLp);
+        setContentView(root);
+    }
+
+    private void exportSettingsBackup() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            intent.putExtra(Intent.EXTRA_TITLE, "STS-Fast-Browser-Backup.json");
+            startActivityForResult(intent, REQ_EXPORT_SETTINGS);
+        } catch (Exception e) {
+            Toast.makeText(this, "Backup file नहीं बन पाई", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void importSettingsBackup() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/json");
+            startActivityForResult(intent, REQ_IMPORT_SETTINGS);
+        } catch (Exception e) {
+            Toast.makeText(this, "Backup file open नहीं हो पाई", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String readSmallUtf8File(Uri uri, int maxBytes) throws Exception {
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            if (in == null) throw new Exception("Missing input");
+            byte[] buffer = new byte[8192];
+            int total = 0;
+            int n;
+            while ((n = in.read(buffer)) > 0) {
+                total += n;
+                if (total > maxBytes) throw new Exception("Backup too large");
+                out.write(buffer, 0, n);
+            }
+            return out.toString("UTF-8");
+        }
+    }
+
+    private void writeSettingsBackup(Uri uri) {
+        new Thread(() -> {
+            try {
+                String json = buildBackupJson();
+                if (TextUtils.isEmpty(json)) throw new Exception("Empty backup");
+                try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (out == null) throw new Exception("Missing output");
+                    out.write(json.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                }
+                runOnUiThread(() -> Toast.makeText(
+                        this, "Settings backup save हो गया", Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(
+                        this, "Settings backup नहीं हो पाया", Toast.LENGTH_SHORT).show());
+            }
+        }, "SFB-Backup").start();
+    }
+
+    private void restoreSettingsBackup(Uri uri) {
+        new Thread(() -> {
+            try {
+                String json = readSmallUtf8File(uri, 2 * 1024 * 1024);
+                if (!applyBackupJsonToPrefs(json)) throw new Exception("Invalid backup");
+
+                runOnUiThread(() -> {
+                    try {
+                        adBlockEnabled = prefs.getBoolean(KEY_ADBLOCK, true);
+                        hardAdBlockEnabled = prefs.getBoolean(KEY_HARD_ADBLOCK, true);
+                        loadSites();
+                        loadSlots();
+                        slot1DocumentsHome = true;
+                        phoneDataMode = "Documents";
+                        showDocumentsHome();
+                        updateSlotLabels();
+                        markStartupHealthy();
+                        Toast.makeText(this, "Settings restore हो गई", Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(this, "Restore apply नहीं हो पाया", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(
+                        this, "यह valid STS Fast Browser backup नहीं है", Toast.LENGTH_LONG).show());
+            }
+        }, "SFB-Restore").start();
     }
 
     private void setAdBlockEnabled(boolean enabled, boolean showToast) {
@@ -2807,11 +3084,25 @@ public class MainActivity extends android.app.Activity {
                         Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
                 startActivity(intent);
             } catch (ActivityNotFoundException e) {
-                Toast.makeText(this, "इस file के लिए viewer नहीं मिला", Toast.LENGTH_SHORT).show();
+                openExternalFileFallback(uriString, name, mime);
             } catch (Exception e) {
-                Toast.makeText(this, "File open नहीं हो पाई", Toast.LENGTH_SHORT).show();
+                openExternalFileFallback(uriString, name, mime);
             }
         });
+    }
+
+    private void openExternalFileFallback(String uriString, String name, String mime) {
+        try {
+            Uri uri = Uri.parse(uriString);
+            Intent fallback = new Intent(Intent.ACTION_VIEW);
+            fallback.setDataAndType(uri,
+                    TextUtils.isEmpty(mime) ? mimeForPhoneDataName(name) : mime);
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                    Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            startActivity(fallback);
+        } catch (Exception ignored) {
+            Toast.makeText(this, "File open नहीं हो पाई", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private ArrayList<Uri> parsePhoneDataUris(String json) {
@@ -2952,6 +3243,21 @@ public class MainActivity extends android.app.Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_EXPORT_SETTINGS) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                writeSettingsBackup(data.getData());
+            }
+            return;
+        }
+
+        if (requestCode == REQ_IMPORT_SETTINGS) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                restoreSettingsBackup(data.getData());
+            }
+            return;
+        }
+
         if (requestCode == REQ_PHONE_DATA_DELETE) {
             if (slot1DocumentsHome) showDocumentsHome();
         }
@@ -3013,6 +3319,24 @@ public class MainActivity extends android.app.Activity {
         target.clearHistory();
         target.removeAllViews();
         target.destroy();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            synchronized (phoneDataThumbCache) {
+                phoneDataThumbCache.evictAll();
+            }
+        }
+    }
+
+    @Override
+    public void onLowMemory() {
+        synchronized (phoneDataThumbCache) {
+            phoneDataThumbCache.evictAll();
+        }
+        super.onLowMemory();
     }
 
     @Override
