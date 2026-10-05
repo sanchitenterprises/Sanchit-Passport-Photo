@@ -101,6 +101,7 @@ public class OfficeViewerActivity extends Activity {
     private boolean pendingSaveOriginal;
     private String pendingExportFormat;
     private boolean editing = false;
+    private boolean incomingEdit = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,6 +114,7 @@ public class OfficeViewerActivity extends Activity {
         fileName = getIntent().getStringExtra("office_name");
         cookie = getIntent().getStringExtra("office_cookie");
         userAgent = getIntent().getStringExtra("office_user_agent");
+        incomingEdit = getIntent().getBooleanExtra("incoming_edit", false);
 
         if (sourceUri != null) {
             String resolved = resolveDisplayName(sourceUri);
@@ -171,6 +173,15 @@ public class OfficeViewerActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         s.setAllowFileAccess(false);
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (incomingEdit && !editing) {
+                    incomingEdit = false;
+                    setEditMode(true);
+                }
+            }
+
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 try {
