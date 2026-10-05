@@ -1,7 +1,6 @@
 package com.sts.fastbrowser;
 
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
 import android.database.Cursor;
@@ -11,14 +10,11 @@ import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.text.TextUtils;
 import android.view.Gravity;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -27,13 +23,11 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /**
- * Single Android entry-point for Open with / Share / Edit.
- * Keeps only one STS Fast Browser target in Android choosers and then routes
- * the received content to the app's built-in viewers.
+ * One Android entry point for Open with / Share / Edit.
+ * It accepts almost any file, resolves the real type using MIME + extension +
+ * light signature sniffing, then sends it to the correct STS built-in viewer.
  */
 public class IntentRouterActivity extends Activity {
-    private static final int MAX_TEXT_PREVIEW = 256 * 1024;
-    private static final int MAX_BINARY_PREVIEW = 4096;
     private static final int MAX_ZIP_ENTRIES = 250;
 
     @Override
@@ -51,17 +45,18 @@ public class IntentRouterActivity extends Activity {
 
     private void handleIncoming(Intent intent) {
         if (intent == null) {
-            showMessage("No file received.");
+            showMessage("कोई file नहीं मिली।");
             return;
         }
 
-        String action = intent.getAction();
+        final String action = intent.getAction();
+
         if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
             ArrayList<Uri> uris = extractMultipleUris(intent);
             if (uris.isEmpty()) {
                 showSharedText(intent);
             } else if (uris.size() == 1) {
-                openSingle(uris.get(0), guessMime(intent, uris.get(0)), action);
+                routeSingle(uris.get(0), resolveMime(intent, uris.get(0)), action);
             } else {
                 showMultiple(uris, intent.getType());
             }
@@ -69,9 +64,9 @@ public class IntentRouterActivity extends Activity {
         }
 
         if (Intent.ACTION_SEND.equals(action)) {
-            Uri stream = extractSingleStream(intent);
-            if (stream != null) {
-                openSingle(stream, guessMime(intent, stream), action);
+            Uri uri = extractSingleUri(intent);
+            if (uri != null) {
+                routeSingle(uri, resolveMime(intent, uri), action);
             } else {
                 showSharedText(intent);
             }
@@ -80,18 +75,19 @@ public class IntentRouterActivity extends Activity {
 
         if (Intent.ACTION_VIEW.equals(action) || Intent.ACTION_EDIT.equals(action)) {
             Uri uri = intent.getData();
+            if (uri == null) uri = extractSingleUri(intent);
             if (uri == null) {
-                showMessage("No file received.");
+                showMessage("कोई file नहीं मिली।");
                 return;
             }
-            openSingle(uri, guessMime(intent, uri), action);
+            routeSingle(uri, resolveMime(intent, uri), action);
             return;
         }
 
-        showMessage("Unsupported Android action.");
+        showMessage("यह Android action अभी supported नहीं है।");
     }
 
-    private Uri extractSingleStream(Intent intent) {
+    private Uri extractSingleUri(Intent intent) {
         try {
             if (android.os.Build.VERSION.SDK_INT >= 33) {
                 Uri u = intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri.class);
@@ -108,7 +104,7 @@ public class IntentRouterActivity extends Activity {
             Uri u = clip.getItemAt(0).getUri();
             if (u != null) return u;
         }
-        return null;
+        return intent.getData();
     }
 
     private ArrayList<Uri> extractMultipleUris(Intent intent) {
@@ -134,69 +130,99 @@ public class IntentRouterActivity extends Activity {
         return out;
     }
 
-    private void openSingle(Uri uri, String mime, String sourceAction) {
+    private void routeSingle(Uri uri, String rawMime, String sourceAction) {
         if (uri == null) {
-            showMessage("No file received.");
+            showMessage("कोई file नहीं मिली।");
             return;
         }
 
         String name = displayName(uri);
         String ext = extension(name);
+        String mime = normalizeMime(rawMime);
+
+        // Extension wins when a sender supplies a vague/wrong generic MIME.
+        String extMime = mimeFromExtension(ext);
+        if (isGenericMime(mime) && !TextUtils.isEmpty(extMime)) mime = extMime;
+
+        // Some apps send application/octet-stream even for normal images/PDFs.
+        if (isGenericMime(mime)) {
+            String sniffed = sniffMime(uri);
+            if (!TextUtils.isEmpty(sniffed)) mime = sniffed;
+        }
+
+        // If resolver knows a better type than the sender, use it.
+        if (isGenericMime(mime)) {
+            try {
+                String resolved = normalizeMime(getContentResolver().getType(uri));
+                if (!isGenericMime(resolved)) mime = resolved;
+            } catch (Exception ignored) {}
+        }
+
+        if (TextUtils.isEmpty(mime)) mime = "application/octet-stream";
+
+        Class<?> targetClass = null;
+        if (isImage(mime, ext)) {
+            targetClass = ImageViewerActivity.class;
+        } else if (isPdf(mime, ext)) {
+            targetClass = PdfViewerActivity.class;
+        } else if (isAudio(mime, ext) || isVideo(mime, ext)) {
+            targetClass = MediaPlayerActivity.class;
+        } else if (isOfficeOrText(mime, ext)) {
+            targetClass = OfficeViewerActivity.class;
+        }
+
+        if (targetClass == null) {
+            showFriendlyFallback(uri, name, mime, sourceAction);
+            return;
+        }
 
         try {
-            Intent target;
-            if (isImage(mime, ext)) {
-                target = new Intent(this, ImageViewerActivity.class);
-                target.setData(uri);
-                target.putExtra("incoming_action", sourceAction);
-            } else if (isPdf(mime, ext)) {
-                target = new Intent(this, PdfViewerActivity.class);
-                target.setData(uri);
+            Intent target = new Intent(this, targetClass);
+            target.setDataAndType(uri, mime);
+            target.putExtra("incoming_action", sourceAction);
+            target.putExtra("incoming_edit", Intent.ACTION_EDIT.equals(sourceAction));
+
+            if (targetClass == PdfViewerActivity.class) {
                 target.putExtra("pdf_name", name);
                 target.putExtra("pdf_slot", 1);
-                target.putExtra("incoming_action", sourceAction);
-            } else if (isAudio(mime, ext) || isVideo(mime, ext)) {
-                target = new Intent(this, MediaPlayerActivity.class);
-                target.setData(uri);
+            } else if (targetClass == OfficeViewerActivity.class) {
+                target.putExtra("office_name", name);
+            } else if (targetClass == MediaPlayerActivity.class) {
                 target.putExtra("media_name", name);
                 target.putExtra("media_mime", mime);
                 target.putExtra("media_mode", isVideo(mime, ext) ? "video" : "audio");
-                target.putExtra("incoming_action", sourceAction);
-            } else if (isOfficeOrText(mime, ext)) {
-                target = new Intent(this, OfficeViewerActivity.class);
-                target.setData(uri);
-                target.putExtra("office_name", name);
-                target.putExtra("incoming_action", sourceAction);
-            } else {
-                showGenericFile(uri, name, mime, sourceAction);
-                return;
             }
 
-            target.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION |
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
-                    Intent.FLAG_ACTIVITY_NEW_DOCUMENT |
-                    Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            // Propagate the exact URI grant to the viewer. Do not force a new task here:
+            // OEM Android builds can reject/lose grants when a received share is re-launched
+            // into another task.
+            target.setClipData(ClipData.newRawUri("STS Fast Browser file", uri));
+            target.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            if (Intent.ACTION_EDIT.equals(sourceAction)) {
+                target.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            }
+
             startActivity(target);
             finish();
-        } catch (Exception e) {
-            showGenericFile(uri, name, mime, sourceAction);
+        } catch (Exception launchError) {
+            // Never show raw bytes for a normal file. Keep a clean fallback screen.
+            showFriendlyFallback(uri, name, mime, sourceAction);
         }
     }
 
     private void showMultiple(ArrayList<Uri> uris, String sharedMime) {
         setTitle("STS Fast Browser");
         LinearLayout root = baseColumn();
-        TextView title = titleView(uris.size() + " shared files");
-        root.addView(title);
+        root.addView(titleView(uris.size() + " files"));
 
-        TextView hint = bodyView("किसी file पर tap करें। STS Fast Browser उसे सही built-in viewer में खोलेगा।");
+        TextView hint = bodyView("किसी file पर tap करें। File type के अनुसार सही STS viewer खुलेगा।");
         hint.setPadding(dp(16), dp(4), dp(16), dp(12));
         root.addView(hint);
 
         for (Uri uri : uris) {
             String name = displayName(uri);
-            String mime = getContentResolver().getType(uri);
-            if (TextUtils.isEmpty(mime)) mime = sharedMime;
+            String mime = resolveMime(null, uri);
+            if (isGenericMime(mime)) mime = normalizeMime(sharedMime);
             final String useMime = TextUtils.isEmpty(mime) ? "application/octet-stream" : mime;
 
             TextView row = new TextView(this);
@@ -210,7 +236,7 @@ public class IntentRouterActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMargins(dp(12), dp(5), dp(12), dp(5));
             root.addView(row, lp);
-            row.setOnClickListener(v -> openSingle(uri, useMime, Intent.ACTION_SEND_MULTIPLE));
+            row.setOnClickListener(v -> routeSingle(uri, useMime, Intent.ACTION_SEND_MULTIPLE));
         }
 
         ScrollView scroll = new ScrollView(this);
@@ -219,20 +245,18 @@ public class IntentRouterActivity extends Activity {
     }
 
     private void showSharedText(Intent intent) {
-        String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+        CharSequence shared = null;
+        try { shared = intent.getCharSequenceExtra(Intent.EXTRA_TEXT); } catch (Exception ignored) {}
+        String text = shared == null ? "" : shared.toString().trim();
+
         if (TextUtils.isEmpty(text)) {
-            CharSequence cs = intent.getCharSequenceExtra(Intent.EXTRA_TEXT);
-            if (cs != null) text = cs.toString();
-        }
-        if (TextUtils.isEmpty(text)) {
-            showMessage("Share received, but no readable file or text was supplied.");
+            showMessage("Share आया, लेकिन readable file या text नहीं मिला।");
             return;
         }
 
-        String trimmed = text.trim();
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+        if (text.startsWith("http://") || text.startsWith("https://")) {
             Intent browser = new Intent(this, MainActivity.class);
-            browser.putExtra("browser_open_url", trimmed);
+            browser.putExtra("browser_open_url", text);
             browser.putExtra("browser_slot", 1);
             startActivity(browser);
             finish();
@@ -246,53 +270,198 @@ public class IntentRouterActivity extends Activity {
         body.setTextIsSelectable(true);
         body.setPadding(dp(16), dp(8), dp(16), dp(20));
         root.addView(body);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
     }
 
-    private void showGenericFile(Uri uri, String name, String mime, String sourceAction) {
+    private void showFriendlyFallback(Uri uri, String name, String mime, String sourceAction) {
         setTitle("STS Fast Browser");
         LinearLayout root = baseColumn();
         root.addView(titleView(name));
 
-        long size = fileSize(uri);
         String actionLabel = Intent.ACTION_EDIT.equals(sourceAction) ? "Edit with" :
                 (Intent.ACTION_SEND.equals(sourceAction) || Intent.ACTION_SEND_MULTIPLE.equals(sourceAction))
                         ? "Shared to" : "Opened with";
-        root.addView(bodyView(actionLabel + " STS Fast Browser\nType: " +
-                (TextUtils.isEmpty(mime) ? "Unknown" : mime) +
+
+        long size = fileSize(uri);
+        root.addView(bodyView(actionLabel + " STS Fast Browser\nType: " + mime +
                 (size >= 0 ? "\nSize: " + humanSize(size) : "")));
 
-        TextView preview = bodyView(buildPreview(uri, name, mime));
-        preview.setTextIsSelectable(true);
-        preview.setTypeface(android.graphics.Typeface.MONOSPACE);
-        preview.setPadding(dp(16), dp(14), dp(16), dp(24));
-        root.addView(preview);
+        String ext = extension(name);
+        String archive = "";
+        if (in(ext, "zip", "jar", "apk", "cbz")) archive = zipPreview(uri);
+
+        TextView message;
+        if (!TextUtils.isEmpty(archive)) {
+            message = bodyView(archive);
+            message.setTextIsSelectable(true);
+        } else {
+            message = bodyView("File STS Fast Browser ने receive कर ली है। इस format का built-in visual preview उपलब्ध नहीं है।");
+        }
+        message.setPadding(dp(16), dp(14), dp(16), dp(24));
+        root.addView(message);
 
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root);
         setContentView(scroll);
     }
 
-    private String buildPreview(Uri uri, String name, String mime) {
-        String ext = extension(name);
-        if ("zip".equals(ext) || "apk".equals(ext) || "jar".equals(ext)) {
-            String zip = zipPreview(uri);
-            if (!TextUtils.isEmpty(zip)) return zip;
-        }
+    private String resolveMime(Intent intent, Uri uri) {
+        String intentMime = normalizeMime(intent == null ? null : intent.getType());
+        String resolverMime = "";
+        try { resolverMime = normalizeMime(getContentResolver().getType(uri)); } catch (Exception ignored) {}
 
-        if (isTextLike(mime, ext)) {
-            byte[] data = readPrefix(uri, MAX_TEXT_PREVIEW);
-            if (data.length == 0) return "File is empty or could not be read.";
-            try {
-                return new String(data, java.nio.charset.StandardCharsets.UTF_8);
-            } catch (Exception ignored) {}
-        }
+        String ext = extension(displayName(uri));
+        String extMime = mimeFromExtension(ext);
 
-        byte[] data = readPrefix(uri, MAX_BINARY_PREVIEW);
-        if (data.length == 0) return "File received successfully. No visual preview is available for this format.";
-        return "Binary preview (first " + data.length + " bytes):\n\n" + hexDump(data);
+        if (!isGenericMime(intentMime)) return intentMime;
+        if (!isGenericMime(resolverMime)) return resolverMime;
+        if (!TextUtils.isEmpty(extMime)) return extMime;
+
+        String sniffed = sniffMime(uri);
+        return TextUtils.isEmpty(sniffed) ? "application/octet-stream" : sniffed;
+    }
+
+    private String normalizeMime(String mime) {
+        if (mime == null) return "";
+        mime = mime.trim().toLowerCase(Locale.ROOT);
+        int semi = mime.indexOf(';');
+        if (semi >= 0) mime = mime.substring(0, semi).trim();
+        return mime;
+    }
+
+    private boolean isGenericMime(String mime) {
+        return TextUtils.isEmpty(mime) || "*/*".equals(mime) ||
+                "application/octet-stream".equals(mime) ||
+                "binary/octet-stream".equals(mime);
+    }
+
+    private String sniffMime(Uri uri) {
+        byte[] h = new byte[16];
+        int n = 0;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in != null) n = in.read(h);
+        } catch (Exception ignored) {}
+
+        if (n >= 3 && (h[0] & 0xff) == 0xff && (h[1] & 0xff) == 0xd8 && (h[2] & 0xff) == 0xff)
+            return "image/jpeg";
+        if (n >= 8 && (h[0] & 0xff) == 0x89 && h[1] == 'P' && h[2] == 'N' && h[3] == 'G')
+            return "image/png";
+        if (n >= 6 && h[0] == 'G' && h[1] == 'I' && h[2] == 'F')
+            return "image/gif";
+        if (n >= 12 && h[0] == 'R' && h[1] == 'I' && h[2] == 'F' && h[3] == 'F' &&
+                h[8] == 'W' && h[9] == 'E' && h[10] == 'B' && h[11] == 'P')
+            return "image/webp";
+        if (n >= 5 && h[0] == '%' && h[1] == 'P' && h[2] == 'D' && h[3] == 'F' && h[4] == '-')
+            return "application/pdf";
+        if (n >= 4 && h[0] == 'P' && h[1] == 'K' && (h[2] == 3 || h[2] == 5 || h[2] == 7) &&
+                (h[3] == 4 || h[3] == 6 || h[3] == 8))
+            return "application/zip";
+        if (n >= 4 && h[0] == 'O' && h[1] == 'g' && h[2] == 'g' && h[3] == 'S')
+            return "audio/ogg";
+        if (n >= 3 && h[0] == 'I' && h[1] == 'D' && h[2] == '3')
+            return "audio/mpeg";
+        if (n >= 8 && h[4] == 'f' && h[5] == 't' && h[6] == 'y' && h[7] == 'p')
+            return "video/mp4";
+        return "";
+    }
+
+    private String mimeFromExtension(String ext) {
+        if (in(ext, "jpg", "jpeg", "jpe")) return "image/jpeg";
+        if ("png".equals(ext)) return "image/png";
+        if ("webp".equals(ext)) return "image/webp";
+        if ("gif".equals(ext)) return "image/gif";
+        if ("bmp".equals(ext)) return "image/bmp";
+        if ("avif".equals(ext)) return "image/avif";
+        if (in(ext, "heic", "heif")) return "image/heic";
+        if (in(ext, "tif", "tiff")) return "image/tiff";
+        if ("pdf".equals(ext)) return "application/pdf";
+
+        if ("mp3".equals(ext)) return "audio/mpeg";
+        if ("m4a".equals(ext)) return "audio/mp4";
+        if ("aac".equals(ext)) return "audio/aac";
+        if ("wav".equals(ext)) return "audio/wav";
+        if ("ogg".equals(ext)) return "audio/ogg";
+        if ("flac".equals(ext)) return "audio/flac";
+        if ("opus".equals(ext)) return "audio/opus";
+        if ("amr".equals(ext)) return "audio/amr";
+
+        if ("mp4".equals(ext) || "m4v".equals(ext)) return "video/mp4";
+        if ("mkv".equals(ext)) return "video/x-matroska";
+        if ("webm".equals(ext)) return "video/webm";
+        if ("3gp".equals(ext)) return "video/3gpp";
+        if ("mov".equals(ext)) return "video/quicktime";
+        if ("avi".equals(ext)) return "video/x-msvideo";
+        if ("wmv".equals(ext)) return "video/x-ms-wmv";
+        if (in(ext, "mpeg", "mpg")) return "video/mpeg";
+
+        if ("docx".equals(ext)) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if ("doc".equals(ext)) return "application/msword";
+        if ("xlsx".equals(ext)) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if ("xls".equals(ext)) return "application/vnd.ms-excel";
+        if ("pptx".equals(ext)) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if ("ppt".equals(ext)) return "application/vnd.ms-powerpoint";
+        if ("txt".equals(ext)) return "text/plain";
+        if ("csv".equals(ext)) return "text/csv";
+        if ("rtf".equals(ext)) return "application/rtf";
+        if ("odt".equals(ext)) return "application/vnd.oasis.opendocument.text";
+        if ("ods".equals(ext)) return "application/vnd.oasis.opendocument.spreadsheet";
+        if ("odp".equals(ext)) return "application/vnd.oasis.opendocument.presentation";
+        if ("ofd".equals(ext)) return "application/ofd";
+        if ("json".equals(ext)) return "application/json";
+        if ("xml".equals(ext)) return "application/xml";
+        if (in(ext, "html", "htm")) return "text/html";
+        if ("md".equals(ext)) return "text/markdown";
+        if ("log".equals(ext)) return "text/plain";
+
+        if ("zip".equals(ext)) return "application/zip";
+        if ("rar".equals(ext)) return "application/vnd.rar";
+        if ("7z".equals(ext)) return "application/x-7z-compressed";
+        if ("apk".equals(ext)) return "application/vnd.android.package-archive";
+        return "";
+    }
+
+    private boolean isImage(String mime, String ext) {
+        return mime.startsWith("image/") ||
+                in(ext, "jpg","jpeg","jpe","png","webp","heic","heif","gif","bmp","avif","tif","tiff");
+    }
+
+    private boolean isPdf(String mime, String ext) {
+        return "application/pdf".equals(mime) || "application/x-pdf".equals(mime) || "pdf".equals(ext);
+    }
+
+    private boolean isAudio(String mime, String ext) {
+        return mime.startsWith("audio/") ||
+                in(ext, "mp3","m4a","aac","wav","ogg","flac","opus","amr","wma");
+    }
+
+    private boolean isVideo(String mime, String ext) {
+        return mime.startsWith("video/") ||
+                in(ext, "mp4","mkv","webm","3gp","mov","avi","wmv","m4v","mpeg","mpg","ts");
+    }
+
+    private boolean isOfficeOrText(String mime, String ext) {
+        if (mime.startsWith("text/")) return true;
+        if (in(mime,
+                "application/msword",
+                "application/vnd.ms-word",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-excel",
+                "application/excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/rtf",
+                "application/vnd.oasis.opendocument.text",
+                "application/vnd.oasis.opendocument.spreadsheet",
+                "application/vnd.oasis.opendocument.presentation",
+                "application/ofd",
+                "application/json",
+                "application/xml")) return true;
+        return in(ext, "doc","docx","xls","xlsx","ppt","pptx","txt","csv","rtf","odt","ods","odp","ofd",
+                "json","xml","html","htm","md","log");
     }
 
     private String zipPreview(Uri uri) {
@@ -312,51 +481,6 @@ public class IntentRouterActivity extends Activity {
         } catch (Exception e) {
             return "";
         }
-    }
-
-    private byte[] readPrefix(Uri uri, int limit) {
-        try (InputStream in = getContentResolver().openInputStream(uri);
-             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            if (in == null) return new byte[0];
-            byte[] buf = new byte[8192];
-            int total = 0;
-            int n;
-            while (total < limit && (n = in.read(buf, 0, Math.min(buf.length, limit - total))) > 0) {
-                out.write(buf, 0, n);
-                total += n;
-            }
-            return out.toByteArray();
-        } catch (Exception e) {
-            return new byte[0];
-        }
-    }
-
-    private String hexDump(byte[] data) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < data.length; i += 16) {
-            sb.append(String.format(Locale.US, "%08X  ", i));
-            StringBuilder ascii = new StringBuilder();
-            for (int j = 0; j < 16; j++) {
-                if (i + j < data.length) {
-                    int b = data[i + j] & 0xFF;
-                    sb.append(String.format(Locale.US, "%02X ", b));
-                    ascii.append(b >= 32 && b < 127 ? (char) b : '.');
-                } else {
-                    sb.append("   ");
-                    ascii.append(' ');
-                }
-            }
-            sb.append(" ").append(ascii).append('\n');
-        }
-        return sb.toString();
-    }
-
-    private String guessMime(Intent intent, Uri uri) {
-        String mime = intent == null ? null : intent.getType();
-        if (TextUtils.isEmpty(mime) && uri != null) {
-            try { mime = getContentResolver().getType(uri); } catch (Exception ignored) {}
-        }
-        return TextUtils.isEmpty(mime) ? "application/octet-stream" : mime;
     }
 
     private String displayName(Uri uri) {
@@ -406,33 +530,8 @@ public class IntentRouterActivity extends Activity {
         return name.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
-    private boolean isImage(String mime, String ext) {
-        return mime.startsWith("image/") || in(ext, "jpg","jpeg","png","webp","heic","heif","gif","bmp","avif","tif","tiff");
-    }
-
-    private boolean isPdf(String mime, String ext) {
-        return "application/pdf".equalsIgnoreCase(mime) || "application/x-pdf".equalsIgnoreCase(mime) || "pdf".equals(ext);
-    }
-
-    private boolean isAudio(String mime, String ext) {
-        return mime.startsWith("audio/") || in(ext, "mp3","m4a","aac","wav","ogg","flac","opus","amr","wma");
-    }
-
-    private boolean isVideo(String mime, String ext) {
-        return mime.startsWith("video/") || in(ext, "mp4","mkv","webm","3gp","mov","avi","wmv","m4v","mpeg","mpg","ts");
-    }
-
-    private boolean isOfficeOrText(String mime, String ext) {
-        if (mime.startsWith("text/")) return true;
-        return in(ext, "doc","docx","xls","xlsx","ppt","pptx","txt","csv","rtf","odt","ods","odp","ofd");
-    }
-
-    private boolean isTextLike(String mime, String ext) {
-        return mime.startsWith("text/") ||
-                in(ext, "txt","csv","rtf","json","xml","html","htm","css","js","java","kt","md","log","ini","conf","yaml","yml","sql");
-    }
-
     private boolean in(String value, String... values) {
+        if (value == null) return false;
         for (String v : values) if (v.equalsIgnoreCase(value)) return true;
         return false;
     }
@@ -482,7 +581,7 @@ public class IntentRouterActivity extends Activity {
         return String.format(Locale.getDefault(), "%.1f GB", mb / 1024.0);
     }
 
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }
