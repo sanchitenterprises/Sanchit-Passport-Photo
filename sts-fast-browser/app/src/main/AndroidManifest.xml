@@ -20,7 +20,7 @@
 
         <activity
             android:name=".ImageViewerActivity"
-            android:exported="false"
+            android:exported="true"
             android:documentLaunchMode="always"
             android:taskAffinity="${applicationId}.image"
             android:launchMode="standard"
@@ -30,7 +30,7 @@
 
         <activity
             android:name=".PdfViewerActivity"
-            android:exported="false"
+            android:exported="true"
             android:documentLaunchMode="always"
             android:taskAffinity="${applicationId}.pdf"
             android:launchMode="standard"
@@ -40,7 +40,7 @@
 
         <activity
             android:name=".OfficeViewerActivity"
-            android:exported="false"
+            android:exported="true"
             android:documentLaunchMode="always"
             android:taskAffinity="${applicationId}.office"
             android:launchMode="standard"
@@ -50,7 +50,7 @@
 
         <activity
             android:name=".MediaPlayerActivity"
-            android:exported="false"
+            android:exported="true"
             android:documentLaunchMode="always"
             android:taskAffinity="${applicationId}.media"
             android:launchMode="standard"
