@@ -29,6 +29,7 @@ import android.text.InputType;
 import android.text.TextUtils;
 import android.text.method.PasswordTransformationMethod;
 import android.util.Size;
+import android.util.LruCache;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -121,7 +122,13 @@ public class MainActivity extends android.app.Activity {
     private volatile boolean slot1DocumentsHome = true;
     private volatile String phoneDataMode = "Documents";
     private volatile boolean documentAccessRequested = false;
-    private int documentsLoadGeneration = 0;
+    private volatile int documentsLoadGeneration = 0;
+    private final LruCache<String, byte[]> phoneDataThumbCache = new LruCache<String, byte[]>(12 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, byte[] value) {
+            return value == null ? 0 : value.length;
+        }
+    };
 
     private final String[] blockedHosts = new String[] {
             "doubleclick.net", "googlesyndication.com", "googleadservices.com",
@@ -1027,9 +1034,10 @@ public class MainActivity extends android.app.Activity {
                 "}catch(e){}}" +
                 "window.__stsHardAdClean=function(){hideAds();youtube();};" +
                 "window.__stsHardAdClean();" +
-                "try{new MutationObserver(function(){window.__stsHardAdClean();}).observe(document.documentElement||document," +
+                "try{var __stsAdPending=false;new MutationObserver(function(){if(__stsAdPending)return;__stsAdPending=true;" +
+                "setTimeout(function(){__stsAdPending=false;window.__stsHardAdClean();},120);}).observe(document.documentElement||document," +
                 "{childList:true,subtree:true,attributes:true,attributeFilter:['class']});}catch(e){}" +
-                "try{window.__stsHardAdTimer=setInterval(window.__stsHardAdClean,500);}catch(e){}" +
+                "try{window.__stsHardAdTimer=setInterval(window.__stsHardAdClean,1200);}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
@@ -1994,7 +2002,8 @@ public class MainActivity extends android.app.Activity {
                         "<button onclick='STSDocuments.requestAccess()'>Allow File Access</button></div>",
                         0, true, selectedMode);
             } else {
-                List<DocumentEntry> entries = queryPhoneData(selectedMode);
+                List<DocumentEntry> entries = queryPhoneData(selectedMode, generation);
+                if (generation != documentsLoadGeneration || !selectedMode.equals(phoneDataMode)) return;
                 html = buildPhoneDataHtml(entries, selectedMode);
             }
 
@@ -2054,7 +2063,7 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
-    private List<DocumentEntry> queryPhoneData(String mode) {
+    private List<DocumentEntry> queryPhoneData(String mode, int generation) {
         List<DocumentEntry> out = new ArrayList<>();
         Cursor cursor = null;
         try {
@@ -2091,7 +2100,12 @@ public class MainActivity extends android.app.Activity {
             int sizeCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.SIZE);
             int dateCol = cursor.getColumnIndex(MediaStore.Files.FileColumns.DATE_MODIFIED);
 
+            int scanned = 0;
             while (cursor.moveToNext()) {
+                if ((scanned++ & 255) == 0 &&
+                        (generation != documentsLoadGeneration || !mode.equals(phoneDataMode))) {
+                    break;
+                }
                 String name = cursor.getString(nameCol);
                 if (TextUtils.isEmpty(name)) continue;
                 String mime = mimeCol >= 0 ? cursor.getString(mimeCol) : null;
@@ -2357,8 +2371,8 @@ public class MainActivity extends android.app.Activity {
                 ".tab.active{color:#fff;border-bottom-color:#fff;font-weight:700}.search{display:none;padding:0 0 12px}.search.show{display:block}" +
                 ".search input{width:100%;height:42px;border-radius:10px;border:1px solid #555;background:#171717;color:#fff;padding:0 12px;font-size:16px}" +
                 ".doc-menu{display:none;position:fixed;right:12px;top:58px;z-index:50;width:max-content;max-width:72vw;background:#1a1a1a;border:1px solid #3a3a3a;border-radius:10px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.55)}.doc-menu.show{display:block}.selection-menu{display:none}.menu-item,.sort-option{display:block;width:100%;min-width:0;border:0;border-bottom:1px solid #2d2d2d;background:#1a1a1a;color:#fff;text-align:left;padding:12px 16px;font-size:15px;white-space:nowrap}.menu-item:active,.sort-option:active{background:#303030}.sort-sub{display:none;background:#121212}.sort-sub.show{display:block}.sort-sub .sort-option{padding-left:28px;color:#ddd}" +
-                ".date-group{font-size:22px;font-weight:700;padding:14px 16px 10px}.doc-list{padding-bottom:28px}" +
-                ".doc-item{position:relative;display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020}.doc-item.selected{outline:2px solid #4F8F8B;outline-offset:-2px;background:#16302e}.doc-item.selected:after{content:'✓';position:absolute;right:7px;top:7px;width:22px;height:22px;border-radius:50%;background:#4F8F8B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;z-index:4}" +
+                ".date-group{font-size:22px;font-weight:700;padding:14px 16px 10px;content-visibility:auto;contain-intrinsic-size:52px}.doc-list{padding-bottom:28px}" +
+                ".doc-item{position:relative;display:flex;align-items:center;min-height:100px;padding:10px 16px;border-bottom:1px solid #202020;content-visibility:auto;contain-intrinsic-size:100px}.doc-item.selected{outline:2px solid #4F8F8B;outline-offset:-2px;background:#16302e}.doc-item.selected:after{content:'✓';position:absolute;right:7px;top:7px;width:22px;height:22px;border-radius:50%;background:#4F8F8B;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;z-index:4}" +
                 ".doc-item:active{background:#181818}.file-icon{width:54px;height:66px;margin-right:16px;display:flex;align-items:center;justify-content:center;" +
                 "border-radius:4px 4px 3px 3px;color:#fff;font-weight:700;font-size:18px;clip-path:polygon(0 0,76% 0,100% 20%,100% 100%,0 100%)}" +
                 ".file-icon.pdf{background:#e34d4d}.file-icon.doc{background:#3778c2}.file-icon.xls{background:#388e4a}" +
@@ -2382,7 +2396,7 @@ public class MainActivity extends android.app.Activity {
                 "<div id='selectedCount' class='selected-count'>0 selected</div>" +
                 "<button class='head-btn' onclick='toggleSearch()'>⌕</button>" +
                 "<button id='menuButton' class='head-btn' onclick='toggleDocMenu(event)'>⋮</button></div>" +
-                "<div id='searchBox' class='search'><input id='q' placeholder='Search " + escapeDocsAttr(mode.toLowerCase(Locale.ROOT)) + "' oninput='applyFilter()'></div>" +
+                "<div id='searchBox' class='search'><input id='q' placeholder='Search " + escapeDocsAttr(mode.toLowerCase(Locale.ROOT)) + "' oninput='scheduleFilter()'></div>" +
                 "<div class='tabs'>" + phoneDataTabsHtml(mode) + "</div></div>" +
                 "<div id='modeMenu' class='mode-menu'>" +
                 modeOptionHtml("Documents", mode) + modeOptionHtml("Photo", mode) +
@@ -2409,7 +2423,8 @@ public class MainActivity extends android.app.Activity {
                 "</div></div>" +
                 body +
                 "<script>" +
-                "var cat='All',selected=new Set(),pressTimer=null,startX=0,startY=0;" +
+                "var cat='All',selected=new Set(),pressTimer=null,startX=0,startY=0,filterTimer=null;" +
+                "function scheduleFilter(){if(filterTimer)clearTimeout(filterTimer);filterTimer=setTimeout(function(){filterTimer=null;applyFilter();},120);}" +
                 "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
                 "function toggleModeMenu(e){if(e)e.stopPropagation();document.getElementById('docMenu').classList.remove('show');document.getElementById('sortSub').classList.remove('show');document.getElementById('modeMenu').classList.toggle('show');}" +
                 "function chooseMode(v){document.getElementById('modeMenu').classList.remove('show');STSDocuments.selectMode(v);}" +
@@ -2456,14 +2471,25 @@ public class MainActivity extends android.app.Activity {
         try {
             String encoded = requestUri.getQueryParameter("u");
             if (TextUtils.isEmpty(encoded)) return null;
+            String kind = requestUri.getQueryParameter("k");
+            String cacheKey = (kind == null ? "" : kind) + "|" + encoded;
+            byte[] cached;
+            synchronized (phoneDataThumbCache) {
+                cached = phoneDataThumbCache.get(cacheKey);
+            }
+            if (cached != null) {
+                return new WebResourceResponse(
+                        "image/jpeg", null,
+                        new ByteArrayInputStream(cached)
+                );
+            }
+
             Uri mediaUri = Uri.parse(encoded);
             Bitmap bitmap;
-
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                bitmap = getContentResolver().loadThumbnail(mediaUri, new Size(360, 360), null);
+                bitmap = getContentResolver().loadThumbnail(mediaUri, new Size(300, 300), null);
             } else {
                 long id = ContentUris.parseId(mediaUri);
-                String kind = requestUri.getQueryParameter("k");
                 if ("video".equals(kind)) {
                     bitmap = MediaStore.Video.Thumbnails.getThumbnail(
                             getContentResolver(), id, MediaStore.Video.Thumbnails.MINI_KIND, null);
@@ -2474,12 +2500,16 @@ public class MainActivity extends android.app.Activity {
             }
 
             if (bitmap == null) return null;
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 82, out);
+            ByteArrayOutputStream out = new ByteArrayOutputStream(24 * 1024);
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out);
             if (!bitmap.isRecycled()) bitmap.recycle();
+            byte[] data = out.toByteArray();
+            synchronized (phoneDataThumbCache) {
+                phoneDataThumbCache.put(cacheKey, data);
+            }
             return new WebResourceResponse(
                     "image/jpeg", null,
-                    new ByteArrayInputStream(out.toByteArray())
+                    new ByteArrayInputStream(data)
             );
         } catch (Exception e) {
             return new WebResourceResponse(
@@ -2846,6 +2876,9 @@ public class MainActivity extends android.app.Activity {
         webView1 = null;
         webView2 = null;
         webView = null;
+        synchronized (phoneDataThumbCache) {
+            phoneDataThumbCache.evictAll();
+        }
         super.onDestroy();
     }
 
