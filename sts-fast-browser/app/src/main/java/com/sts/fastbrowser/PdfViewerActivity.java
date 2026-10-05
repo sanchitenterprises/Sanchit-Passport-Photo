@@ -64,8 +64,10 @@ import java.net.URL;
 import java.util.Locale;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -93,6 +95,7 @@ public class PdfViewerActivity extends Activity {
     private final ExecutorService pdfRenderExecutor = Executors.newSingleThreadExecutor();
     private final Runnable visiblePageUpdater = this::updateVisiblePdfPages;
     private final Map<Integer, List<PdfLink>> pageLinks = new HashMap<>();
+    private final Set<Integer> pageLinksScanned = new HashSet<>();
     private int pendingImagePage = -1;
     private String pendingPageFormat = null;
 
@@ -245,7 +248,10 @@ public class PdfViewerActivity extends Activity {
 
                 pdfPfd = ParcelFileDescriptor.open(pdfFile, ParcelFileDescriptor.MODE_READ_ONLY);
                 pdfRenderer = new PdfRenderer(pdfPfd);
-                extractPdfLinks();
+                synchronized (this) {
+                    pageLinks.clear();
+                    pageLinksScanned.clear();
+                }
                 renderAllPages();
             } catch (InvalidPasswordException e) {
                 if (doc != null) try { doc.close(); } catch (Exception ignored) {}
@@ -285,17 +291,16 @@ public class PdfViewerActivity extends Activity {
         dialog.show();
     }
 
-    private void extractPdfLinks() {
-        pageLinks.clear();
-        if (textDocument == null) return;
-
-        try {
-            int pageCount = textDocument.getNumberOfPages();
-            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+    private void ensurePdfLinks(int pageIndex) {
+        synchronized (this) {
+            if (textDocument == null || pageLinksScanned.contains(pageIndex)) return;
+            pageLinksScanned.add(pageIndex);
+            try {
+                if (pageIndex < 0 || pageIndex >= textDocument.getNumberOfPages()) return;
                 PDPage page = textDocument.getPage(pageIndex);
                 PDRectangle box = page.getCropBox();
                 if (box == null) box = page.getMediaBox();
-                if (box == null) continue;
+                if (box == null) return;
 
                 float pageW = box.getWidth();
                 float pageH = box.getHeight();
@@ -304,7 +309,7 @@ public class PdfViewerActivity extends Activity {
                 List<PdfLink> links = new ArrayList<>();
 
                 List<PDAnnotation> annotations = page.getAnnotations();
-                if (annotations == null) continue;
+                if (annotations == null) return;
 
                 for (PDAnnotation annotation : annotations) {
                     if (!(annotation instanceof PDAnnotationLink)) continue;
@@ -337,9 +342,8 @@ public class PdfViewerActivity extends Activity {
                 }
 
                 if (!links.isEmpty()) pageLinks.put(pageIndex, links);
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
-            pageLinks.clear();
         }
     }
 
@@ -847,6 +851,10 @@ public class PdfViewerActivity extends Activity {
             }
         }
         pdfRenderExecutor.shutdownNow();
+        synchronized (this) {
+            pageLinks.clear();
+            pageLinksScanned.clear();
+        }
         closePdfResources();
         super.onDestroy();
     }
@@ -962,6 +970,7 @@ public class PdfViewerActivity extends Activity {
                 try {
                     if (destroyed || generation != baseGeneration) return;
                     fresh = renderPageBitmap(pageIndex, targetWidth);
+                    ensurePdfLinks(pageIndex);
                     final Bitmap result = fresh;
                     runOnUiThread(() -> {
                         if (destroyed || generation != baseGeneration) {
