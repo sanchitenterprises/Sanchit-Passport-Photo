@@ -265,7 +265,12 @@ public class OfficeViewerActivity extends Activity {
                     html = renderPpt(sourceFile);
                 } else if (lower.endsWith(".csv")) {
                     html = renderCsv(sourceFile);
-                } else if (lower.endsWith(".txt")) {
+                } else if (lower.endsWith(".txt") || lower.endsWith(".json") ||
+                        lower.endsWith(".xml") || lower.endsWith(".html") || lower.endsWith(".htm") ||
+                        lower.endsWith(".md") || lower.endsWith(".log") || lower.endsWith(".ini") ||
+                        lower.endsWith(".conf") || lower.endsWith(".yaml") || lower.endsWith(".yml") ||
+                        lower.endsWith(".sql") || lower.endsWith(".css") || lower.endsWith(".js") ||
+                        lower.endsWith(".java") || lower.endsWith(".kt")) {
                     html = renderTextFile(sourceFile);
                 } else if (lower.endsWith(".rtf")) {
                     html = renderRtf(sourceFile);
@@ -296,7 +301,11 @@ public class OfficeViewerActivity extends Activity {
         String n = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
         if (n.endsWith(".xls") || n.endsWith(".xlsx") || n.endsWith(".csv") || n.endsWith(".ods")) return "Excel";
         if (n.endsWith(".ppt") || n.endsWith(".pptx") || n.endsWith(".odp")) return "PowerPoint";
-        if (n.endsWith(".txt") || n.endsWith(".rtf")) return "Text";
+        if (n.endsWith(".txt") || n.endsWith(".rtf") || n.endsWith(".json") || n.endsWith(".xml") ||
+                n.endsWith(".html") || n.endsWith(".htm") || n.endsWith(".md") || n.endsWith(".log") ||
+                n.endsWith(".ini") || n.endsWith(".conf") || n.endsWith(".yaml") || n.endsWith(".yml") ||
+                n.endsWith(".sql") || n.endsWith(".css") || n.endsWith(".js") || n.endsWith(".java") ||
+                n.endsWith(".kt")) return "Text";
         if (n.endsWith(".ofd")) return "OFD";
         return "Word";
     }
