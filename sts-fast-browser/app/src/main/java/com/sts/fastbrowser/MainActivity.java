@@ -2058,6 +2058,9 @@ public class MainActivity extends android.app.Activity {
                         hardAdBlockEnabled = prefs.getBoolean(KEY_HARD_ADBLOCK, true);
                         loadSites();
                         loadSlots();
+                        if (webView2 != null) {
+                            webView2.loadUrl(slot2Url);
+                        }
                         slot1DocumentsHome = true;
                         phoneDataMode = "Documents";
                         showDocumentsHome();
