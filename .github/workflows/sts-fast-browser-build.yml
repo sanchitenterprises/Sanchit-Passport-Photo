@@ -37,27 +37,13 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Keep Backup and Restore menu removed
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("sts-fast-browser/app/src/main/java/com/sts/fastbrowser/MainActivity.java")
-          s = p.read_text(encoding="utf-8")
-          s = s.replace('        pm.getMenu().add("Backup Settings");\n', '')
-          s = s.replace('        pm.getMenu().add("Restore Settings");\n', '')
-          s = s.replace('            if (t.equals("Backup Settings")) {\n                exportSettingsBackup();\n                return true;\n            }\n', '')
-          s = s.replace('            if (t.equals("Restore Settings")) {\n                importSettingsBackup();\n                return true;\n            }\n', '')
-          p.write_text(s, encoding="utf-8")
-          PY
-
       - name: Build unsigned release APK
         run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
 
       - name: Upload unsigned APK and signing tool
         uses: actions/upload-artifact@v4
         with:
-          name: STS-Fast-Browser-v1.0.62-unsigned
+          name: STS-Fast-Browser-v1.0.63-unsigned
           path: |
             sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
             /usr/local/lib/android/sdk/build-tools/35.0.0/lib/apksigner.jar
@@ -71,11 +57,11 @@ jobs:
           cp -a sts-fast-browser full-source/
           cp .github/workflows/sts-fast-browser-build.yml full-source/.github/workflows/
           cd full-source
-          zip -r ../STS-Fast-Browser-v1.0.62-SOURCE.zip . >/dev/null
+          zip -r ../STS-Fast-Browser-v1.0.63-SOURCE.zip . >/dev/null
 
       - name: Upload complete source package
         uses: actions/upload-artifact@v4
         with:
-          name: STS-Fast-Browser-v1.0.62-SOURCE
-          path: STS-Fast-Browser-v1.0.62-SOURCE.zip
+          name: STS-Fast-Browser-v1.0.63-SOURCE
+          path: STS-Fast-Browser-v1.0.63-SOURCE.zip
           if-no-files-found: error
