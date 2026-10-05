@@ -135,6 +135,10 @@ public class MainActivity extends android.app.Activity {
     private volatile String phoneDataMode = "Documents";
     private volatile boolean documentAccessRequested = false;
     private volatile int documentsLoadGeneration = 0;
+    private static final int PHONE_DATA_BATCH_SIZE = 350;
+    private volatile List<DocumentEntry> phoneDataSnapshot = new ArrayList<>();
+    private volatile int phoneDataSnapshotGeneration = -1;
+    private volatile String phoneDataSnapshotMode = "";
     private final LruCache<String, byte[]> phoneDataThumbCache = new LruCache<String, byte[]>(12 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, byte[] value) {
@@ -1067,10 +1071,12 @@ public class MainActivity extends android.app.Activity {
                 "}catch(e){}}" +
                 "window.__stsHardAdClean=function(){hideAds();youtube();};" +
                 "window.__stsHardAdClean();" +
-                "try{var __stsAdPending=false;new MutationObserver(function(){if(__stsAdPending)return;__stsAdPending=true;" +
-                "setTimeout(function(){__stsAdPending=false;window.__stsHardAdClean();},120);}).observe(document.documentElement||document," +
-                "{childList:true,subtree:true,attributes:true,attributeFilter:['class']});}catch(e){}" +
-                "try{window.__stsHardAdTimer=setInterval(window.__stsHardAdClean,1200);}catch(e){}" +
+                "try{var __stsAdPending=false,__stsSchedule=function(){if(__stsAdPending)return;__stsAdPending=true;" +
+                "setTimeout(function(){__stsAdPending=false;window.__stsHardAdClean();},180);};" +
+                "new MutationObserver(__stsSchedule).observe(document.documentElement||document,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});" +
+                "document.addEventListener('play',__stsSchedule,true);document.addEventListener('loadedmetadata',__stsSchedule,true);" +
+                "document.addEventListener('ended',__stsSchedule,true);document.addEventListener('visibilitychange',__stsSchedule,true);}catch(e){}" +
+                "try{window.__stsHardAdTimer=setInterval(function(){if(!document.hidden)window.__stsHardAdClean();},5000);}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
@@ -2286,6 +2292,9 @@ public class MainActivity extends android.app.Activity {
         new Thread(() -> {
             final String html;
             if (!hasDocumentAccess()) {
+                phoneDataSnapshot = new ArrayList<>();
+                phoneDataSnapshotGeneration = generation;
+                phoneDataSnapshotMode = selectedMode;
                 html = documentsShellHtml(
                         "<div class='permission'><div class='folder'>▣</div>" +
                         "<h2>Phone Data</h2>" +
@@ -2295,6 +2304,9 @@ public class MainActivity extends android.app.Activity {
             } else {
                 List<DocumentEntry> entries = queryPhoneData(selectedMode, generation);
                 if (generation != documentsLoadGeneration || !selectedMode.equals(phoneDataMode)) return;
+                phoneDataSnapshot = entries;
+                phoneDataSnapshotGeneration = generation;
+                phoneDataSnapshotMode = selectedMode;
                 html = buildPhoneDataHtml(entries, selectedMode);
             }
 
@@ -2737,12 +2749,38 @@ public class MainActivity extends android.app.Activity {
     }
 
     private String buildPhoneDataHtml(List<DocumentEntry> docs, String mode) {
-        StringBuilder rows = new StringBuilder(Math.max(8192, docs.size() * 340));
+        int initialCount = Math.min(docs.size(), PHONE_DATA_BATCH_SIZE);
+        String rows = buildPhoneDataRows(docs, 0, initialCount);
+
+        String body = "<div class='doc-list' id='docList'>" + rows + "</div>" +
+                (docs.size() > initialCount
+                        ? "<div id='loadMoreSentinel' class='load-more'>Scroll करने पर और files load होंगी…</div>"
+                        : "") +
+                (docs.isEmpty()
+                        ? "<div class='empty'>कोई " + escapeDocsHtml(mode) + " data नहीं मिला।</div>"
+                        : "");
+        return documentsShellHtml(body, docs.size(), false, mode);
+    }
+
+    private String buildPhoneDataRows(List<DocumentEntry> docs, int start, int end) {
+        if (docs == null || docs.isEmpty()) return "";
+        int safeStart = Math.max(0, Math.min(start, docs.size()));
+        int safeEnd = Math.max(safeStart, Math.min(end, docs.size()));
+
+        StringBuilder rows = new StringBuilder(Math.max(4096, (safeEnd - safeStart) * 340));
         SimpleDateFormat groupFmt = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
         SimpleDateFormat itemFmt = new SimpleDateFormat("d MMMM", Locale.getDefault());
-        String lastGroup = "";
 
-        for (DocumentEntry d : docs) {
+        String lastGroup = "";
+        if (safeStart > 0) {
+            DocumentEntry previous = docs.get(safeStart - 1);
+            lastGroup = previous.modified > 0
+                    ? groupFmt.format(new Date(previous.modified))
+                    : "Unknown date";
+        }
+
+        for (int index = safeStart; index < safeEnd; index++) {
+            DocumentEntry d = docs.get(index);
             String group = d.modified > 0 ? groupFmt.format(new Date(d.modified)) : "Unknown date";
             if (!group.equals(lastGroup)) {
                 rows.append("<div class='date-group' data-group='").append(escapeDocsAttr(group)).append("'>")
@@ -2778,12 +2816,7 @@ public class MainActivity extends android.app.Activity {
             rows.append("<div class='file-body'><div class='file-name'>").append(escapeDocsHtml(d.name)).append("</div>")
                     .append("<div class='file-meta'>").append(escapeDocsHtml(sub)).append("</div></div></div>");
         }
-
-        String body = "<div class='doc-list' id='docList'>" + rows + "</div>" +
-                (docs.isEmpty()
-                        ? "<div class='empty'>कोई " + escapeDocsHtml(mode) + " data नहीं मिला।</div>"
-                        : "");
-        return documentsShellHtml(body, docs.size(), false, mode);
+        return rows.toString();
     }
 
     private String documentsShellHtml(String body, int count, boolean permissionPage, String mode) {
@@ -2809,7 +2842,7 @@ public class MainActivity extends android.app.Activity {
                 "body.media-grid .doc-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:0 2px 24px}body.media-grid .date-group{grid-column:1/-1;font-size:16px;padding:10px 8px 6px}" +
                 "body.media-grid .doc-item{display:block;min-height:0;padding:0 0 7px;border:0;text-align:left;overflow:hidden}body.media-grid .media-thumb-wrap{width:100%;aspect-ratio:1/1;margin:0}" +
                 "body.media-grid .file-body{padding:3px 3px 0}body.media-grid .file-name{font-size:9px;font-weight:500;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}body.media-grid .file-meta{display:none}" +
-                ".empty,.center,.permission{text-align:center;padding:70px 24px;color:#aaa}" +
+                ".load-more{text-align:center;padding:18px 16px 30px;color:#777;font-size:13px}.empty,.center,.permission{text-align:center;padding:70px 24px;color:#aaa}" +
                 ".permission{padding-top:100px}.permission h2{color:#fff}.permission p{line-height:1.5}.permission button{margin-top:14px;border:0;" +
                 "border-radius:10px;padding:13px 20px;background:#4F8F8B;color:#fff;font-size:16px;font-weight:700}.folder{font-size:54px;color:#f0a348}" +
                 ".spinner{width:34px;height:34px;border:4px solid #333;border-top-color:#eee;border-radius:50%;margin:0 auto 14px;animation:r 1s linear infinite}" +
@@ -2850,8 +2883,9 @@ public class MainActivity extends android.app.Activity {
                 "</div></div>" +
                 body +
                 "<script>" +
-                "var cat='All',selected=new Set(),pressTimer=null,startX=0,startY=0,filterTimer=null;" +
-                "function scheduleFilter(){if(filterTimer)clearTimeout(filterTimer);filterTimer=setTimeout(function(){filterTimer=null;applyFilter();},120);}" +
+                "var cat='All',selected=new Set(),pressTimer=null,startX=0,startY=0,filterTimer=null,loadingMore=false,pendingSort=null;" +
+                "var loadedCount=document.querySelectorAll('.doc-item').length,totalCount=" + count + ";" +
+                "function scheduleFilter(){if(filterTimer)clearTimeout(filterTimer);filterTimer=setTimeout(function(){filterTimer=null;applyFilter();var q=(document.getElementById('q').value||'').trim();if(q&&loadedCount<totalCount)loadAllGradually();},120);}" +
                 "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
                 "function toggleModeMenu(e){if(e)e.stopPropagation();document.getElementById('docMenu').classList.remove('show');document.getElementById('sortSub').classList.remove('show');document.getElementById('modeMenu').classList.toggle('show');}" +
                 "function chooseMode(v){document.getElementById('modeMenu').classList.remove('show');STSDocuments.selectMode(v);}" +
@@ -2860,7 +2894,10 @@ public class MainActivity extends android.app.Activity {
                 "function toggleSelected(x,forceOn){setSelected(x,forceOn===true?true:!selected.has(x));}" +
                 "function handleItemTap(x,e){if(x.dataset.longpress==='1'){x.dataset.longpress='';return;}if(selected.size){toggleSelected(x,false);return;}openDoc(x);}" +
                 "function clearPress(){if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}}" +
-                "function installSelection(){document.querySelectorAll('.doc-item').forEach(function(x){x.addEventListener('touchstart',function(e){if(!e.touches||e.touches.length!==1)return;startX=e.touches[0].clientX;startY=e.touches[0].clientY;clearTimeout(pressTimer);pressTimer=setTimeout(function(){x.dataset.longpress='1';toggleSelected(x,true);pressTimer=null;},520);},{passive:true});x.addEventListener('touchmove',function(e){if(!pressTimer||!e.touches||!e.touches.length)return;var dx=e.touches[0].clientX-startX,dy=e.touches[0].clientY-startY;if(dx*dx+dy*dy>100)clearPress();},{passive:true});x.addEventListener('touchend',clearPress,{passive:true});x.addEventListener('touchcancel',clearPress,{passive:true});x.addEventListener('contextmenu',function(e){e.preventDefault();if(x.dataset.longpress!=='1'){x.dataset.longpress='1';toggleSelected(x,true);}return false;});});}" +
+                "function installSelection(root){(root||document).querySelectorAll('.doc-item:not([data-bound])').forEach(function(x){x.dataset.bound='1';x.addEventListener('touchstart',function(e){if(!e.touches||e.touches.length!==1)return;startX=e.touches[0].clientX;startY=e.touches[0].clientY;clearTimeout(pressTimer);pressTimer=setTimeout(function(){x.dataset.longpress='1';toggleSelected(x,true);pressTimer=null;},520);},{passive:true});x.addEventListener('touchmove',function(e){if(!pressTimer||!e.touches||!e.touches.length)return;var dx=e.touches[0].clientX-startX,dy=e.touches[0].clientY-startY;if(dx*dx+dy*dy>100)clearPress();},{passive:true});x.addEventListener('touchend',clearPress,{passive:true});x.addEventListener('touchcancel',clearPress,{passive:true});x.addEventListener('contextmenu',function(e){e.preventDefault();if(x.dataset.longpress!=='1'){x.dataset.longpress='1';toggleSelected(x,true);}return false;});});}" +
+                "function loadMoreNow(){if(loadingMore||loadedCount>=totalCount)return false;loadingMore=true;try{var html=STSDocuments.loadMore(loadedCount);if(html){var box=document.createElement('div');box.innerHTML=html;var list=document.getElementById('docList');while(box.firstChild)list.appendChild(box.firstChild);loadedCount=list.querySelectorAll('.doc-item').length;installSelection(list);applyFilter();}if(loadedCount>=totalCount){var s=document.getElementById('loadMoreSentinel');if(s)s.remove();}}catch(e){}loadingMore=false;return loadedCount<totalCount;}" +
+                "function loadAllGradually(){if(loadedCount>=totalCount){if(pendingSort){var m=pendingSort;pendingSort=null;sortDocs(m);}return;}loadMoreNow();setTimeout(loadAllGradually,25);}" +
+                "window.addEventListener('scroll',function(){if(window.innerHeight+window.scrollY>document.body.scrollHeight-900)loadMoreNow();},{passive:true});" +
                 "function selectedUris(){return Array.from(selected).map(function(x){return x.dataset.uri;});}" +
                 "function shareSelected(){var a=selectedUris();document.getElementById('docMenu').classList.remove('show');if(a.length)STSDocuments.shareSelected(JSON.stringify(a));}" +
                 "function deleteSelected(){var a=selectedUris();document.getElementById('docMenu').classList.remove('show');if(a.length)STSDocuments.removeSelected(JSON.stringify(a));}" +
@@ -2870,7 +2907,7 @@ public class MainActivity extends android.app.Activity {
                 "function toggleSortSub(e){if(e)e.stopPropagation();document.getElementById('sortSub').classList.toggle('show');}" +
                 "function dateGroup(ms){var d=new Date(Number(ms)||0);if(!d.getTime())return 'Unknown date';" +
                 "var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return y+'/'+m+'/'+day;}" +
-                "function sortDocs(mode){var list=document.getElementById('docList');if(!list)return;" +
+                "function sortDocs(mode){if(loadedCount<totalCount){pendingSort=mode;loadAllGradually();return;}var list=document.getElementById('docList');if(!list)return;" +
                 "var items=Array.from(list.querySelectorAll('.doc-item'));list.querySelectorAll('.date-group').forEach(function(x){x.remove();});" +
                 "items.sort(function(a,b){if(mode==='nameAsc'||mode==='nameDesc'){var x=a.dataset.name||'',y=b.dataset.name||'';var r=x.localeCompare(y);return mode==='nameAsc'?r:-r;}" +
                 "if(mode==='sizeDesc'||mode==='sizeAsc'){var x=Number(a.dataset.size)||0,y=Number(b.dataset.size)||0;return mode==='sizeDesc'?(y-x):(x-y);}" +
@@ -3061,7 +3098,12 @@ public class MainActivity extends android.app.Activity {
                 String lower = name == null ? "" : name.toLowerCase(Locale.ROOT);
                 Intent intent;
 
-                if (isPhotoCandidate(name, mime)) {
+                if (lower.endsWith(".apk") ||
+                        "application/vnd.android.package-archive".equalsIgnoreCase(mime)) {
+                    intent = new Intent(this, IntentRouterActivity.class);
+                    intent.setAction(Intent.ACTION_VIEW);
+                    intent.setDataAndType(uri, "application/vnd.android.package-archive");
+                } else if (isPhotoCandidate(name, mime)) {
                     intent = new Intent(this, ImageViewerActivity.class);
                     intent.setData(uri);
                 } else if (isAudioCandidate(name, mime) || isVideoFileCandidate(name, mime)) {
@@ -3201,6 +3243,17 @@ public class MainActivity extends android.app.Activity {
         public void open(String uri, String name, String mime) {
             if (!slot1DocumentsHome) return;
             openDocumentFromHome(uri, name, mime);
+        }
+
+        @JavascriptInterface
+        public String loadMore(int offset) {
+            if (!slot1DocumentsHome) return "";
+            List<DocumentEntry> snapshot = phoneDataSnapshot;
+            if (snapshot == null || phoneDataSnapshotGeneration != documentsLoadGeneration ||
+                    !phoneDataSnapshotMode.equals(phoneDataMode)) return "";
+            int start = Math.max(0, Math.min(offset, snapshot.size()));
+            int end = Math.min(snapshot.size(), start + PHONE_DATA_BATCH_SIZE);
+            return buildPhoneDataRows(snapshot, start, end);
         }
 
         @JavascriptInterface
