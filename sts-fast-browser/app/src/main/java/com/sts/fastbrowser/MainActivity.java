@@ -107,12 +107,13 @@ public class MainActivity extends android.app.Activity {
     private LinearLayout slot1Container;
     private LinearLayout slot2Container;
     private TextView slot1Button;
-    private TextView slot2Button;
+    private EditText slot2Button;
     private ImageView slot1HomeIcon;
     private ImageView slot1RefreshIcon;
     private ImageView slot2HomeIcon;
     private ImageView slot2RefreshIcon;
     private ImageView menuButton;
+    private AlertDialog manageSitesDialog;
     private LinearLayout browserTopBar;
     private FrameLayout webStage;
     private WebView webView1;
@@ -225,7 +226,7 @@ public class MainActivity extends android.app.Activity {
         slot1RefreshIcon = makeIconButton(R.drawable.ic_refresh);
 
         slot2HomeIcon = makeIconButton(R.drawable.ic_home);
-        slot2Button = makeSlotLabel("Google ▾");
+        slot2Button = makeD2AddressBar();
         slot2RefreshIcon = makeIconButton(R.drawable.ic_refresh);
 
         slot1Container.addView(slot1HomeIcon, new LinearLayout.LayoutParams(dp(36), ViewGroup.LayoutParams.MATCH_PARENT));
@@ -264,7 +265,30 @@ public class MainActivity extends android.app.Activity {
         root.addView(webStage, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
         slot1Button.setOnClickListener(v -> showSitePopup(slot1Container, 1));
-        slot2Button.setOnClickListener(v -> showSitePopup(slot2Container, 2));
+        slot2Button.setOnEditorActionListener((v, actionId, event) -> {
+            navigateD2Address(v.getText().toString());
+            return true;
+        });
+        slot2Button.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                slot2Button.post(() -> {
+                    if (slot2Button.hasFocus()) slot2Button.selectAll();
+                });
+            } else {
+                syncD2AddressBar(null);
+            }
+        });
+        slot2Button.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_UP) {
+                int rightEdge = slot2Button.getWidth() - dp(34);
+                if (event.getX() >= rightEdge) {
+                    slot2Button.clearFocus();
+                    showSitePopup(slot2Container, 2);
+                    return true;
+                }
+            }
+            return false;
+        });
         slot1HomeIcon.setOnClickListener(v -> goHome(1));
         slot2HomeIcon.setOnClickListener(v -> goHome(2));
         slot1RefreshIcon.setOnClickListener(v -> refreshSlot(1));
@@ -272,7 +296,6 @@ public class MainActivity extends android.app.Activity {
         menuButton.setOnClickListener(this::showMainMenu);
 
         applyPressAnimation(slot1Button);
-        applyPressAnimation(slot2Button);
         applyPressAnimation(slot1HomeIcon);
         applyPressAnimation(slot2HomeIcon);
         applyPressAnimation(slot1RefreshIcon);
@@ -302,6 +325,26 @@ public class MainActivity extends android.app.Activity {
         tv.setClickable(true);
         tv.setFocusable(true);
         return tv;
+    }
+
+    private EditText makeD2AddressBar() {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setTextColor(Color.parseColor("#162326"));
+        input.setHintTextColor(Color.parseColor("#68777A"));
+        input.setHint("Search or type website");
+        input.setTextSize(12);
+        input.setGravity(Gravity.CENTER_VERTICAL);
+        input.setPadding(dp(7), 0, dp(3), 0);
+        input.setBackgroundColor(Color.TRANSPARENT);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_GO);
+        input.setSelectAllOnFocus(false);
+        input.setLongClickable(true);
+        input.setTextIsSelectable(true);
+        input.setCompoundDrawablesWithIntrinsicBounds(0, 0, android.R.drawable.arrow_down_float, 0);
+        input.setCompoundDrawablePadding(dp(2));
+        return input;
     }
 
     private ImageView makeIconButton(int drawableRes) {
@@ -596,6 +639,7 @@ public class MainActivity extends android.app.Activity {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 updateYouTubeState(view, url);
+                if (view == webView2) syncD2AddressBar(url);
                 browserPageZoom.put(view, 1.0f);
                 applyBrowserPageZoom(view, 1.0f);
                 super.onPageStarted(view, url, favicon);
@@ -623,6 +667,7 @@ public class MainActivity extends android.app.Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 updateYouTubeState(view, url);
+                if (view == webView2) syncD2AddressBar(url);
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
                 if (adBlockEnabled) injectNormalAdCleanup(view);
@@ -1243,6 +1288,10 @@ public class MainActivity extends android.app.Activity {
         } else {
             slot2Name = site.name;
             slot2Url = site.url;
+            if (slot2Button != null && !slot2Button.hasFocus()) {
+                slot2Button.setText(site.url);
+                slot2Button.setSelection(0);
+            }
         }
         saveSlots();
         showWebView(slot);
@@ -1489,37 +1538,120 @@ public class MainActivity extends android.app.Activity {
     }
 
     private void showMainMenu(View anchor) {
-        PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
-        pm.getMenu().add(adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF");
-        pm.getMenu().add(hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF");
-        pm.getMenu().add("Add Website");
-        pm.getMenu().add("Manage Websites");
-        pm.getMenu().add("About");
-        pm.setOnMenuItemClickListener(item -> {
-            String t = String.valueOf(item.getTitle());
-            if (t.startsWith("Hard Ad Blocker")) {
-                setHardAdBlockEnabled(!hardAdBlockEnabled, true);
-                return true;
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(6), dp(6), dp(6), dp(6));
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.WHITE);
+        bg.setCornerRadius(dp(14));
+        bg.setStroke(dp(1), Color.parseColor("#D5DDDC"));
+        box.setBackground(bg);
+
+        int popupWidth = dp(252);
+        PopupWindow popup = new PopupWindow(box, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        popup.setOutsideTouchable(true);
+        popup.setElevation(dp(14));
+        popup.setAnimationStyle(android.R.style.Animation_Dialog);
+
+        LinearLayout navRow = new LinearLayout(this);
+        navRow.setOrientation(LinearLayout.HORIZONTAL);
+        navRow.setGravity(Gravity.CENTER);
+        navRow.setPadding(dp(4), dp(3), dp(4), dp(5));
+
+        ImageButton back = makeHistoryButton(R.drawable.ic_back, "Back");
+        ImageButton forward = makeHistoryButton(R.drawable.ic_forward, "Forward");
+
+        WebView active = webView;
+        boolean d1Home = activeSlot == 1 && slot1DocumentsHome;
+        boolean canBack = !d1Home && active != null && active.canGoBack();
+        boolean canForward = !d1Home && active != null && active.canGoForward();
+        setHistoryButtonEnabled(back, canBack);
+        setHistoryButtonEnabled(forward, canForward);
+
+        back.setOnClickListener(v -> {
+            popup.dismiss();
+            WebView current = webView;
+            if (!(activeSlot == 1 && slot1DocumentsHome) && current != null && current.canGoBack()) {
+                current.goBack();
             }
-            if (t.startsWith("Ad Blocker")) {
-                setAdBlockEnabled(!adBlockEnabled, true);
-                return true;
-            }
-            if (t.equals("Add Website")) {
-                showAddWebsiteDialog(activeSlot);
-                return true;
-            }
-            if (t.equals("Manage Websites")) {
-                showManageSitesDialog();
-                return true;
-            }
-            if (t.equals("About")) {
-                showAboutDialog();
-                return true;
-            }
-            return false;
         });
-        pm.show();
+        forward.setOnClickListener(v -> {
+            popup.dismiss();
+            WebView current = webView;
+            if (!(activeSlot == 1 && slot1DocumentsHome) && current != null && current.canGoForward()) {
+                current.goForward();
+            }
+        });
+
+        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        navLp1.setMargins(0, 0, dp(3), 0);
+        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(0, dp(48), 1f);
+        navLp2.setMargins(dp(3), 0, 0, 0);
+        navRow.addView(back, navLp1);
+        navRow.addView(forward, navLp2);
+        box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+
+        addMainMenuAction(box, adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF", () -> {
+            popup.dismiss();
+            setAdBlockEnabled(!adBlockEnabled, true);
+        });
+        addMainMenuAction(box, hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF", () -> {
+            popup.dismiss();
+            setHardAdBlockEnabled(!hardAdBlockEnabled, true);
+        });
+        addMainMenuAction(box, "Add Website", () -> {
+            popup.dismiss();
+            showAddWebsiteDialog(activeSlot);
+        });
+        addMainMenuAction(box, "Manage Websites", () -> {
+            popup.dismiss();
+            showManageSitesDialog();
+        });
+        addMainMenuAction(box, "About", () -> {
+            popup.dismiss();
+            showAboutDialog();
+        });
+
+        int xOff = anchor.getWidth() - popupWidth;
+        popup.showAsDropDown(anchor, xOff, dp(2));
+    }
+
+    private ImageButton makeHistoryButton(int iconRes, String description) {
+        ImageButton button = new ImageButton(this);
+        button.setImageResource(iconRes);
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        button.setPadding(dp(14), dp(10), dp(14), dp(10));
+        button.setContentDescription(description);
+        button.setBackground(makeRipple(Color.parseColor("#EEF3F2")));
+        applyPressAnimation(button);
+        return button;
+    }
+
+    private void setHistoryButtonEnabled(ImageButton button, boolean enabled) {
+        button.setEnabled(enabled);
+        button.setAlpha(enabled ? 1f : 0.32f);
+    }
+
+    private void addMainMenuAction(LinearLayout box, String label, Runnable action) {
+        TextView item = new TextView(this);
+        item.setText(label);
+        item.setTextColor(Color.parseColor("#172326"));
+        item.setTextSize(15);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(14), 0, dp(10), 0);
+        GradientDrawable base = new GradientDrawable();
+        base.setColor(Color.WHITE);
+        base.setCornerRadius(dp(9));
+        item.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.parseColor("#224F8F8B")), base, null));
+        item.setClickable(true);
+        item.setFocusable(true);
+        item.setOnClickListener(v -> {
+            if (action != null) action.run();
+        });
+        applyPressAnimation(item);
+        box.addView(item, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
     }
 
     private void showAddWebsiteDialog(int slot) {
@@ -1574,11 +1706,16 @@ public class MainActivity extends android.app.Activity {
 
         ScrollView sc = new ScrollView(this);
         sc.addView(list);
-        new AlertDialog.Builder(this)
+        if (manageSitesDialog != null && manageSitesDialog.isShowing()) {
+            manageSitesDialog.dismiss();
+        }
+        manageSitesDialog = new AlertDialog.Builder(this)
                 .setTitle("Manage Websites")
                 .setView(sc)
                 .setPositiveButton("Close", null)
-                .show();
+                .create();
+        manageSitesDialog.setOnDismissListener(d -> manageSitesDialog = null);
+        manageSitesDialog.show();
     }
 
     private void addManageSection(LinearLayout list, String heading, int slot) {
@@ -1631,12 +1768,18 @@ public class MainActivity extends android.app.Activity {
 
     private void showManagedSiteMenu(View anchor, Site site, int slot, TextView titleView) {
         PopupMenu pm = new PopupMenu(this, anchor, Gravity.END);
+        pm.getMenu().add("Open Website");
         pm.getMenu().add("Edit");
         pm.getMenu().add(site.hasPassword() ? "Change Password" : "Set Password");
         pm.getMenu().add(slot == 1 ? "Move to D2" : "Move to D1");
         pm.getMenu().add("Remove Website");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
+            if (t.equals("Open Website")) {
+                if (manageSitesDialog != null) manageSitesDialog.dismiss();
+                selectSite(slot, site);
+                return true;
+            }
             if (t.equals("Edit")) {
                 Runnable openEditor = () -> showEditWebsiteDialog(site, slot, titleView);
                 if (site.hasPassword()) {
@@ -2129,7 +2272,41 @@ public class MainActivity extends android.app.Activity {
             String d1Label = slot1DocumentsHome ? "Phone Data" : slot1Name;
             slot1Button.setText((activeSlot == 1 ? "● " : "") + d1Label + " ▾");
         }
-        if (slot2Button != null) slot2Button.setText((activeSlot == 2 ? "● " : "") + slot2Name + " ▾");
+        if (slot2Button != null && !slot2Button.hasFocus()) {
+            String current = webView2 == null ? null : webView2.getUrl();
+            slot2Button.setText(TextUtils.isEmpty(current) ? slot2Url : current);
+        }
+    }
+
+    private void syncD2AddressBar(String url) {
+        if (slot2Button == null || slot2Button.hasFocus()) return;
+        String shown = url;
+        if (TextUtils.isEmpty(shown) && webView2 != null) shown = webView2.getUrl();
+        if (TextUtils.isEmpty(shown)) shown = slot2Url;
+        slot2Button.setText(shown == null ? "" : shown);
+        slot2Button.setSelection(0);
+    }
+
+    private void navigateD2Address(String raw) {
+        if (raw == null) return;
+        String input = raw.trim();
+        if (input.isEmpty()) return;
+
+        String destination = null;
+        boolean looksLikeUrl =
+                input.matches("(?i)^[a-z][a-z0-9+.-]*://.+$") ||
+                input.matches("(?i)^localhost(?::\\d+)?(?:/.*)?$") ||
+                input.matches("(?i)^\\d{1,3}(?:\\.\\d{1,3}){3}(?::\\d+)?(?:/.*)?$") ||
+                (!input.contains(" ") && input.contains("."));
+
+        if (looksLikeUrl) destination = normalizeUrl(input);
+        if (destination == null) {
+            destination = "https://www.google.com/search?q=" + Uri.encode(input);
+        }
+
+        slot2Button.clearFocus();
+        showWebView(2);
+        if (webView2 != null) webView2.loadUrl(destination);
     }
 
     private List<Site> getSites(int slot) {
