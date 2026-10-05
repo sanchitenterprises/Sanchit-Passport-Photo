@@ -89,6 +89,7 @@ public class PdfShareProvider extends ContentProvider {
                 String first = segments.get(0);
                 if ("image".equals(first)) folder = "image";
                 else if ("office".equals(first)) folder = "office";
+                else if ("install".equals(first)) folder = "install";
             }
             String name = uri.getLastPathSegment();
             File dir = new File(getContext().getCacheDir(), folder);
