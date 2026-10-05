@@ -381,7 +381,12 @@ public class ImageViewerActivity extends Activity {
                 decoded = applyExifOrientation(decoded, sourceFile);
 
                 final Bitmap loaded = decoded;
-                runOnUiThread(() -> setBitmap(loaded));
+                runOnUiThread(() -> {
+                    setBitmap(loaded);
+                    if (getIntent().getBooleanExtra("incoming_edit", false)) {
+                        enterEditMode();
+                    }
+                });
             } catch (Exception e) {
                 runOnUiThread(() -> Toast.makeText(this, "Image open नहीं हो पाई", Toast.LENGTH_SHORT).show());
             }
