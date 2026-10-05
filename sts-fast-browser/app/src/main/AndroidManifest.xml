@@ -183,7 +183,9 @@
             android:exported="true"
             android:screenOrientation="unspecified"
             android:launchMode="singleTop"
-            android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden">
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
