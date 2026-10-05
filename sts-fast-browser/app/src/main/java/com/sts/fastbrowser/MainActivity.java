@@ -132,7 +132,7 @@ public class MainActivity extends android.app.Activity {
     private String slot2Name = GOOGLE_NAME;
     private String slot2Url = GOOGLE_URL;
     private volatile boolean slot1DocumentsHome = true;
-    private volatile String phoneDataMode = "Documents";
+    private volatile String phoneDataMode = "All Data";
     private volatile boolean documentAccessRequested = false;
     private volatile int documentsLoadGeneration = 0;
     private static final int PHONE_DATA_BATCH_SIZE = 350;
@@ -2902,6 +2902,7 @@ public class MainActivity extends android.app.Activity {
                 body +
                 "<script>" +
                 "var cat='All',selected=new Set(),pressTimer=null,startX=0,startY=0,filterTimer=null,loadingMore=false,pendingSort=null;" +
+                "var allDataMode=" + ("All Data".equals(mode) ? "true" : "false") + ",majorCat='';" +
                 "var loadedCount=document.querySelectorAll('.doc-item').length,totalCount=" + count + ";" +
                 "function scheduleFilter(){if(filterTimer)clearTimeout(filterTimer);filterTimer=setTimeout(function(){filterTimer=null;applyFilter();var q=(document.getElementById('q').value||'').trim();if(q&&loadedCount<totalCount)loadAllGradually();},120);}" +
                 "function toggleSearch(){document.getElementById('searchBox').classList.toggle('show');var q=document.getElementById('q');if(document.getElementById('searchBox').classList.contains('show'))q.focus();}" +
@@ -2913,7 +2914,10 @@ public class MainActivity extends android.app.Activity {
                 "function handleItemTap(x,e){if(x.dataset.longpress==='1'){x.dataset.longpress='';return;}if(selected.size){toggleSelected(x,false);return;}openDoc(x);}" +
                 "function clearPress(){if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}}" +
                 "function installSelection(root){(root||document).querySelectorAll('.doc-item:not([data-bound])').forEach(function(x){x.dataset.bound='1';x.addEventListener('touchstart',function(e){if(!e.touches||e.touches.length!==1)return;startX=e.touches[0].clientX;startY=e.touches[0].clientY;clearTimeout(pressTimer);pressTimer=setTimeout(function(){x.dataset.longpress='1';toggleSelected(x,true);pressTimer=null;},520);},{passive:true});x.addEventListener('touchmove',function(e){if(!pressTimer||!e.touches||!e.touches.length)return;var dx=e.touches[0].clientX-startX,dy=e.touches[0].clientY-startY;if(dx*dx+dy*dy>100)clearPress();},{passive:true});x.addEventListener('touchend',clearPress,{passive:true});x.addEventListener('touchcancel',clearPress,{passive:true});x.addEventListener('contextmenu',function(e){e.preventDefault();if(x.dataset.longpress!=='1'){x.dataset.longpress='1';toggleSelected(x,true);}return false;});});}" +
-                "function loadMoreNow(){if(loadingMore||loadedCount>=totalCount)return false;loadingMore=true;try{var html=STSDocuments.loadMore(loadedCount);if(html){var box=document.createElement('div');box.innerHTML=html;var list=document.getElementById('docList');while(box.firstChild)list.appendChild(box.firstChild);loadedCount=list.querySelectorAll('.doc-item').length;installSelection(list);applyFilter();}if(loadedCount>=totalCount){var s=document.getElementById('loadMoreSentinel');if(s)s.remove();}}catch(e){}loadingMore=false;return loadedCount<totalCount;}" +
+                "function ensureLoadSentinel(text){var s=document.getElementById('loadMoreSentinel');if(!s){s=document.createElement('div');s.id='loadMoreSentinel';s.className='load-more';document.getElementById('docList').after(s);}s.textContent=text||'Scroll करने पर और files load होंगी…';return s;}" +
+                "function loadMajorMore(){if(!allDataMode||!majorCat||loadingMore||loadedCount>=totalCount&&totalCount>0)return false;loadingMore=true;try{var raw=STSDocuments.loadMajorCategory(majorCat,loadedCount);var o=raw?JSON.parse(raw):null;var list=document.getElementById('docList');if(o){totalCount=Number(o.total)||0;if(o.html){var box=document.createElement('div');box.innerHTML=o.html;while(box.firstChild)list.appendChild(box.firstChild);installSelection(list);}loadedCount=Number(o.loaded)||list.querySelectorAll('.doc-item').length;var oldEmpty=document.getElementById('majorEmpty');if(oldEmpty)oldEmpty.remove();if(totalCount===0){var empty=document.createElement('div');empty.id='majorEmpty';empty.className='empty';empty.textContent='कोई '+majorCat+' data नहीं मिला।';list.after(empty);}if(loadedCount<totalCount)ensureLoadSentinel('Scroll करने पर और '+majorCat+' files load होंगी…');else{var s=document.getElementById('loadMoreSentinel');if(s)s.remove();}applyFilter();}}catch(e){}loadingMore=false;return loadedCount<totalCount;}" +
+                "function switchMajorCategory(v){majorCat=v;cat=v;selected.clear();syncSelectionUi();var list=document.getElementById('docList');list.innerHTML='';var s=document.getElementById('loadMoreSentinel');if(s)s.remove();var empty=document.getElementById('majorEmpty');if(empty)empty.remove();loadedCount=0;totalCount=0;ensureLoadSentinel(v+' loading...');loadMajorMore();}" +
+                "function loadMoreNow(){if(allDataMode&&majorCat)return loadMajorMore();if(loadingMore||loadedCount>=totalCount)return false;loadingMore=true;try{var html=STSDocuments.loadMore(loadedCount);if(html){var box=document.createElement('div');box.innerHTML=html;var list=document.getElementById('docList');while(box.firstChild)list.appendChild(box.firstChild);loadedCount=list.querySelectorAll('.doc-item').length;installSelection(list);applyFilter();}if(loadedCount>=totalCount){var s=document.getElementById('loadMoreSentinel');if(s)s.remove();}}catch(e){}loadingMore=false;return loadedCount<totalCount;}" +
                 "function loadAllGradually(){if(loadedCount>=totalCount){if(pendingSort){var m=pendingSort;pendingSort=null;sortDocs(m);}return;}loadMoreNow();setTimeout(loadAllGradually,25);}" +
                 "window.addEventListener('scroll',function(){if(window.innerHeight+window.scrollY>document.body.scrollHeight-900)loadMoreNow();},{passive:true});" +
                 "function selectedUris(){return Array.from(selected).map(function(x){return x.dataset.uri;});}" +
@@ -2935,10 +2939,10 @@ public class MainActivity extends android.app.Activity {
                 "document.getElementById('sortSub').classList.remove('show');document.getElementById('docMenu').classList.remove('show');applyFilter();}" +
                 "document.addEventListener('click',function(e){var m=document.getElementById('docMenu'),b=document.getElementById('menuButton');if(m&&b&&!m.contains(e.target)&&e.target!==b){m.classList.remove('show');document.getElementById('sortSub').classList.remove('show');}" +
                 "var mm=document.getElementById('modeMenu'),mb=document.getElementById('modeButton');if(mm&&mb&&!mm.contains(e.target)&&e.target!==mb)mm.classList.remove('show');});" +
-                "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');applyFilter();}" +
+                "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');if(allDataMode){switchMajorCategory(v);return;}applyFilter();}" +
                 "function applyFilter(){var q=(document.getElementById('q').value||'').toLowerCase();var n=0;" +
                 "document.querySelectorAll('.doc-item').forEach(function(x){var ok=(cat==='All'||x.dataset.cat===cat)&&(!q||x.dataset.name.indexOf(q)>=0);x.classList.toggle('hide',!ok);if(ok)n++;});" +
-                "document.getElementById('shownCount').textContent=n;document.querySelectorAll('.date-group').forEach(function(g){var x=g.nextElementSibling;var any=false;" +
+                "document.getElementById('shownCount').textContent=(allDataMode&&majorCat&&!q?totalCount:n);document.querySelectorAll('.date-group').forEach(function(g){var x=g.nextElementSibling;var any=false;" +
                 "while(x&&!x.classList.contains('date-group')){if(x.classList.contains('doc-item')&&!x.classList.contains('hide')){any=true;break;}x=x.nextElementSibling;}g.classList.toggle('hide',!any);});}" +
                 "function openDoc(x){STSDocuments.open(x.dataset.uri,x.dataset.filename,x.dataset.mime);}" +
                 "installSelection();syncSelectionUi();" +
@@ -3279,6 +3283,35 @@ public class MainActivity extends android.app.Activity {
             int start = Math.max(0, Math.min(offset, snapshot.size()));
             int end = Math.min(snapshot.size(), start + PHONE_DATA_BATCH_SIZE);
             return buildPhoneDataRows(snapshot, start, end);
+        }
+
+        @JavascriptInterface
+        public String loadMajorCategory(String category, int offset) {
+            if (!slot1DocumentsHome || !"All Data".equals(phoneDataMode)) return "";
+            if (!"Documents".equals(category) && !"Photo".equals(category) &&
+                    !"Audio".equals(category) && !"Video".equals(category) &&
+                    !"Other Data".equals(category)) return "";
+
+            List<DocumentEntry> snapshot = phoneDataSnapshot;
+            if (snapshot == null || phoneDataSnapshotGeneration != documentsLoadGeneration ||
+                    !phoneDataSnapshotMode.equals(phoneDataMode)) return "";
+
+            List<DocumentEntry> filtered = new ArrayList<>();
+            for (DocumentEntry item : snapshot) {
+                if (category.equals(item.filterType)) filtered.add(item);
+            }
+
+            int start = Math.max(0, Math.min(offset, filtered.size()));
+            int end = Math.min(filtered.size(), start + PHONE_DATA_BATCH_SIZE);
+            try {
+                JSONObject out = new JSONObject();
+                out.put("html", buildPhoneDataRows(filtered, start, end));
+                out.put("loaded", end);
+                out.put("total", filtered.size());
+                return out.toString();
+            } catch (Exception ignored) {
+                return "";
+            }
         }
 
         @JavascriptInterface
