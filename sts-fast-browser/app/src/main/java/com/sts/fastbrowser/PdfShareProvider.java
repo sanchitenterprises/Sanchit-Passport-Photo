@@ -24,6 +24,12 @@ public class PdfShareProvider extends ContentProvider {
         if (n.endsWith(".png")) return "image/png";
         if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
         if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".gif")) return "image/gif";
+        if (n.endsWith(".bmp")) return "image/bmp";
+        if (n.endsWith(".heic") || n.endsWith(".heif")) return "image/heic";
+        if (n.endsWith(".avif")) return "image/avif";
+        if (n.endsWith(".tif") || n.endsWith(".tiff")) return "image/tiff";
+        if (n.endsWith(".pdf")) return "application/pdf";
         if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
         if (n.endsWith(".xls")) return "application/vnd.ms-excel";
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -37,7 +43,26 @@ public class PdfShareProvider extends ContentProvider {
         if (n.endsWith(".ods")) return "application/vnd.oasis.opendocument.spreadsheet";
         if (n.endsWith(".odp")) return "application/vnd.oasis.opendocument.presentation";
         if (n.endsWith(".ofd")) return "application/ofd";
-        return "application/pdf";
+        if (n.endsWith(".mp3")) return "audio/mpeg";
+        if (n.endsWith(".m4a")) return "audio/mp4";
+        if (n.endsWith(".aac")) return "audio/aac";
+        if (n.endsWith(".wav")) return "audio/wav";
+        if (n.endsWith(".ogg")) return "audio/ogg";
+        if (n.endsWith(".flac")) return "audio/flac";
+        if (n.endsWith(".mp4") || n.endsWith(".m4v")) return "video/mp4";
+        if (n.endsWith(".mkv")) return "video/x-matroska";
+        if (n.endsWith(".webm")) return "video/webm";
+        if (n.endsWith(".3gp")) return "video/3gpp";
+        if (n.endsWith(".mov")) return "video/quicktime";
+        if (n.endsWith(".avi")) return "video/x-msvideo";
+        if (n.endsWith(".zip")) return "application/zip";
+        if (n.endsWith(".rar")) return "application/vnd.rar";
+        if (n.endsWith(".7z")) return "application/x-7z-compressed";
+        if (n.endsWith(".apk")) return "application/vnd.android.package-archive";
+        if (n.endsWith(".json")) return "application/json";
+        if (n.endsWith(".xml")) return "application/xml";
+        if (n.endsWith(".html") || n.endsWith(".htm")) return "text/html";
+        return "application/octet-stream";
     }
 
     @Override
