@@ -186,7 +186,7 @@ public class IntentRouterActivity extends Activity {
                 target.putExtra("pdf_name", name);
                 target.putExtra("pdf_slot", 1);
             } else if (targetClass == OfficeViewerActivity.class) {
-                target.putExtra("office_name", name);
+                target.putExtra("office_name", ensureNameForMime(name, mime));
             } else if (targetClass == MediaPlayerActivity.class) {
                 target.putExtra("media_name", name);
                 target.putExtra("media_mime", mime);
@@ -414,7 +414,11 @@ public class IntentRouterActivity extends Activity {
         if ("xml".equals(ext)) return "application/xml";
         if (in(ext, "html", "htm")) return "text/html";
         if ("md".equals(ext)) return "text/markdown";
-        if ("log".equals(ext)) return "text/plain";
+        if ("log".equals(ext) || "ini".equals(ext) || "conf".equals(ext) ||
+                "sql".equals(ext) || "java".equals(ext) || "kt".equals(ext)) return "text/plain";
+        if ("yaml".equals(ext) || "yml".equals(ext)) return "text/yaml";
+        if ("css".equals(ext)) return "text/css";
+        if ("js".equals(ext)) return "text/javascript";
 
         if ("zip".equals(ext)) return "application/zip";
         if ("rar".equals(ext)) return "application/vnd.rar";
@@ -461,7 +465,33 @@ public class IntentRouterActivity extends Activity {
                 "application/json",
                 "application/xml")) return true;
         return in(ext, "doc","docx","xls","xlsx","ppt","pptx","txt","csv","rtf","odt","ods","odp","ofd",
-                "json","xml","html","htm","md","log");
+                "json","xml","html","htm","md","log","ini","conf","yaml","yml","sql","css","js","java","kt");
+    }
+
+    private String ensureNameForMime(String name, String mime) {
+        String ext = extension(name);
+        if (!TextUtils.isEmpty(ext)) return name;
+        String suffix = "";
+        if ("application/vnd.openxmlformats-officedocument.wordprocessingml.document".equals(mime)) suffix = ".docx";
+        else if ("application/msword".equals(mime) || "application/vnd.ms-word".equals(mime)) suffix = ".doc";
+        else if ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".equals(mime)) suffix = ".xlsx";
+        else if ("application/vnd.ms-excel".equals(mime) || "application/excel".equals(mime)) suffix = ".xls";
+        else if ("application/vnd.openxmlformats-officedocument.presentationml.presentation".equals(mime)) suffix = ".pptx";
+        else if ("application/vnd.ms-powerpoint".equals(mime)) suffix = ".ppt";
+        else if ("text/csv".equals(mime)) suffix = ".csv";
+        else if ("application/rtf".equals(mime) || "text/rtf".equals(mime)) suffix = ".rtf";
+        else if ("application/vnd.oasis.opendocument.text".equals(mime)) suffix = ".odt";
+        else if ("application/vnd.oasis.opendocument.spreadsheet".equals(mime)) suffix = ".ods";
+        else if ("application/vnd.oasis.opendocument.presentation".equals(mime)) suffix = ".odp";
+        else if ("application/ofd".equals(mime)) suffix = ".ofd";
+        else if ("application/json".equals(mime)) suffix = ".json";
+        else if ("application/xml".equals(mime) || "text/xml".equals(mime)) suffix = ".xml";
+        else if ("text/html".equals(mime)) suffix = ".html";
+        else if ("text/markdown".equals(mime)) suffix = ".md";
+        else if ("text/css".equals(mime)) suffix = ".css";
+        else if ("text/javascript".equals(mime) || "application/javascript".equals(mime)) suffix = ".js";
+        else if (mime.startsWith("text/")) suffix = ".txt";
+        return name + suffix;
     }
 
     private String zipPreview(Uri uri) {
