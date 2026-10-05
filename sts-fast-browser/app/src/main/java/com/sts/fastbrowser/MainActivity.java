@@ -1029,7 +1029,8 @@ public class MainActivity extends android.app.Activity {
                 "for(var j=0;j<n.length;j++){try{n[j].style.setProperty('display','none','important');" +
                 "n[j].style.setProperty('visibility','hidden','important');}catch(e){}}}};" +
                 "window.__stsNormalAdClean();" +
-                "try{new MutationObserver(function(){window.__stsNormalAdClean();}).observe(document.documentElement||document," +
+                "try{var __stsNormalPending=false;new MutationObserver(function(){if(__stsNormalPending)return;__stsNormalPending=true;" +
+                "setTimeout(function(){__stsNormalPending=false;window.__stsNormalAdClean();},180);}).observe(document.documentElement||document," +
                 "{childList:true,subtree:true});}catch(e){}" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
