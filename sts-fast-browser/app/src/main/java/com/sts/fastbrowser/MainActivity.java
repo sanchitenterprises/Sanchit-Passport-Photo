@@ -2558,8 +2558,9 @@ public class MainActivity extends android.app.Activity {
                 long size = sizeCol >= 0 ? cursor.getLong(sizeCol) : 0L;
                 long modifiedSec = dateCol >= 0 ? cursor.getLong(dateCol) : 0L;
 
-                // Skip folder-like MediaStore rows from Other Data.
-                if ("Other Data".equals(mode) && TextUtils.isEmpty(mime) && size <= 0L && name.indexOf('.') < 0) {
+                // Skip folder-like MediaStore rows from All Data / Other Data.
+                if (("All Data".equals(mode) || "Other Data".equals(mode)) &&
+                        TextUtils.isEmpty(mime) && size <= 0L && name.indexOf('.') < 0) {
                     continue;
                 }
 
@@ -2582,6 +2583,14 @@ public class MainActivity extends android.app.Activity {
     }
 
     private String categoryForPhoneData(String mode, String name, String mime) {
+        if ("All Data".equals(mode)) {
+            String document = documentCategory(name);
+            if (document != null) return document;
+            if (isPhotoCandidate(name, mime)) return "PHOTO";
+            if (isAudioCandidate(name, mime)) return "AUDIO";
+            if (isVideoFileCandidate(name, mime)) return "VIDEO";
+            return otherDataCategory(name, mime);
+        }
         if ("Documents".equals(mode)) return documentCategory(name);
         if ("Photo".equals(mode)) return isPhotoCandidate(name, mime) ? "PHOTO" : null;
         if ("Audio".equals(mode)) return isAudioCandidate(name, mime) ? "AUDIO" : null;
@@ -2599,6 +2608,14 @@ public class MainActivity extends android.app.Activity {
     private String filterTypeForPhoneData(String mode, String name, String mime) {
         String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
         String m = mime == null ? "" : mime.toLowerCase(Locale.ROOT);
+
+        if ("All Data".equals(mode)) {
+            if (documentCategory(name) != null) return "Documents";
+            if (isPhotoCandidate(name, mime)) return "Photo";
+            if (isAudioCandidate(name, mime)) return "Audio";
+            if (isVideoFileCandidate(name, mime)) return "Video";
+            return "Other Data";
+        }
 
         if ("Documents".equals(mode)) {
             if (n.endsWith(".pdf")) return "PDF";
@@ -2860,7 +2877,7 @@ public class MainActivity extends android.app.Activity {
                 "<div id='searchBox' class='search'><input id='q' placeholder='Search " + escapeDocsAttr(mode.toLowerCase(Locale.ROOT)) + "' oninput='scheduleFilter()'></div>" +
                 "<div class='tabs'>" + phoneDataTabsHtml(mode) + "</div></div>" +
                 "<div id='modeMenu' class='mode-menu'>" +
-                modeOptionHtml("Documents", mode) + modeOptionHtml("Photo", mode) +
+                modeOptionHtml("All Data", mode) + modeOptionHtml("Documents", mode) + modeOptionHtml("Photo", mode) +
                 modeOptionHtml("Audio", mode) + modeOptionHtml("Video", mode) +
                 modeOptionHtml("Other Data", mode) +
                 "</div>" +
@@ -2985,6 +3002,13 @@ public class MainActivity extends android.app.Activity {
     }
 
     private String phoneDataTabsHtml(String mode) {
+        if ("All Data".equals(mode)) {
+            return tabHtml("Documents", false) +
+                    tabHtml("Photo", false) +
+                    tabHtml("Audio", false) +
+                    tabHtml("Video", false) +
+                    tabHtml("Other Data", false);
+        }
         if ("Documents".equals(mode)) {
             return tabHtml("All", true) +
                     tabHtml("PDF", false) +
@@ -3260,7 +3284,7 @@ public class MainActivity extends android.app.Activity {
         @JavascriptInterface
         public void selectMode(String mode) {
             if (!slot1DocumentsHome) return;
-            if (!"Documents".equals(mode) && !"Photo".equals(mode) &&
+            if (!"All Data".equals(mode) && !"Documents".equals(mode) && !"Photo".equals(mode) &&
                     !"Audio".equals(mode) && !"Video".equals(mode) &&
                     !"Other Data".equals(mode)) return;
             phoneDataMode = mode;
