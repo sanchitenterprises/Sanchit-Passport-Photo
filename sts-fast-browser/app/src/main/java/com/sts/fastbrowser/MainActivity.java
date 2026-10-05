@@ -119,6 +119,8 @@ public class MainActivity extends android.app.Activity {
     private boolean adBlockEnabled = true;
     private boolean hardAdBlockEnabled = true;
     private int activeSlot = 1;
+    private volatile boolean webView1YouTube = false;
+    private volatile boolean webView2YouTube = false;
     private String slot1Name = GOOGLE_NAME;
     private String slot1Url = GOOGLE_URL;
     private String slot2Name = GOOGLE_NAME;
@@ -565,6 +567,7 @@ public class MainActivity extends android.app.Activity {
         targetWebView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                updateYouTubeState(view, url);
                 browserPageZoom.put(view, 1.0f);
                 applyBrowserPageZoom(view, 1.0f);
                 super.onPageStarted(view, url, favicon);
@@ -591,6 +594,7 @@ public class MainActivity extends android.app.Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                updateYouTubeState(view, url);
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
                 if (adBlockEnabled) injectNormalAdCleanup(view);
@@ -1175,6 +1179,7 @@ public class MainActivity extends android.app.Activity {
         if (webView1 != null) webView1.setVisibility(activeSlot == 1 ? View.VISIBLE : View.GONE);
         if (webView2 != null) webView2.setVisibility(activeSlot == 2 ? View.VISIBLE : View.GONE);
         updateSlotLabels();
+        updatePictureInPictureParams();
     }
 
     private void ensureSlotPageLoaded(int slot) {
@@ -2030,22 +2035,98 @@ public class MainActivity extends android.app.Activity {
         return true;
     }
 
+    private boolean isYouTubeUrl(String url) {
+        if (TextUtils.isEmpty(url)) return false;
+        try {
+            Uri u = Uri.parse(url);
+            String host = u.getHost();
+            if (!TextUtils.isEmpty(host)) {
+                host = host.toLowerCase(Locale.ROOT);
+                if ("youtube.com".equals(host) ||
+                        host.endsWith(".youtube.com") ||
+                        "youtu.be".equals(host) ||
+                        host.endsWith(".youtu.be")) {
+                    return true;
+                }
+            }
+
+            // Google/search redirect URLs can temporarily remain visible while YouTube is loading.
+            String lower = url.toLowerCase(Locale.ROOT);
+            return lower.contains("youtube.com%2f") ||
+                    lower.contains("youtube.com/watch") ||
+                    lower.contains("youtu.be%2f");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void updateYouTubeState(WebView view, String url) {
+        boolean youtube = isYouTubeUrl(url);
+        if (view == webView1) webView1YouTube = youtube;
+        else if (view == webView2) webView2YouTube = youtube;
+
+        if (view == webView) {
+            updatePictureInPictureParams();
+        }
+    }
+
     private boolean isCurrentYouTubePage() {
         if (webView == null) return false;
         if (activeSlot == 1 && slot1DocumentsHome) return false;
 
+        boolean tracked = activeSlot == 2 ? webView2YouTube : webView1YouTube;
+        if (tracked) return true;
+
         String url = webView.getUrl();
-        if (TextUtils.isEmpty(url)) return false;
+        if (isYouTubeUrl(url)) return true;
         try {
-            String host = Uri.parse(url).getHost();
-            if (TextUtils.isEmpty(host)) return false;
-            host = host.toLowerCase(Locale.ROOT);
-            return "youtube.com".equals(host) ||
-                    host.endsWith(".youtube.com") ||
-                    "youtu.be".equals(host) ||
-                    host.endsWith(".youtu.be");
+            return isYouTubeUrl(webView.getOriginalUrl());
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    private PictureInPictureParams buildYouTubePipParams(boolean autoEnter) {
+        PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
+                .setAspectRatio(new Rational(16, 9));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setSeamlessResizeEnabled(true);
+            builder.setAutoEnterEnabled(autoEnter);
+        }
+        return builder.build();
+    }
+
+    private void updatePictureInPictureParams() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        try {
+            boolean youtube = isCurrentYouTubePage();
+            setPictureInPictureParams(buildYouTubePipParams(youtube));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void resumeYouTubeVideoInWebView() {
+        if (webView == null || !isCurrentYouTubePage()) return;
+        String js =
+                "(function(){" +
+                "try{" +
+                "var v=document.querySelector('video');" +
+                "if(v){var p=v.play();if(p&&p.catch)p.catch(function(){});}" +
+                "}catch(e){}" +
+                "})();";
+        try {
+            webView.evaluateJavascript(js, null);
+            webView.postDelayed(() -> {
+                if (webView != null && isCurrentYouTubePage()) {
+                    try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+                }
+            }, 350);
+            webView.postDelayed(() -> {
+                if (webView != null && isCurrentYouTubePage()) {
+                    try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+                }
+            }, 1000);
+        } catch (Exception ignored) {
         }
     }
 
@@ -2054,19 +2135,16 @@ public class MainActivity extends android.app.Activity {
         if (isInPictureInPictureMode()) return;
 
         try {
-            PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
-                    .setAspectRatio(new Rational(16, 9));
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                builder.setSeamlessResizeEnabled(true);
-            }
-            enterPictureInPictureMode(builder.build());
+            resumeYouTubeVideoInWebView();
+            enterPictureInPictureMode(buildYouTubePipParams(false));
         } catch (Exception ignored) {
         }
     }
 
     @Override
     protected void onUserLeaveHint() {
-        if (isCurrentYouTubePage()) {
+        // Android 12+ uses system auto-PiP; older versions still need the manual trigger.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && isCurrentYouTubePage()) {
             enterYouTubePictureInPicture();
         }
         super.onUserLeaveHint();
@@ -2081,6 +2159,11 @@ public class MainActivity extends android.app.Activity {
         }
         if (webStage != null) {
             webStage.requestLayout();
+        }
+        if (isInPictureInPictureMode && isCurrentYouTubePage()) {
+            resumeYouTubeVideoInWebView();
+        } else if (!isInPictureInPictureMode) {
+            updatePictureInPictureParams();
         }
     }
 
@@ -2119,6 +2202,7 @@ public class MainActivity extends android.app.Activity {
         if (browserTopBar != null && !isInPictureInPictureMode()) {
             browserTopBar.setVisibility(View.VISIBLE);
         }
+        updatePictureInPictureParams();
         if (documentAccessRequested && slot1DocumentsHome && webView1 != null) {
             documentAccessRequested = false;
             webView1.postDelayed(this::showDocumentsHome, 250);
