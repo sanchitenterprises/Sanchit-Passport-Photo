@@ -1824,6 +1824,15 @@ public class MainActivity extends android.app.Activity {
                 }).show();
     }
 
+    private String currentAppVersion() {
+        try {
+            android.content.pm.PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null ? "" : info.versionName;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private void showAboutDialog() {
         String webViewVersion = prefs == null ? "" : prefs.getString(KEY_LAST_HEALTH_WEBVIEW, "");
         String health = TextUtils.isEmpty(webViewVersion)
@@ -1831,7 +1840,7 @@ public class MainActivity extends android.app.Activity {
                 : "WebView: " + webViewVersion;
         new AlertDialog.Builder(this)
                 .setTitle("STS Fast Browser")
-                .setMessage("Version " + BuildConfig.VERSION_NAME +
+                .setMessage("Version " + currentAppVersion() +
                         "\n\nSimple • Fast • Two Quick Slots" +
                         "\nLong-Life protection: ON" +
                         "\n" + health +
@@ -1845,7 +1854,7 @@ public class MainActivity extends android.app.Activity {
             JSONObject root = new JSONObject();
             root.put("format", "STS_FAST_BROWSER_BACKUP");
             root.put("schema", 1);
-            root.put("appVersion", BuildConfig.VERSION_NAME);
+            root.put("appVersion", currentAppVersion());
             root.put("sitesD1", new JSONArray(prefs.getString(KEY_SITES_D1, "[]")));
             root.put("sitesD2", new JSONArray(prefs.getString(KEY_SITES_D2, "[]")));
             root.put("slot1Name", prefs.getString(KEY_SLOT1_NAME, GOOGLE_NAME));
