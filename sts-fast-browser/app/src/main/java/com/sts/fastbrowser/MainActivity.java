@@ -1487,8 +1487,6 @@ public class MainActivity extends android.app.Activity {
         pm.getMenu().add(hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF");
         pm.getMenu().add("Add Website");
         pm.getMenu().add("Manage Websites");
-        pm.getMenu().add("Backup Settings");
-        pm.getMenu().add("Restore Settings");
         pm.getMenu().add("About");
         pm.setOnMenuItemClickListener(item -> {
             String t = String.valueOf(item.getTitle());
@@ -1506,14 +1504,6 @@ public class MainActivity extends android.app.Activity {
             }
             if (t.equals("Manage Websites")) {
                 showManageSitesDialog();
-                return true;
-            }
-            if (t.equals("Backup Settings")) {
-                exportSettingsBackup();
-                return true;
-            }
-            if (t.equals("Restore Settings")) {
-                importSettingsBackup();
                 return true;
             }
             if (t.equals("About")) {
