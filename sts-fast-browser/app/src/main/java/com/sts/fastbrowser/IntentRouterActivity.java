@@ -2,7 +2,11 @@ package com.sts.fastbrowser;
 
 import android.app.Activity;
 import android.content.ClipData;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.net.Uri;
@@ -16,8 +20,11 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -160,6 +167,13 @@ public class IntentRouterActivity extends Activity {
 
         if (TextUtils.isEmpty(mime)) mime = "application/octet-stream";
 
+        // APK is not an archive-preview document here. Open it through Android's
+        // real package installer so Install/Update appears immediately.
+        if (isApk(mime, ext)) {
+            launchApkInstaller(uri, name);
+            return;
+        }
+
         Class<?> targetClass = null;
         if (isImage(mime, ext)) {
             targetClass = ImageViewerActivity.class;
@@ -291,7 +305,7 @@ public class IntentRouterActivity extends Activity {
 
         String ext = extension(name);
         String archive = "";
-        if (in(ext, "zip", "jar", "apk", "cbz")) archive = zipPreview(uri);
+        if (in(ext, "zip", "jar", "cbz")) archive = zipPreview(uri);
 
         TextView message;
         if (!TextUtils.isEmpty(archive)) {
@@ -425,6 +439,79 @@ public class IntentRouterActivity extends Activity {
         if ("7z".equals(ext)) return "application/x-7z-compressed";
         if ("apk".equals(ext)) return "application/vnd.android.package-archive";
         return "";
+    }
+
+    private boolean isApk(String mime, String ext) {
+        return "application/vnd.android.package-archive".equals(mime) || "apk".equals(ext);
+    }
+
+    private void launchApkInstaller(Uri originalUri, String name) {
+        Uri installUri = originalUri;
+        try {
+            // file:// URIs cannot be handed to another app on modern Android.
+            // Copy only that case into our private cache and expose it read-only.
+            if ("file".equalsIgnoreCase(originalUri.getScheme())) {
+                File dir = new File(getCacheDir(), "install");
+                if (!dir.exists()) dir.mkdirs();
+                String safeName = safeFileName(TextUtils.isEmpty(name) ? "package.apk" : name);
+                if (!safeName.toLowerCase(Locale.ROOT).endsWith(".apk")) safeName += ".apk";
+                File local = new File(dir, System.currentTimeMillis() + "_" + safeName);
+                try (InputStream in = getContentResolver().openInputStream(originalUri);
+                     OutputStream out = new FileOutputStream(local)) {
+                    if (in == null) throw new IllegalStateException("APK read failed");
+                    byte[] buf = new byte[64 * 1024];
+                    int n;
+                    while ((n = in.read(buf)) != -1) out.write(buf, 0, n);
+                }
+                installUri = new Uri.Builder()
+                        .scheme("content")
+                        .authority(getPackageName() + ".pdfshare")
+                        .appendPath("install")
+                        .appendPath(local.getName())
+                        .build();
+            }
+
+            Intent install = new Intent(Intent.ACTION_VIEW);
+            install.setDataAndType(installUri, "application/vnd.android.package-archive");
+            install.setClipData(ClipData.newRawUri("APK", installUri));
+            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+            // Because STS Fast Browser itself accepts */*, make the package installer
+            // explicit. This prevents Android from showing STS again or looping back.
+            PackageManager pm = getPackageManager();
+            List<ResolveInfo> candidates = pm.queryIntentActivities(install, PackageManager.MATCH_DEFAULT_ONLY);
+            ResolveInfo chosen = null;
+            ResolveInfo firstOther = null;
+            for (ResolveInfo ri : candidates) {
+                if (ri == null || ri.activityInfo == null) continue;
+                String pkg = ri.activityInfo.packageName;
+                if (TextUtils.isEmpty(pkg) || getPackageName().equals(pkg)) continue;
+                if (firstOther == null) firstOther = ri;
+                ApplicationInfo ai = ri.activityInfo.applicationInfo;
+                if (ai != null && (ai.flags & ApplicationInfo.FLAG_SYSTEM) != 0) {
+                    chosen = ri;
+                    break;
+                }
+            }
+            if (chosen == null) chosen = firstOther;
+
+            if (chosen != null) {
+                install.setComponent(new ComponentName(
+                        chosen.activityInfo.packageName,
+                        chosen.activityInfo.name
+                ));
+            }
+
+            startActivity(install);
+            finish();
+        } catch (Exception e) {
+            showMessage("APK installer open नहीं हो पाया। Phone Settings में Install unknown apps की permission check करें।");
+        }
+    }
+
+    private String safeFileName(String name) {
+        if (TextUtils.isEmpty(name)) return "package.apk";
+        return name.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
     private boolean isImage(String mime, String ext) {
