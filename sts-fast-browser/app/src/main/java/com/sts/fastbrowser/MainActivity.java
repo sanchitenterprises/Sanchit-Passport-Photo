@@ -4,12 +4,14 @@ import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.app.AlertDialog;
+import android.app.PictureInPictureParams;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ContentUris;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -30,6 +32,7 @@ import android.text.TextUtils;
 import android.text.method.PasswordTransformationMethod;
 import android.util.Size;
 import android.util.LruCache;
+import android.util.Rational;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -104,6 +107,7 @@ public class MainActivity extends android.app.Activity {
     private ImageView slot2HomeIcon;
     private ImageView slot2RefreshIcon;
     private ImageView menuButton;
+    private LinearLayout browserTopBar;
     private FrameLayout webStage;
     private WebView webView1;
     private WebView webView2;
@@ -172,6 +176,7 @@ public class MainActivity extends android.app.Activity {
         root.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         LinearLayout top = new LinearLayout(this);
+        browserTopBar = top;
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(4), dp(3), dp(4), dp(3));
@@ -2025,6 +2030,60 @@ public class MainActivity extends android.app.Activity {
         return true;
     }
 
+    private boolean isCurrentYouTubePage() {
+        if (webView == null) return false;
+        if (activeSlot == 1 && slot1DocumentsHome) return false;
+
+        String url = webView.getUrl();
+        if (TextUtils.isEmpty(url)) return false;
+        try {
+            String host = Uri.parse(url).getHost();
+            if (TextUtils.isEmpty(host)) return false;
+            host = host.toLowerCase(Locale.ROOT);
+            return "youtube.com".equals(host) ||
+                    host.endsWith(".youtube.com") ||
+                    "youtu.be".equals(host) ||
+                    host.endsWith(".youtu.be");
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void enterYouTubePictureInPicture() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !isCurrentYouTubePage()) return;
+        if (isInPictureInPictureMode()) return;
+
+        try {
+            PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
+                    .setAspectRatio(new Rational(16, 9));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                builder.setSeamlessResizeEnabled(true);
+            }
+            enterPictureInPictureMode(builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    protected void onUserLeaveHint() {
+        if (isCurrentYouTubePage()) {
+            enterYouTubePictureInPicture();
+        }
+        super.onUserLeaveHint();
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode,
+                                               Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        if (browserTopBar != null) {
+            browserTopBar.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
+        }
+        if (webStage != null) {
+            webStage.requestLayout();
+        }
+    }
+
     private void requestDocumentAccess() {
         runOnUiThread(() -> {
             try {
@@ -2057,6 +2116,9 @@ public class MainActivity extends android.app.Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (browserTopBar != null && !isInPictureInPictureMode()) {
+            browserTopBar.setVisibility(View.VISIBLE);
+        }
         if (documentAccessRequested && slot1DocumentsHome && webView1 != null) {
             documentAccessRequested = false;
             webView1.postDelayed(this::showDocumentsHome, 250);
