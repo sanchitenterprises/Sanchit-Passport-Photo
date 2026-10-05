@@ -37,6 +37,25 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Apply v1.0.61 menu cleanup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("sts-fast-browser/app/src/main/java/com/sts/fastbrowser/MainActivity.java")
+          s = p.read_text(encoding="utf-8")
+          s = s.replace('        pm.getMenu().add("Backup Settings");\n', '')
+          s = s.replace('        pm.getMenu().add("Restore Settings");\n', '')
+          s = s.replace('            if (t.equals("Backup Settings")) {\n                exportSettingsBackup();\n                return true;\n            }\n', '')
+          s = s.replace('            if (t.equals("Restore Settings")) {\n                importSettingsBackup();\n                return true;\n            }\n', '')
+          p.write_text(s, encoding="utf-8")
+          g = Path("sts-fast-browser/app/build.gradle")
+          t = g.read_text(encoding="utf-8")
+          t = t.replace("versionCode 61", "versionCode 62")
+          t = t.replace("versionName '1.0.60'", "versionName '1.0.61'")
+          g.write_text(t, encoding="utf-8")
+          PY
+
       - name: Build unsigned release APK
         run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
 
