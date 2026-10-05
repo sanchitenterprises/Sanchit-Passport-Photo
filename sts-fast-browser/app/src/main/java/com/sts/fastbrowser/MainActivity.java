@@ -1844,7 +1844,9 @@ public class MainActivity extends android.app.Activity {
                         "\n\nSimple • Fast • Two Quick Slots" +
                         "\nLong-Life protection: ON" +
                         "\n" + health +
-                        "\n\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu.")
+                        "\n\nNormal Ad Blocker and Hard Ad Blocker are separate ON/OFF options in the common menu." +
+                        "\n\nCreated by Sanchit Kumar" +
+                        "\n© 2026 STS Fast Browser. All Rights Reserved.")
                 .setPositiveButton("OK", null)
                 .show();
     }
