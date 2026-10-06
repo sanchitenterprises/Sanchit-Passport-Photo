@@ -1181,17 +1181,21 @@ public class MainActivity extends android.app.Activity {
                 "function pick(v){try{v=String(v||'').trim();" +
                 "var m=v.match(/([A-Za-z0-9][^\\\\/:*?\"<>|\\n\\r]{0,170}\\.(?:apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac))/i);" +
                 "return m?m[1].trim():'';}catch(e){return '';}}" +
-                "function anchorFromEvent(e){try{" +
-                "var p=e.composedPath?e.composedPath():[];for(var i=0;i<p.length;i++){" +
-                "var x=p[i];if(x&&x.tagName&&String(x.tagName).toLowerCase()==='a')return x;}" +
-                "return e.target&&e.target.closest?e.target.closest('a'):null;}catch(z){return null;}}" +
-                "function nearbyName(a){var n=pick(a.getAttribute('download'))||pick(a.getAttribute('aria-label'))||pick(a.getAttribute('title'))||pick(a.textContent);" +
-                "var x=a,c=0;while(!n&&x&&c<4){x=x.parentElement;c++;if(x)n=pick(x.textContent);}return n;}" +
-                "document.addEventListener('click',function(e){try{" +
-                "var a=anchorFromEvent(e);if(!a)return;var h=a.href||'';var n=nearbyName(a);" +
-                "if(!n||!window.STSDownload)return;" +
-                "if(STSDownload.remember)STSDownload.remember(h,n);" +
-                "var low=n.toLowerCase();" +
+                "function fromNode(x){try{if(!x)return '';var n='';" +
+                "if(x.getAttribute){n=pick(x.getAttribute('download'))||pick(x.getAttribute('aria-label'))||pick(x.getAttribute('title'))||pick(x.getAttribute('data-testid'));}" +
+                "if(!n)n=pick(x.innerText||x.textContent||'');return n;}catch(e){return '';}}" +
+                "function scan(e){try{var p=e.composedPath?e.composedPath():[];" +
+                "for(var i=0;i<p.length;i++){var n=fromNode(p[i]);if(n)return n;}" +
+                "var x=e.target,c=0;while(x&&c<10){var z=fromNode(x);if(z)return z;x=x.parentElement;c++;}" +
+                "return '';}catch(e2){return '';}}" +
+                "function hrefOf(e){try{var p=e.composedPath?e.composedPath():[];" +
+                "for(var i=0;i<p.length;i++){var x=p[i];if(x&&x.href)return String(x.href||'');}" +
+                "var a=e.target&&e.target.closest?e.target.closest('[href]'):null;return a&&a.href?String(a.href):'';}catch(z){return '';}}" +
+                "function remember(e){try{var n=scan(e);if(!n)return '';window.__stsLastDownloadName=n;window.__stsLastDownloadAt=Date.now();" +
+                "var h=hrefOf(e);if(window.STSDownload&&STSDownload.remember)STSDownload.remember(h,n);return n;}catch(x){return '';}}" +
+                "['pointerdown','touchstart','mousedown'].forEach(function(t){document.addEventListener(t,function(e){remember(e);},true);});" +
+                "document.addEventListener('click',function(e){try{var n=remember(e);if(!n||!window.STSDownload)return;" +
+                "var h=hrefOf(e),low=n.toLowerCase();" +
                 "if((low.endsWith('.apk')||low.endsWith('.zip'))&&/^https?:/i.test(h)&&STSDownload.download){" +
                 "e.preventDefault();e.stopImmediatePropagation();STSDownload.download(h,n);}" +
                 "}catch(x){}},true);" +
@@ -1226,6 +1230,38 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private void handleBrowserDownload(String url, String userAgent, String contentDisposition,
+                                       String mimeType, WebView sourceView) {
+        if (sourceView == null) {
+            enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, null);
+            return;
+        }
+
+        try {
+            sourceView.evaluateJavascript(
+                    "(function(){try{var t=Date.now()-(window.__stsLastDownloadAt||0);" +
+                            "return t<60000?(window.__stsLastDownloadName||''):'';}catch(e){return '';}})()",
+                    value -> {
+                        try {
+                            String name = "";
+                            if (!TextUtils.isEmpty(value) && !"null".equals(value)) {
+                                JSONArray arr = new JSONArray("[" + value + "]");
+                                name = sanitizeDownloadName(arr.optString(0, ""));
+                            }
+                            if (!TextUtils.isEmpty(name) && name.indexOf('.') > 0) {
+                                synchronized (downloadHints) {
+                                    downloadHints.put(sourceView,
+                                            new DownloadHint(url, name, System.currentTimeMillis()));
+                                }
+                            }
+                        } catch (Exception ignored) {}
+                        enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, sourceView);
+                    });
+        } catch (Exception e) {
+            enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, sourceView);
+        }
+    }
+
     private String sanitizeDownloadName(String value) {
         if (TextUtils.isEmpty(value)) return "";
         String name = value.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
@@ -1238,7 +1274,7 @@ public class MainActivity extends android.app.Activity {
         synchronized (downloadHints) {
             DownloadHint hint = downloadHints.get(sourceView);
             if (hint == null) return null;
-            if (System.currentTimeMillis() - hint.timeMs > 15000L) {
+            if (System.currentTimeMillis() - hint.timeMs > 60000L) {
                 downloadHints.remove(sourceView);
                 return null;
             }
