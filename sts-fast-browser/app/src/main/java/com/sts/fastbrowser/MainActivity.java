@@ -2441,13 +2441,13 @@ public class MainActivity extends android.app.Activity {
             popup.dismiss();
             setAdBlockEnabled(!adBlockEnabled, true);
         });
-        addMainMenuAction(box, "Download", () -> {
-            popup.dismiss();
-            openDownloadsFolder();
-        });
         addMainMenuAction(box, hardAdLabel, () -> {
             popup.dismiss();
             setHardAdBlockEnabled(!hardAdBlockEnabled, true);
+        });
+        addMainMenuAction(box, "Download", () -> {
+            popup.dismiss();
+            openDownloadsFolder();
         });
         addMainMenuAction(box, "Add Website", () -> {
             popup.dismiss();
