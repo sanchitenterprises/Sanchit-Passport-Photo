@@ -116,6 +116,11 @@ public class MainActivity extends android.app.Activity {
     private AlertDialog manageSitesDialog;
     private LinearLayout browserTopBar;
     private FrameLayout webStage;
+    private FrameLayout loadingOverlay;
+    private ImageView loadingLogo;
+    private android.animation.AnimatorSet loadingLogoAnimator;
+    private boolean webView1Loading = false;
+    private boolean webView2Loading = false;
     private WebView webView1;
     private WebView webView2;
     private final java.util.WeakHashMap<WebView, Float> browserPageZoom = new java.util.WeakHashMap<>();
@@ -263,6 +268,26 @@ public class MainActivity extends android.app.Activity {
         webStage.addView(webView2, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ));
+
+        loadingOverlay = new FrameLayout(this);
+        loadingOverlay.setBackgroundColor(Color.argb(235, 255, 255, 255));
+        loadingOverlay.setClickable(true);
+        loadingOverlay.setFocusable(false);
+        loadingOverlay.setVisibility(View.GONE);
+        loadingOverlay.setAlpha(0f);
+
+        loadingLogo = new ImageView(this);
+        loadingLogo.setImageResource(R.drawable.sfb_app_icon_v2);
+        loadingLogo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        loadingLogo.setContentDescription("Loading");
+        FrameLayout.LayoutParams loadingLogoLp = new FrameLayout.LayoutParams(dp(92), dp(92));
+        loadingLogoLp.gravity = Gravity.CENTER;
+        loadingOverlay.addView(loadingLogo, loadingLogoLp);
+
+        webStage.addView(loadingOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
         webView2.setVisibility(View.GONE);
         webView = webView1;
         root.addView(webStage, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -527,6 +552,12 @@ public class MainActivity extends android.app.Activity {
 
         targetWebView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                super.onProgressChanged(view, newProgress);
+                setBrowserLoading(view, newProgress < 100);
+            }
+
+            @Override
             public void onGeolocationPermissionsShowPrompt(String origin, GeolocationPermissions.Callback callback) {
                 if (hasLocationPermission()) {
                     callback.invoke(origin, true, false);
@@ -707,6 +738,9 @@ public class MainActivity extends android.app.Activity {
                         view == webView2 && retryOriginalHttpAfterHttpsFailure(view, request.getUrl().toString())) {
                     return;
                 }
+                if (request == null || request.isForMainFrame()) {
+                    setBrowserLoading(view, false);
+                }
                 super.onReceivedError(view, request, error);
             }
 
@@ -716,6 +750,9 @@ public class MainActivity extends android.app.Activity {
                         errorResponse != null && errorResponse.getStatusCode() >= 400 &&
                         retryOriginalHttpAfterHttpsFailure(view, request.getUrl().toString())) {
                     return;
+                }
+                if (request == null || request.isForMainFrame()) {
+                    setBrowserLoading(view, false);
                 }
                 super.onReceivedHttpError(view, request, errorResponse);
             }
@@ -1295,12 +1332,86 @@ public class MainActivity extends android.app.Activity {
         return slot == 2 ? webView2 : webView1;
     }
 
+    private void setBrowserLoading(WebView view, boolean loading) {
+        if (view == webView1) {
+            webView1Loading = loading;
+        } else if (view == webView2) {
+            webView2Loading = loading;
+        } else {
+            return;
+        }
+        if (view == webView) updateLoadingOverlayForActiveSlot();
+    }
+
+    private void updateLoadingOverlayForActiveSlot() {
+        if (loadingOverlay == null || loadingLogo == null) return;
+        boolean loading = activeSlot == 2 ? webView2Loading : webView1Loading;
+
+        loadingOverlay.animate().cancel();
+        if (loading) {
+            if (loadingOverlay.getVisibility() != View.VISIBLE) {
+                loadingOverlay.setAlpha(0f);
+                loadingOverlay.setVisibility(View.VISIBLE);
+            }
+            startLoadingLogoAnimation();
+            loadingOverlay.animate().alpha(1f).setDuration(120).start();
+        } else {
+            stopLoadingLogoAnimation();
+            if (loadingOverlay.getVisibility() == View.VISIBLE) {
+                loadingOverlay.animate().alpha(0f).setDuration(150).withEndAction(() -> {
+                    if (loadingOverlay != null && !(activeSlot == 2 ? webView2Loading : webView1Loading)) {
+                        loadingOverlay.setVisibility(View.GONE);
+                    }
+                }).start();
+            }
+        }
+    }
+
+    private void startLoadingLogoAnimation() {
+        if (loadingLogo == null) return;
+        if (loadingLogoAnimator != null && loadingLogoAnimator.isRunning()) return;
+
+        loadingLogo.setScaleX(0.86f);
+        loadingLogo.setScaleY(0.86f);
+        loadingLogo.setAlpha(0.62f);
+
+        android.animation.ObjectAnimator sx = android.animation.ObjectAnimator.ofFloat(loadingLogo, View.SCALE_X, 0.86f, 1.08f);
+        android.animation.ObjectAnimator sy = android.animation.ObjectAnimator.ofFloat(loadingLogo, View.SCALE_Y, 0.86f, 1.08f);
+        android.animation.ObjectAnimator alpha = android.animation.ObjectAnimator.ofFloat(loadingLogo, View.ALPHA, 0.62f, 1f);
+        sx.setDuration(620);
+        sy.setDuration(620);
+        alpha.setDuration(620);
+        sx.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        sy.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        alpha.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+        sx.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        sy.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+        alpha.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+
+        loadingLogoAnimator = new android.animation.AnimatorSet();
+        loadingLogoAnimator.playTogether(sx, sy, alpha);
+        loadingLogoAnimator.start();
+    }
+
+    private void stopLoadingLogoAnimation() {
+        if (loadingLogoAnimator != null) {
+            loadingLogoAnimator.cancel();
+            loadingLogoAnimator = null;
+        }
+        if (loadingLogo != null) {
+            loadingLogo.setScaleX(1f);
+            loadingLogo.setScaleY(1f);
+            loadingLogo.setAlpha(1f);
+        }
+    }
+
     private void showWebView(int slot) {
         activeSlot = slot == 2 ? 2 : 1;
         webView = webViewForSlot(activeSlot);
         if (webView1 != null) webView1.setVisibility(activeSlot == 1 ? View.VISIBLE : View.GONE);
         if (webView2 != null) webView2.setVisibility(activeSlot == 2 ? View.VISIBLE : View.GONE);
         updateSlotLabels();
+        updateLoadingOverlayForActiveSlot();
         updatePictureInPictureParams();
     }
 
@@ -3749,6 +3860,8 @@ public class MainActivity extends android.app.Activity {
 
     @Override
     protected void onDestroy() {
+        stopLoadingLogoAnimation();
+        if (loadingOverlay != null) loadingOverlay.animate().cancel();
         destroyWebView(webView1);
         destroyWebView(webView2);
         webView1 = null;
