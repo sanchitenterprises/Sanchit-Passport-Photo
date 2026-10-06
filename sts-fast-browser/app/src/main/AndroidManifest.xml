@@ -61,6 +61,12 @@
             android:configChanges="orientation|screenSize|smallestScreenSize|keyboardHidden" />
 
         <activity
+            android:name=".DownloadsActivity"
+            android:exported="false"
+            android:screenOrientation="unspecified"
+            android:resizeableActivity="true" />
+
+        <activity
             android:name=".IntentRouterActivity"
             android:exported="true"
             android:launchMode="singleTop"
