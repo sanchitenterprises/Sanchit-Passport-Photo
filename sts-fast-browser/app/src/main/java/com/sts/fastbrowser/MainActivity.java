@@ -1181,11 +1181,19 @@ public class MainActivity extends android.app.Activity {
                 "function pick(v){try{v=String(v||'').trim();" +
                 "var m=v.match(/([A-Za-z0-9][^\\\\/:*?\"<>|\\n\\r]{0,170}\\.(?:apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac))/i);" +
                 "return m?m[1].trim():'';}catch(e){return '';}}" +
+                "function anchorFromEvent(e){try{" +
+                "var p=e.composedPath?e.composedPath():[];for(var i=0;i<p.length;i++){" +
+                "var x=p[i];if(x&&x.tagName&&String(x.tagName).toLowerCase()==='a')return x;}" +
+                "return e.target&&e.target.closest?e.target.closest('a'):null;}catch(z){return null;}}" +
+                "function nearbyName(a){var n=pick(a.getAttribute('download'))||pick(a.getAttribute('aria-label'))||pick(a.getAttribute('title'))||pick(a.textContent);" +
+                "var x=a,c=0;while(!n&&x&&c<4){x=x.parentElement;c++;if(x)n=pick(x.textContent);}return n;}" +
                 "document.addEventListener('click',function(e){try{" +
-                "var a=e.target&&e.target.closest?e.target.closest('a'):null;if(!a)return;" +
-                "var h=a.href||'';" +
-                "var n=pick(a.getAttribute('download'))||pick(a.getAttribute('aria-label'))||pick(a.getAttribute('title'))||pick(a.textContent);" +
-                "if(n&&window.STSDownload&&STSDownload.remember)STSDownload.remember(h,n);" +
+                "var a=anchorFromEvent(e);if(!a)return;var h=a.href||'';var n=nearbyName(a);" +
+                "if(!n||!window.STSDownload)return;" +
+                "if(STSDownload.remember)STSDownload.remember(h,n);" +
+                "var low=n.toLowerCase();" +
+                "if((low.endsWith('.apk')||low.endsWith('.zip'))&&/^https?:/i.test(h)&&STSDownload.download){" +
+                "e.preventDefault();e.stopImmediatePropagation();STSDownload.download(h,n);}" +
                 "}catch(x){}},true);" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
@@ -1205,6 +1213,16 @@ public class MainActivity extends android.app.Activity {
             synchronized (downloadHints) {
                 downloadHints.put(owner, new DownloadHint(href, clean, System.currentTimeMillis()));
             }
+        }
+
+        @JavascriptInterface
+        public void download(String href, String name) {
+            String clean = sanitizeDownloadName(name);
+            if (TextUtils.isEmpty(href) || TextUtils.isEmpty(clean) || clean.indexOf('.') < 0) return;
+            synchronized (downloadHints) {
+                downloadHints.put(owner, new DownloadHint(href, clean, System.currentTimeMillis()));
+            }
+            runOnUiThread(() -> enqueueBrowserDownload(href, null, null, null, owner));
         }
     }
 
