@@ -653,7 +653,7 @@ public class MainActivity extends android.app.Activity {
                     } else if (isOfficeCandidate(url, mt)) {
                         openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
                     } else {
-                        enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, targetWebView);
+                        handleBrowserDownload(url, userAgent, contentDisposition, mimeType, targetWebView);
                     }
                     child.destroy();
                 });
@@ -719,7 +719,7 @@ public class MainActivity extends android.app.Activity {
             } else if (isOfficeCandidate(url, mt)) {
                 openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
             } else {
-                enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, targetWebView);
+                handleBrowserDownload(url, userAgent, contentDisposition, mimeType, targetWebView);
             }
         });
         targetWebView.setWebViewClient(new WebViewClient() {
@@ -1178,27 +1178,26 @@ public class MainActivity extends android.app.Activity {
         String js =
                 "(function(){" +
                 "if(window.__stsDownloadNameHook)return;window.__stsDownloadNameHook=true;" +
-                "function pick(v){try{v=String(v||'').trim();" +
-                "var m=v.match(/([A-Za-z0-9][^\\\\/:*?\"<>|\\n\\r]{0,170}\\.(?:apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac))/i);" +
-                "return m?m[1].trim():'';}catch(e){return '';}}" +
-                "function fromNode(x){try{if(!x)return '';var n='';" +
-                "if(x.getAttribute){n=pick(x.getAttribute('download'))||pick(x.getAttribute('aria-label'))||pick(x.getAttribute('title'))||pick(x.getAttribute('data-testid'));}" +
-                "if(!n)n=pick(x.innerText||x.textContent||'');return n;}catch(e){return '';}}" +
-                "function scan(e){try{var p=e.composedPath?e.composedPath():[];" +
-                "for(var i=0;i<p.length;i++){var n=fromNode(p[i]);if(n)return n;}" +
-                "var x=e.target,c=0;while(x&&c<10){var z=fromNode(x);if(z)return z;x=x.parentElement;c++;}" +
-                "return '';}catch(e2){return '';}}" +
-                "function hrefOf(e){try{var p=e.composedPath?e.composedPath():[];" +
-                "for(var i=0;i<p.length;i++){var x=p[i];if(x&&x.href)return String(x.href||'');}" +
-                "var a=e.target&&e.target.closest?e.target.closest('[href]'):null;return a&&a.href?String(a.href):'';}catch(z){return '';}}" +
-                "function remember(e){try{var n=scan(e);if(!n)return '';window.__stsLastDownloadName=n;window.__stsLastDownloadAt=Date.now();" +
-                "var h=hrefOf(e);if(window.STSDownload&&STSDownload.remember)STSDownload.remember(h,n);return n;}catch(x){return '';}}" +
-                "['pointerdown','touchstart','mousedown'].forEach(function(t){document.addEventListener(t,function(e){remember(e);},true);});" +
-                "document.addEventListener('click',function(e){try{var n=remember(e);if(!n||!window.STSDownload)return;" +
-                "var h=hrefOf(e),low=n.toLowerCase();" +
-                "if((low.endsWith('.apk')||low.endsWith('.zip'))&&/^https?:/i.test(h)&&STSDownload.download){" +
-                "e.preventDefault();e.stopImmediatePropagation();STSDownload.download(h,n);}" +
-                "}catch(x){}},true);" +
+                "function clean(v){return String(v||'').replace(/\\s+/g,' ').trim();}" +
+                "function fileNameFromExactLink(a){try{if(!a)return '';" +
+                "var n=clean(a.getAttribute('download'))||clean(a.getAttribute('aria-label'))||clean(a.getAttribute('title'))||clean(a.textContent);" +
+                "if(!n)return '';" +
+                "var m=n.match(/([A-Za-z0-9][^\\\\/:*?\"<>|\\n\\r]{0,170}\\.(?:apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac))/i);" +
+                "if(m)return m[1].trim();" +
+                "var t=n.toLowerCase();" +
+                "var ext='';if(/\\bapk\\b/.test(t))ext='.apk';else if(/\\bzip\\b/.test(t))ext='.zip';else if(/\\bpdf\\b/.test(t))ext='.pdf';" +
+                "if(!ext)return '';" +
+                "n=n.replace(/\\b(download|डाउनलोड|करें|kare|karen)\\b/ig,' ').replace(/\\b(apk|zip|pdf)\\b/ig,' ').replace(/\\s+/g,' ').trim();" +
+                "if(!n)n='download';return n+ext;}catch(e){return '';}}" +
+                "function exactLink(e){try{" +
+                "var p=e.composedPath?e.composedPath():[];" +
+                "for(var i=0;i<p.length;i++){var x=p[i];if(x&&x.href)return x;}" +
+                "return e.target&&e.target.closest?e.target.closest('[href]'):null;}catch(z){return null;}}" +
+                "function remember(e){try{var a=exactLink(e);if(!a)return;var h=String(a.href||'');if(!/^https?:/i.test(h))return;" +
+                "var n=fileNameFromExactLink(a);window.__stsLastDownloadHref=h;window.__stsLastDownloadName=n;window.__stsLastDownloadAt=Date.now();" +
+                "if(n&&window.STSDownload&&STSDownload.remember)STSDownload.remember(h,n);" +
+                "}catch(x){}}" +
+                "['pointerdown','touchstart','mousedown','click'].forEach(function(t){document.addEventListener(t,remember,true);});" +
                 "})();";
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
@@ -1212,21 +1211,11 @@ public class MainActivity extends android.app.Activity {
 
         @JavascriptInterface
         public void remember(String href, String name) {
-            String clean = sanitizeDownloadName(name);
-            if (TextUtils.isEmpty(clean) || clean.indexOf('.') < 0) return;
+            String clean = normalizeClickedDownloadName(name);
+            if (TextUtils.isEmpty(clean)) return;
             synchronized (downloadHints) {
                 downloadHints.put(owner, new DownloadHint(href, clean, System.currentTimeMillis()));
             }
-        }
-
-        @JavascriptInterface
-        public void download(String href, String name) {
-            String clean = sanitizeDownloadName(name);
-            if (TextUtils.isEmpty(href) || TextUtils.isEmpty(clean) || clean.indexOf('.') < 0) return;
-            synchronized (downloadHints) {
-                downloadHints.put(owner, new DownloadHint(href, clean, System.currentTimeMillis()));
-            }
-            runOnUiThread(() -> enqueueBrowserDownload(href, null, null, null, owner));
         }
     }
 
@@ -1239,19 +1228,25 @@ public class MainActivity extends android.app.Activity {
 
         try {
             sourceView.evaluateJavascript(
-                    "(function(){try{var t=Date.now()-(window.__stsLastDownloadAt||0);" +
-                            "return t<60000?(window.__stsLastDownloadName||''):'';}catch(e){return '';}})()",
+                    "(function(){try{var a=Date.now()-(window.__stsLastDownloadAt||0);" +
+                            "return JSON.stringify({h:a<20000?(window.__stsLastDownloadHref||''):''," +
+                            "n:a<20000?(window.__stsLastDownloadName||''):''});}catch(e){return '{}';}})()",
                     value -> {
                         try {
-                            String name = "";
+                            String raw = "";
                             if (!TextUtils.isEmpty(value) && !"null".equals(value)) {
-                                JSONArray arr = new JSONArray("[" + value + "]");
-                                name = sanitizeDownloadName(arr.optString(0, ""));
+                                JSONArray wrap = new JSONArray("[" + value + "]");
+                                raw = wrap.optString(0, "");
                             }
-                            if (!TextUtils.isEmpty(name) && name.indexOf('.') > 0) {
-                                synchronized (downloadHints) {
-                                    downloadHints.put(sourceView,
-                                            new DownloadHint(url, name, System.currentTimeMillis()));
+                            if (!TextUtils.isEmpty(raw)) {
+                                JSONObject meta = new JSONObject(raw);
+                                String clickedHref = meta.optString("h", "");
+                                String clickedName = normalizeClickedDownloadName(meta.optString("n", ""));
+                                if (!TextUtils.isEmpty(clickedName)) {
+                                    synchronized (downloadHints) {
+                                        downloadHints.put(sourceView,
+                                                new DownloadHint(clickedHref, clickedName, System.currentTimeMillis()));
+                                    }
                                 }
                             }
                         } catch (Exception ignored) {}
@@ -1264,46 +1259,116 @@ public class MainActivity extends android.app.Activity {
 
     private String sanitizeDownloadName(String value) {
         if (TextUtils.isEmpty(value)) return "";
-        String name = value.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+        String name = value.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_")
+                .replaceAll("\\s+", " ").trim();
         if (name.length() > 180) name = name.substring(0, 180).trim();
         return name;
     }
 
-    private String consumeDownloadHint(WebView sourceView, String url) {
-        if (sourceView == null) return null;
+    private String normalizeClickedDownloadName(String value) {
+        String n = sanitizeDownloadName(value);
+        if (TextUtils.isEmpty(n)) return "";
+
+        String lower = n.toLowerCase(Locale.ROOT);
+        if (lower.matches(".*\\.(apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac)$")) {
+            return n;
+        }
+
+        String ext = null;
+        if (lower.matches(".*\\bapk\\b.*")) ext = ".apk";
+        else if (lower.matches(".*\\bzip\\b.*")) ext = ".zip";
+        else if (lower.matches(".*\\bpdf\\b.*")) ext = ".pdf";
+        if (ext == null) return "";
+
+        n = n.replaceAll("(?i)\\b(download|apk|zip|pdf|kare|karen)\\b", " ")
+                .replace("डाउनलोड", " ")
+                .replace("करें", " ")
+                .replaceAll("\\s+", " ").trim();
+        if (TextUtils.isEmpty(n)) n = "download";
+        return sanitizeDownloadName(n + ext);
+    }
+
+    private boolean isGenericDownloadName(String name) {
+        if (TextUtils.isEmpty(name)) return true;
+        String n = name.toLowerCase(Locale.ROOT).trim();
+        return n.equals("content.bin") || n.equals("content") ||
+                n.equals("download") || n.equals("download.bin") ||
+                n.equals("file") || n.equals("file.bin") ||
+                n.equals("unknown") || n.equals("unknown.bin") ||
+                n.equals("blob") || n.equals("blob.bin");
+    }
+
+    private String filenameFromContentDisposition(String contentDisposition, String mimeType) {
+        if (TextUtils.isEmpty(contentDisposition)) return "";
+        try {
+            String guessed = URLUtil.guessFileName("https://download.invalid/file",
+                    contentDisposition, mimeType);
+            guessed = sanitizeDownloadName(guessed);
+            return isGenericDownloadName(guessed) ? "" : guessed;
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String filenameFromUrl(String url) {
+        if (TextUtils.isEmpty(url)) return "";
+        try {
+            String last = Uri.parse(url).getLastPathSegment();
+            if (TextUtils.isEmpty(last)) return "";
+            last = java.net.URLDecoder.decode(last, "UTF-8");
+            last = sanitizeDownloadName(last);
+            if (isGenericDownloadName(last)) return "";
+            if (last.matches("(?i).+\\.[a-z0-9]{1,8}$")) return last;
+        } catch (Exception ignored) {}
+        return "";
+    }
+
+    private String extensionForMime(String mimeType) {
+        if (TextUtils.isEmpty(mimeType)) return "";
+        String m = mimeType.toLowerCase(Locale.ROOT).split(";")[0].trim();
+        if (m.equals("application/vnd.android.package-archive")) return ".apk";
+        if (m.equals("application/zip") || m.equals("application/x-zip-compressed")) return ".zip";
+        if (m.equals("application/pdf")) return ".pdf";
+        if (m.equals("image/jpeg")) return ".jpg";
+        if (m.equals("image/png")) return ".png";
+        if (m.equals("image/webp")) return ".webp";
+        if (m.equals("image/gif")) return ".gif";
+        if (m.equals("video/mp4")) return ".mp4";
+        if (m.equals("audio/mpeg")) return ".mp3";
+        if (m.contains("wordprocessingml")) return ".docx";
+        if (m.contains("spreadsheetml")) return ".xlsx";
+        if (m.contains("presentationml")) return ".pptx";
+        if (m.equals("text/csv")) return ".csv";
+        if (m.equals("text/plain")) return ".txt";
+        return "";
+    }
+
+    private String consumeDownloadHint(WebView sourceView) {
+        if (sourceView == null) return "";
         synchronized (downloadHints) {
             DownloadHint hint = downloadHints.get(sourceView);
-            if (hint == null) return null;
-            if (System.currentTimeMillis() - hint.timeMs > 60000L) {
+            if (hint == null) return "";
+            if (System.currentTimeMillis() - hint.timeMs > 20000L) {
                 downloadHints.remove(sourceView);
-                return null;
+                return "";
             }
-
-            // The browser may redirect the clicked URL to a signed CDN URL.
-            // A very recent hint from this same WebView is therefore valid even if the URL changed.
             downloadHints.remove(sourceView);
-            return sanitizeDownloadName(hint.name);
+            return normalizeClickedDownloadName(hint.name);
         }
     }
 
     private String safeDownloadFileName(String url, String contentDisposition, String mimeType, WebView sourceView) {
-        String hinted = consumeDownloadHint(sourceView, url);
-        if (!TextUtils.isEmpty(hinted) && hinted.contains(".")) return hinted;
+        String fromHeader = filenameFromContentDisposition(contentDisposition, mimeType);
+        if (!TextUtils.isEmpty(fromHeader)) return fromHeader;
 
-        String guessed = null;
-        try {
-            guessed = URLUtil.guessFileName(url, contentDisposition, mimeType);
-        } catch (Exception ignored) {}
+        String clicked = consumeDownloadHint(sourceView);
+        if (!TextUtils.isEmpty(clicked)) return clicked;
 
-        guessed = sanitizeDownloadName(guessed);
-        if (TextUtils.isEmpty(guessed)) guessed = "download";
+        String fromUrl = filenameFromUrl(url);
+        if (!TextUtils.isEmpty(fromUrl)) return fromUrl;
 
-        String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
-        if ((mt.contains("android.package-archive") || mt.contains("application/vnd.android.package-archive")) &&
-                !guessed.toLowerCase(Locale.ROOT).endsWith(".apk")) {
-            guessed += ".apk";
-        }
-        return guessed;
+        String ext = extensionForMime(mimeType);
+        return "download-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) + ext;
     }
 
     private String correctedDownloadMime(String fileName, String mimeType) {
@@ -1314,6 +1379,7 @@ public class MainActivity extends android.app.Activity {
         if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
         if (n.endsWith(".png")) return "image/png";
         if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".gif")) return "image/gif";
         if (n.endsWith(".mp4")) return "video/mp4";
         if (n.endsWith(".mp3")) return "audio/mpeg";
         if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
