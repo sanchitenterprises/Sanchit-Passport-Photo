@@ -15,11 +15,14 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Canvas;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
+import android.graphics.pdf.PdfDocument;
 import android.database.Cursor;
 import android.net.Uri;
 import android.webkit.URLUtil;
@@ -139,6 +142,7 @@ public class MainActivity extends android.app.Activity {
     private WebView webView1;
     private WebView webView2;
     private final java.util.WeakHashMap<WebView, Float> browserPageZoom = new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<WebView, float[]> browserLastTouch = new java.util.WeakHashMap<>();
     // Active-slot alias. D1 and D2 themselves stay alive independently.
     private WebView webView;
     private String pendingGeoOrigin;
@@ -488,6 +492,7 @@ public class MainActivity extends android.app.Activity {
             if (action == MotionEvent.ACTION_DOWN) {
                 customGesture[0] = false;
                 multiTouch[0] = false;
+                browserLastTouch.put(targetWebView, new float[]{event.getX(), event.getY()});
                 captureDownloadHintAtPoint(targetWebView, event.getX(), event.getY());
             }
 
@@ -542,6 +547,314 @@ public class MainActivity extends android.app.Activity {
         try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
 
+    private void installImageLongPressDownload(WebView targetWebView) {
+        targetWebView.setOnLongClickListener(v -> {
+            WebView.HitTestResult hit = targetWebView.getHitTestResult();
+            int type = hit == null ? WebView.HitTestResult.UNKNOWN_TYPE : hit.getType();
+            boolean imageHit = type == WebView.HitTestResult.IMAGE_TYPE ||
+                    type == WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE;
+            if (!imageHit) return false;
+
+            float[] point = browserLastTouch.get(targetWebView);
+            float x = point == null ? targetWebView.getWidth() / 2f : point[0];
+            float y = point == null ? targetWebView.getHeight() / 2f : point[1];
+            String fallbackUrl = hit == null ? "" : hit.getExtra();
+            resolveLongPressedImage(targetWebView, x, y, fallbackUrl);
+            return true;
+        });
+    }
+
+    private void resolveLongPressedImage(WebView view, float rawX, float rawY, String fallbackUrl) {
+        if (view == null) return;
+        String x = String.format(Locale.US, "%.2f", rawX);
+        String y = String.format(Locale.US, "%.2f", rawY);
+        String js =
+                "(function(){try{" +
+                "var d=(window.devicePixelRatio||1),x=" + x + "/d,y=" + y + "/d;" +
+                "var e=document.elementFromPoint(x,y),img=e;" +
+                "if(img&&img.tagName&&String(img.tagName).toLowerCase()!=='img'){" +
+                "img=img.closest?img.closest('img'):null;}" +
+                "if(!img){var p=e,c=0;while(p&&c<5&&!img){if(p.querySelector)img=p.querySelector('img');p=p.parentElement;c++;}}" +
+                "if(!img)return JSON.stringify({urls:[],name:''});" +
+                "var urls=[],seen={};function add(u){try{u=String(u||'').trim();if(!u||u.indexOf('data:')===0)return;" +
+                "if(u.indexOf('//')===0)u=location.protocol+u;else if(u.indexOf('/')===0)u=new URL(u,location.href).href;" +
+                "if(!seen[u]){seen[u]=1;urls.push(u);}}catch(z){}}" +
+                "function attr(node,k){try{return node&&node.getAttribute?node.getAttribute(k):'';}catch(z){return '';}}" +
+                "var p=img,c=0;while(p&&c<8){" +
+                "['data-iurl','data-original','data-original-src','data-full','data-full-src','data-highres','data-hi-res','data-src','data-image','data-url'].forEach(function(k){add(attr(p,k));});" +
+                "var h=attr(p,'href')||(p.href||'');if(h){try{var hu=new URL(h,location.href);" +
+                "['imgurl','media','image_url','image','src','url'].forEach(function(k){var q=hu.searchParams.get(k);if(q)add(q);});" +
+                "if(/\\.(jpg|jpeg|png|webp|gif|bmp|avif|heic|heif)(?:$|[?#])/i.test(hu.href))add(hu.href);}catch(z){}}" +
+                "p=p.parentElement;c++;}" +
+                "var ss=attr(img,'srcset');if(ss){var best='';var score=-1;ss.split(',').forEach(function(part){" +
+                "var s=part.trim().split(/\\s+/),u=s[0],q=s[1]||'1x',v=parseFloat(q)||1;" +
+                "if(/w$/i.test(q))v*=1000;else if(/x$/i.test(q))v*=100;if(v>score){score=v;best=u;}});add(best);}" +
+                "add(img.currentSrc);add(attr(img,'src'));add(img.src);" +
+                "var name=attr(img,'alt')||attr(img,'title')||'';" +
+                "return JSON.stringify({urls:urls,name:String(name||'').trim()});" +
+                "}catch(e){return JSON.stringify({urls:[],name:''});}})()";
+
+        try {
+            view.evaluateJavascript(js, value -> {
+                ArrayList<String> urls = new ArrayList<>();
+                String label = "";
+                try {
+                    if (!TextUtils.isEmpty(value) && !"null".equals(value)) {
+                        JSONArray wrap = new JSONArray("[" + value + "]");
+                        String raw = wrap.optString(0, "");
+                        JSONObject obj = new JSONObject(raw);
+                        JSONArray arr = obj.optJSONArray("urls");
+                        if (arr != null) {
+                            for (int i = 0; i < arr.length(); i++) {
+                                String u = arr.optString(i, "");
+                                if (!TextUtils.isEmpty(u) && !urls.contains(u)) urls.add(u);
+                            }
+                        }
+                        label = obj.optString("name", "");
+                    }
+                } catch (Exception ignored) {}
+
+                if (!TextUtils.isEmpty(fallbackUrl) && !urls.contains(fallbackUrl)) {
+                    urls.add(fallbackUrl);
+                }
+                if (urls.isEmpty()) {
+                    Toast.makeText(this, "Original image link नहीं मिला", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                showImageLongPressMenu(view, urls, label);
+            });
+        } catch (Exception e) {
+            if (!TextUtils.isEmpty(fallbackUrl)) {
+                ArrayList<String> urls = new ArrayList<>();
+                urls.add(fallbackUrl);
+                showImageLongPressMenu(view, urls, "");
+            }
+        }
+    }
+
+    private void showImageLongPressMenu(WebView sourceView, List<String> urls, String label) {
+        if (isFinishing() || urls == null || urls.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle(TextUtils.isEmpty(label) ? "Image" : label)
+                .setItems(new String[]{"Download"}, (dialog, which) ->
+                        showImageFormatMenu(sourceView, urls, label))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showImageFormatMenu(WebView sourceView, List<String> urls, String label) {
+        new AlertDialog.Builder(this)
+                .setTitle("Download image")
+                .setItems(new String[]{"JPG", "PNG", "PDF"}, (dialog, which) -> {
+                    String format = which == 0 ? "JPG" : (which == 1 ? "PNG" : "PDF");
+                    downloadOriginalImage(sourceView, urls, label, format);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private File fetchOriginalImageCandidate(String url, String userAgent, String cookie,
+                                             String referer, DownloadResolvedMeta meta) throws Exception {
+        File file = downloadToTemporaryFile(url, userAgent, cookie, referer, meta);
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            file.delete();
+            throw new Exception("Not a decodable image");
+        }
+        return file;
+    }
+
+    private String imageBaseName(String headerName, String urlName, String label) {
+        String name = sanitizeDownloadName(headerName);
+        if (TextUtils.isEmpty(name) || isGenericDownloadName(name)) name = sanitizeDownloadName(urlName);
+        if (TextUtils.isEmpty(name) || isGenericDownloadName(name)) name = sanitizeDownloadName(label);
+        if (TextUtils.isEmpty(name)) {
+            name = "image-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
+        }
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) name = name.substring(0, dot);
+        name = name.replaceAll("(?i)\\b(download|image|photo|jpg|jpeg|png|pdf)\\b$", "").trim();
+        if (TextUtils.isEmpty(name)) name = "image-" +
+                new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date());
+        return sanitizeDownloadName(name);
+    }
+
+    private void downloadOriginalImage(WebView sourceView, List<String> candidates,
+                                       String label, String format) {
+        if (candidates == null || candidates.isEmpty()) return;
+
+        String ua = null;
+        String referer = null;
+        try {
+            ua = sourceView == null ? null : sourceView.getSettings().getUserAgentString();
+            referer = sourceView == null ? null : sourceView.getUrl();
+        } catch (Exception ignored) {}
+        final String finalUa = ua;
+        final String finalReferer = referer;
+
+        Toast.makeText(this, "Original image download शुरू...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            File source = null;
+            File generated = null;
+            try {
+                DownloadResolvedMeta meta = null;
+                String usedUrl = null;
+
+                for (String candidate : candidates) {
+                    if (TextUtils.isEmpty(candidate) ||
+                            !(candidate.startsWith("http://") || candidate.startsWith("https://"))) continue;
+                    String cookie = null;
+                    try { cookie = CookieManager.getInstance().getCookie(candidate); } catch (Exception ignored) {}
+                    try {
+                        DownloadResolvedMeta attemptMeta = new DownloadResolvedMeta();
+                        source = fetchOriginalImageCandidate(candidate, finalUa, cookie, finalReferer, attemptMeta);
+                        meta = attemptMeta;
+                        usedUrl = candidate;
+                        break;
+                    } catch (Exception ignored) {
+                        if (source != null) source.delete();
+                        source = null;
+                    }
+                }
+
+                if (source == null || meta == null) throw new Exception("Original image unavailable");
+
+                String actualExt = detectActualExtension(source, meta.contentType);
+                String urlName = filenameFromUrl(meta.finalUrl);
+                if (TextUtils.isEmpty(urlName)) urlName = filenameFromUrl(usedUrl);
+                String base = imageBaseName(meta.headerName, urlName, label);
+
+                String outExt = "JPG".equals(format) ? ".jpg" : ("PNG".equals(format) ? ".png" : ".pdf");
+                String outMime = "JPG".equals(format) ? "image/jpeg" :
+                        ("PNG".equals(format) ? "image/png" : "application/pdf");
+                String outName = base + outExt;
+
+                // If source already matches the requested raster format, copy original bytes unchanged.
+                if (("JPG".equals(format) && (".jpg".equalsIgnoreCase(actualExt) || ".jpeg".equalsIgnoreCase(actualExt))) ||
+                        ("PNG".equals(format) && ".png".equalsIgnoreCase(actualExt))) {
+                    generated = source;
+                    source = null;
+                } else {
+                    Bitmap bitmap = BitmapFactory.decodeFile(source.getAbsolutePath());
+                    if (bitmap == null) throw new Exception("Image decode failed");
+
+                    generated = File.createTempFile("sfb-image-", outExt, getCacheDir());
+                    if ("JPG".equals(format)) {
+                        Bitmap jpgBitmap = bitmap;
+                        if (bitmap.hasAlpha()) {
+                            jpgBitmap = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+                            Canvas canvas = new Canvas(jpgBitmap);
+                            canvas.drawColor(Color.WHITE);
+                            canvas.drawBitmap(bitmap, 0f, 0f, null);
+                        }
+                        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(generated))) {
+                            if (!jpgBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
+                                throw new Exception("JPEG encode failed");
+                            }
+                            out.flush();
+                        }
+                        if (jpgBitmap != bitmap) jpgBitmap.recycle();
+                    } else if ("PNG".equals(format)) {
+                        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(generated))) {
+                            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                                throw new Exception("PNG encode failed");
+                            }
+                            out.flush();
+                        }
+                    } else {
+                        PdfDocument pdf = new PdfDocument();
+                        PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(
+                                Math.max(1, bitmap.getWidth()), Math.max(1, bitmap.getHeight()), 1).create();
+                        PdfDocument.Page page = pdf.startPage(pageInfo);
+                        page.getCanvas().drawBitmap(bitmap, 0f, 0f, null);
+                        pdf.finishPage(page);
+                        try (OutputStream out = new BufferedOutputStream(new FileOutputStream(generated))) {
+                            pdf.writeTo(out);
+                            out.flush();
+                        } finally {
+                            pdf.close();
+                        }
+                    }
+                    bitmap.recycle();
+                }
+
+                saveGeneratedDownloadFile(generated, outName, outMime);
+                final String doneName = outName;
+                runOnUiThread(() -> Toast.makeText(
+                        this, "Downloaded: " + doneName, Toast.LENGTH_LONG).show());
+            } catch (OutOfMemoryError oom) {
+                runOnUiThread(() -> Toast.makeText(
+                        this, "Image बहुत बड़ी है • full-resolution conversion के लिए memory कम है",
+                        Toast.LENGTH_LONG).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(
+                        this, "Original image download नहीं हुआ", Toast.LENGTH_LONG).show());
+            } finally {
+                if (source != null) source.delete();
+                if (generated != null) generated.delete();
+            }
+        }, "SFB-OriginalImage").start();
+    }
+
+    private Uri saveGeneratedDownloadFile(File source, String fileName, String mimeType) throws Exception {
+        if (source == null || !source.exists()) throw new Exception("Generated file missing");
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new Exception("Downloads insert failed");
+
+            boolean ok = false;
+            try (InputStream in = new BufferedInputStream(new FileInputStream(source));
+                 OutputStream out = new BufferedOutputStream(getContentResolver().openOutputStream(uri, "w"))) {
+                if (out == null) throw new Exception("Downloads output unavailable");
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                out.flush();
+                ok = true;
+            } finally {
+                if (!ok) {
+                    try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
+                }
+            }
+            android.content.ContentValues ready = new android.content.ContentValues();
+            ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, ready, null, null);
+            return uri;
+        }
+
+        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (!dir.exists() && !dir.mkdirs()) throw new Exception("Downloads folder unavailable");
+        File target = new File(dir, fileName);
+        if (target.exists()) {
+            String ext = fileExtension(fileName);
+            String base = fileName.substring(0, fileName.length() - ext.length());
+            int i = 1;
+            do {
+                target = new File(dir, base + " (" + i++ + ")" + ext);
+            } while (target.exists());
+        }
+        try (InputStream in = new BufferedInputStream(new FileInputStream(source));
+             OutputStream out = new BufferedOutputStream(new FileOutputStream(target))) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+            out.flush();
+        }
+        Intent scan = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
+        scan.setData(Uri.fromFile(target));
+        sendBroadcast(scan);
+        return Uri.fromFile(target);
+    }
+
     private void configureWebView(WebView targetWebView) {
         WebSettings s = targetWebView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -561,6 +874,7 @@ public class MainActivity extends android.app.Activity {
         CookieManager.getInstance().setAcceptThirdPartyCookies(targetWebView, true);
 
         installReliablePinchZoomOut(targetWebView);
+        installImageLongPressDownload(targetWebView);
 
         targetWebView.addJavascriptInterface(new PdfBridge(), "STSPdf");
         targetWebView.addJavascriptInterface(new RdBridge(), "STSRD");
