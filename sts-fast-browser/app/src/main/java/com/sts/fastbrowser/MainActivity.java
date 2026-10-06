@@ -1778,6 +1778,22 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private void openDownloadsFolder() {
+        try {
+            Intent intent = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+            startActivity(intent);
+        } catch (Exception first) {
+            try {
+                Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                fallback.addCategory(Intent.CATEGORY_OPENABLE);
+                fallback.setType("*/*");
+                startActivity(fallback);
+            } catch (Exception second) {
+                Toast.makeText(this, "Downloads नहीं खुल पाया", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
     private void showMainMenu(View anchor) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -1794,6 +1810,7 @@ public class MainActivity extends android.app.Activity {
         int popupWidth = measureMainMenuWidth(
                 "Ad Blocker: ON",
                 "Ad Blocker: OFF",
+                "Download",
                 "Hard Ad Blocker: ON",
                 "Hard Ad Blocker: OFF",
                 "Add Website",
@@ -1846,6 +1863,10 @@ public class MainActivity extends android.app.Activity {
         addMainMenuAction(box, adLabel, () -> {
             popup.dismiss();
             setAdBlockEnabled(!adBlockEnabled, true);
+        });
+        addMainMenuAction(box, "Download", () -> {
+            popup.dismiss();
+            openDownloadsFolder();
         });
         addMainMenuAction(box, hardAdLabel, () -> {
             popup.dismiss();
