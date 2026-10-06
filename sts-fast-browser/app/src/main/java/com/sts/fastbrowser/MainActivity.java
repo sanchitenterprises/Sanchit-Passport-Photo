@@ -2963,6 +2963,14 @@ public class MainActivity extends android.app.Activity {
         pm.getMenu().add("Open Website");
         pm.getMenu().add("Edit");
         pm.getMenu().add(site.hasPassword() ? "Change Password" : "Set Password");
+
+        List<Site> currentSites = getSites(slot);
+        int currentIndex = currentSites.indexOf(site);
+        android.view.MenuItem moveUp = pm.getMenu().add("Move Up");
+        android.view.MenuItem moveDown = pm.getMenu().add("Move Down");
+        moveUp.setEnabled(currentIndex > 1);
+        moveDown.setEnabled(currentIndex >= 1 && currentIndex < currentSites.size() - 1);
+
         pm.getMenu().add(slot == 1 ? "Move to D2" : "Move to D1");
         pm.getMenu().add("Remove Website");
         pm.setOnMenuItemClickListener(item -> {
@@ -2983,6 +2991,14 @@ public class MainActivity extends android.app.Activity {
             }
             if (t.equals("Set Password") || t.equals("Change Password")) {
                 showSetSitePasswordDialog(site, slot);
+                return true;
+            }
+            if (t.equals("Move Up")) {
+                reorderSite(site, slot, -1);
+                return true;
+            }
+            if (t.equals("Move Down")) {
+                reorderSite(site, slot, 1);
                 return true;
             }
             if (t.startsWith("Move to D")) {
@@ -3106,6 +3122,21 @@ public class MainActivity extends android.app.Activity {
             Toast.makeText(this, "Password saved", Toast.LENGTH_SHORT).show();
         }));
         dialog.show();
+    }
+
+    private void reorderSite(Site site, int slot, int direction) {
+        List<Site> sites = getSites(slot);
+        int fromIndex = sites.indexOf(site);
+        if (fromIndex < 1) return;
+
+        int toIndex = fromIndex + direction;
+        if (toIndex < 1 || toIndex >= sites.size()) return;
+
+        java.util.Collections.swap(sites, fromIndex, toIndex);
+        saveSites(slot);
+
+        // Refresh Manage Websites immediately so the saved order is visible.
+        showManageSitesDialog();
     }
 
     private void moveSite(Site site, int fromSlot) {
