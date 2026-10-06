@@ -20,6 +20,9 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true">
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true"/>
         <activity
             android:name=".MainActivity"
             android:screenOrientation="portrait"
