@@ -4444,7 +4444,7 @@ public class MainActivity extends android.app.Activity {
                 "document.getElementById('sortSub').classList.remove('show');document.getElementById('docMenu').classList.remove('show');applyFilter();}" +
                 "document.addEventListener('click',function(e){var m=document.getElementById('docMenu'),b=document.getElementById('menuButton');if(m&&b&&!m.contains(e.target)&&e.target!==b){m.classList.remove('show');document.getElementById('sortSub').classList.remove('show');}" +
                 "var mm=document.getElementById('modeMenu'),mb=document.getElementById('modeButton');if(mm&&mb&&!mm.contains(e.target)&&e.target!==mb)mm.classList.remove('show');});" +
-                "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');if(allDataMode){switchMajorCategory(v);return;}applyFilter();}" +
+                "function setCat(v,b){cat=v;document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active')});b.classList.add('active');if(allDataMode){STSDocuments.selectMode(v);return;}applyFilter();}" +
                 "function applyFilter(){var q=(document.getElementById('q').value||'').toLowerCase();var n=0;" +
                 "document.querySelectorAll('.doc-item').forEach(function(x){var ok=(cat==='All'||x.dataset.cat===cat)&&(!q||x.dataset.name.indexOf(q)>=0);x.classList.toggle('hide',!ok);if(ok)n++;});" +
                 "document.getElementById('shownCount').textContent=(allDataMode&&majorCat&&!q?totalCount:n);document.querySelectorAll('.date-group').forEach(function(g){var x=g.nextElementSibling;var any=false;" +
@@ -4805,11 +4805,6 @@ public class MainActivity extends android.app.Activity {
             for (DocumentEntry item : snapshot) {
                 if (category.equals(item.filterType)) filtered.add(item);
             }
-            filtered.sort((a, b) -> {
-                int byDate = Long.compare(b.modified, a.modified);
-                if (byDate != 0) return byDate;
-                return a.name.compareToIgnoreCase(b.name);
-            });
 
             int start = Math.max(0, Math.min(offset, filtered.size()));
             int end = Math.min(filtered.size(), start + PHONE_DATA_BATCH_SIZE);
