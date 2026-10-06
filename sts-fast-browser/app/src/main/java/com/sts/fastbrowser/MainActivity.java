@@ -23,6 +23,7 @@ import android.graphics.drawable.RippleDrawable;
 import android.database.Cursor;
 import android.net.Uri;
 import android.webkit.URLUtil;
+import android.webkit.ValueCallback;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -86,6 +87,7 @@ public class MainActivity extends android.app.Activity {
     private static final int REQ_PHONE_DATA_DELETE = 814;
     private static final int REQ_EXPORT_SETTINGS = 815;
     private static final int REQ_IMPORT_SETTINGS = 816;
+    private static final int REQ_FILE_CHOOSER = 817;
     private static final String PREFS = "sts_fast_browser_prefs";
     private static final String KEY_STARTUP_PENDING = "startup_pending";
     private static final String KEY_LAST_GOOD_CONFIG = "last_good_config";
@@ -131,6 +133,8 @@ public class MainActivity extends android.app.Activity {
     private WebView webView;
     private String pendingGeoOrigin;
     private GeolocationPermissions.Callback pendingGeoCallback;
+    private ValueCallback<Uri[]> pendingFileChooser;
+    private final java.util.WeakHashMap<WebView, DownloadHint> downloadHints = new java.util.WeakHashMap<>();
     private boolean adBlockEnabled = true;
     private boolean hardAdBlockEnabled = true;
     private int activeSlot = 1;
@@ -549,6 +553,7 @@ public class MainActivity extends android.app.Activity {
 
         targetWebView.addJavascriptInterface(new PdfBridge(), "STSPdf");
         targetWebView.addJavascriptInterface(new RdBridge(), "STSRD");
+        targetWebView.addJavascriptInterface(new DownloadBridge(targetWebView), "STSDownload");
         if (targetWebView == webView1) {
             targetWebView.addJavascriptInterface(new DocumentsBridge(), "STSDocuments");
         }
@@ -558,6 +563,51 @@ public class MainActivity extends android.app.Activity {
             public void onProgressChanged(WebView view, int newProgress) {
                 super.onProgressChanged(view, newProgress);
                 setBrowserLoading(view, newProgress < 100);
+            }
+
+            @Override
+            public boolean onShowFileChooser(WebView webView,
+                                             ValueCallback<Uri[]> filePathCallback,
+                                             WebChromeClient.FileChooserParams fileChooserParams) {
+                if (pendingFileChooser != null) {
+                    pendingFileChooser.onReceiveValue(null);
+                    pendingFileChooser = null;
+                }
+                pendingFileChooser = filePathCallback;
+
+                try {
+                    Intent pick = fileChooserParams == null
+                            ? new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                            : fileChooserParams.createIntent();
+
+                    if (fileChooserParams == null) {
+                        pick.addCategory(Intent.CATEGORY_OPENABLE);
+                        pick.setType("*/*");
+                    }
+                    if (fileChooserParams != null &&
+                            fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
+                        pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    }
+
+                    startActivityForResult(Intent.createChooser(pick, "Select file"), REQ_FILE_CHOOSER);
+                    return true;
+                } catch (Exception first) {
+                    try {
+                        Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        fallback.addCategory(Intent.CATEGORY_OPENABLE);
+                        fallback.setType("*/*");
+                        fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                        startActivityForResult(fallback, REQ_FILE_CHOOSER);
+                        return true;
+                    } catch (Exception second) {
+                        if (pendingFileChooser != null) {
+                            pendingFileChooser.onReceiveValue(null);
+                            pendingFileChooser = null;
+                        }
+                        Toast.makeText(MainActivity.this, "File picker नहीं खुल पाया", Toast.LENGTH_SHORT).show();
+                        return false;
+                    }
+                }
             }
 
             @Override
@@ -730,6 +780,7 @@ public class MainActivity extends android.app.Activity {
                     }
                 }
                 injectPdfHook(view);
+                injectDownloadNameHook(view);
                 injectBrowserCompatibility(view);
                 if (adBlockEnabled) injectNormalAdCleanup(view);
                 if (hardAdBlockEnabled) injectHardAdCleanup(view);
@@ -1122,23 +1173,99 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
-    private String safeDownloadFileName(String url, String contentDisposition, String mimeType) {
+    private void injectDownloadNameHook(WebView view) {
+        if (view == null) return;
+        String js =
+                "(function(){" +
+                "if(window.__stsDownloadNameHook)return;window.__stsDownloadNameHook=true;" +
+                "function pick(v){try{v=String(v||'').trim();" +
+                "var m=v.match(/([A-Za-z0-9][^\\\\/:*?\"<>|\\n\\r]{0,170}\\.(?:apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac))/i);" +
+                "return m?m[1].trim():'';}catch(e){return '';}}" +
+                "document.addEventListener('click',function(e){try{" +
+                "var a=e.target&&e.target.closest?e.target.closest('a'):null;if(!a)return;" +
+                "var h=a.href||'';" +
+                "var n=pick(a.getAttribute('download'))||pick(a.getAttribute('aria-label'))||pick(a.getAttribute('title'))||pick(a.textContent);" +
+                "if(n&&window.STSDownload&&STSDownload.remember)STSDownload.remember(h,n);" +
+                "}catch(x){}},true);" +
+                "})();";
+        try { view.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    private class DownloadBridge {
+        private final WebView owner;
+
+        DownloadBridge(WebView owner) {
+            this.owner = owner;
+        }
+
+        @JavascriptInterface
+        public void remember(String href, String name) {
+            String clean = sanitizeDownloadName(name);
+            if (TextUtils.isEmpty(clean) || clean.indexOf('.') < 0) return;
+            synchronized (downloadHints) {
+                downloadHints.put(owner, new DownloadHint(href, clean, System.currentTimeMillis()));
+            }
+        }
+    }
+
+    private String sanitizeDownloadName(String value) {
+        if (TextUtils.isEmpty(value)) return "";
+        String name = value.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+        if (name.length() > 180) name = name.substring(0, 180).trim();
+        return name;
+    }
+
+    private String consumeDownloadHint(WebView sourceView, String url) {
+        if (sourceView == null) return null;
+        synchronized (downloadHints) {
+            DownloadHint hint = downloadHints.get(sourceView);
+            if (hint == null) return null;
+            if (System.currentTimeMillis() - hint.timeMs > 15000L) {
+                downloadHints.remove(sourceView);
+                return null;
+            }
+
+            // The browser may redirect the clicked URL to a signed CDN URL.
+            // A very recent hint from this same WebView is therefore valid even if the URL changed.
+            downloadHints.remove(sourceView);
+            return sanitizeDownloadName(hint.name);
+        }
+    }
+
+    private String safeDownloadFileName(String url, String contentDisposition, String mimeType, WebView sourceView) {
+        String hinted = consumeDownloadHint(sourceView, url);
+        if (!TextUtils.isEmpty(hinted) && hinted.contains(".")) return hinted;
+
         String guessed = null;
         try {
             guessed = URLUtil.guessFileName(url, contentDisposition, mimeType);
         } catch (Exception ignored) {}
 
-        if (TextUtils.isEmpty(guessed)) guessed = "download";
-        guessed = guessed.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+        guessed = sanitizeDownloadName(guessed);
         if (TextUtils.isEmpty(guessed)) guessed = "download";
 
-        // Preserve APK extension when the server reports Android package MIME but the signed URL has no filename.
         String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
         if ((mt.contains("android.package-archive") || mt.contains("application/vnd.android.package-archive")) &&
                 !guessed.toLowerCase(Locale.ROOT).endsWith(".apk")) {
             guessed += ".apk";
         }
         return guessed;
+    }
+
+    private String correctedDownloadMime(String fileName, String mimeType) {
+        String n = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
+        if (n.endsWith(".apk")) return "application/vnd.android.package-archive";
+        if (n.endsWith(".zip")) return "application/zip";
+        if (n.endsWith(".pdf")) return "application/pdf";
+        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
+        if (n.endsWith(".png")) return "image/png";
+        if (n.endsWith(".webp")) return "image/webp";
+        if (n.endsWith(".mp4")) return "video/mp4";
+        if (n.endsWith(".mp3")) return "audio/mpeg";
+        if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        return mimeType;
     }
 
     private void enqueueBrowserDownload(String url, String userAgent, String contentDisposition,
@@ -1154,7 +1281,8 @@ public class MainActivity extends android.app.Activity {
         }
 
         try {
-            String fileName = safeDownloadFileName(url, contentDisposition, mimeType);
+            String fileName = safeDownloadFileName(url, contentDisposition, mimeType, sourceView);
+            String effectiveMime = correctedDownloadMime(fileName, mimeType);
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
             request.setTitle(fileName);
             request.setDescription("STS Fast Browser");
@@ -1162,8 +1290,8 @@ public class MainActivity extends android.app.Activity {
             request.setAllowedOverMetered(true);
             request.setAllowedOverRoaming(true);
 
-            if (!TextUtils.isEmpty(mimeType)) {
-                try { request.setMimeType(mimeType); } catch (Exception ignored) {}
+            if (!TextUtils.isEmpty(effectiveMime)) {
+                try { request.setMimeType(effectiveMime); } catch (Exception ignored) {}
             }
 
             String cookie = null;
@@ -3963,6 +4091,16 @@ public class MainActivity extends android.app.Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
+        if (requestCode == REQ_FILE_CHOOSER) {
+            ValueCallback<Uri[]> callback = pendingFileChooser;
+            pendingFileChooser = null;
+            if (callback != null) {
+                Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+                callback.onReceiveValue(result);
+            }
+            return;
+        }
+
         if (requestCode == REQ_EXPORT_SETTINGS) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 writeSettingsBackup(data.getData());
@@ -4060,6 +4198,10 @@ public class MainActivity extends android.app.Activity {
 
     @Override
     protected void onDestroy() {
+        if (pendingFileChooser != null) {
+            pendingFileChooser.onReceiveValue(null);
+            pendingFileChooser = null;
+        }
         stopLoadingLogoAnimation();
         if (loadingOverlay != null) loadingOverlay.animate().cancel();
         destroyWebView(webView1);
@@ -4071,6 +4213,18 @@ public class MainActivity extends android.app.Activity {
             phoneDataThumbCache.evictAll();
         }
         super.onDestroy();
+    }
+
+    private static class DownloadHint {
+        final String href;
+        final String name;
+        final long timeMs;
+
+        DownloadHint(String href, String name, long timeMs) {
+            this.href = href == null ? "" : href;
+            this.name = name == null ? "" : name;
+            this.timeMs = timeMs;
+        }
     }
 
     private static class DocumentEntry {
