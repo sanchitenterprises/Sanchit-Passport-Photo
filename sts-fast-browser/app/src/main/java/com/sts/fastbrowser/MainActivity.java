@@ -68,15 +68,25 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.net.Socket;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Date;
+import java.util.Enumeration;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 import java.text.SimpleDateFormat;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -1270,7 +1280,7 @@ public class MainActivity extends android.app.Activity {
         if (TextUtils.isEmpty(n)) return "";
 
         String lower = n.toLowerCase(Locale.ROOT);
-        if (lower.matches(".*\\.(apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac)$")) {
+        if (lower.matches(".*\\.(apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac|rar|7z|gz|exe|msi)$")) {
             return n;
         }
 
@@ -1296,6 +1306,25 @@ public class MainActivity extends android.app.Activity {
                 n.equals("file") || n.equals("file.bin") ||
                 n.equals("unknown") || n.equals("unknown.bin") ||
                 n.equals("blob") || n.equals("blob.bin");
+    }
+
+    private String fileExtension(String name) {
+        if (TextUtils.isEmpty(name)) return "";
+        String clean = name.toLowerCase(Locale.ROOT);
+        int q = clean.indexOf('?');
+        if (q >= 0) clean = clean.substring(0, q);
+        int dot = clean.lastIndexOf('.');
+        if (dot < 0 || dot >= clean.length() - 1) return "";
+        String ext = clean.substring(dot);
+        return ext.length() <= 9 ? ext : "";
+    }
+
+    private String replaceFileExtension(String name, String ext) {
+        String clean = sanitizeDownloadName(name);
+        if (TextUtils.isEmpty(clean)) clean = "download";
+        int dot = clean.lastIndexOf('.');
+        if (dot > 0) clean = clean.substring(0, dot);
+        return clean + (TextUtils.isEmpty(ext) ? "" : ext);
     }
 
     private String filenameFromContentDisposition(String contentDisposition, String mimeType) {
@@ -1335,12 +1364,41 @@ public class MainActivity extends android.app.Activity {
         if (m.equals("image/gif")) return ".gif";
         if (m.equals("video/mp4")) return ".mp4";
         if (m.equals("audio/mpeg")) return ".mp3";
+        if (m.equals("audio/flac")) return ".flac";
+        if (m.equals("audio/ogg")) return ".ogg";
         if (m.contains("wordprocessingml")) return ".docx";
         if (m.contains("spreadsheetml")) return ".xlsx";
         if (m.contains("presentationml")) return ".pptx";
         if (m.equals("text/csv")) return ".csv";
         if (m.equals("text/plain")) return ".txt";
         return "";
+    }
+
+    private String mimeForExtension(String ext, String fallback) {
+        String e = ext == null ? "" : ext.toLowerCase(Locale.ROOT);
+        if (e.equals(".apk")) return "application/vnd.android.package-archive";
+        if (e.equals(".zip")) return "application/zip";
+        if (e.equals(".pdf")) return "application/pdf";
+        if (e.equals(".jpg") || e.equals(".jpeg")) return "image/jpeg";
+        if (e.equals(".png")) return "image/png";
+        if (e.equals(".webp")) return "image/webp";
+        if (e.equals(".gif")) return "image/gif";
+        if (e.equals(".mp4")) return "video/mp4";
+        if (e.equals(".mkv")) return "video/x-matroska";
+        if (e.equals(".mp3")) return "audio/mpeg";
+        if (e.equals(".wav")) return "audio/wav";
+        if (e.equals(".flac")) return "audio/flac";
+        if (e.equals(".ogg")) return "audio/ogg";
+        if (e.equals(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        if (e.equals(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        if (e.equals(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+        if (e.equals(".csv")) return "text/csv";
+        if (e.equals(".txt")) return "text/plain";
+        if (e.equals(".rar")) return "application/vnd.rar";
+        if (e.equals(".7z")) return "application/x-7z-compressed";
+        if (e.equals(".gz")) return "application/gzip";
+        if (e.equals(".exe")) return "application/vnd.microsoft.portable-executable";
+        return TextUtils.isEmpty(fallback) ? "application/octet-stream" : fallback;
     }
 
     private String consumeDownloadHint(WebView sourceView) {
@@ -1357,35 +1415,210 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
-    private String safeDownloadFileName(String url, String contentDisposition, String mimeType, WebView sourceView) {
-        String fromHeader = filenameFromContentDisposition(contentDisposition, mimeType);
-        if (!TextUtils.isEmpty(fromHeader)) return fromHeader;
+    private String detectZipContainerType(File file) {
+        boolean manifest = false;
+        boolean dex = false;
+        boolean resources = false;
+        boolean contentTypes = false;
+        boolean word = false;
+        boolean xl = false;
+        boolean ppt = false;
+        try (ZipFile zip = new ZipFile(file)) {
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            int checked = 0;
+            while (entries.hasMoreElements() && checked++ < 3000) {
+                String n = entries.nextElement().getName();
+                if ("AndroidManifest.xml".equals(n)) manifest = true;
+                else if ("classes.dex".equals(n) || n.matches("classes\\d+\\.dex")) dex = true;
+                else if ("resources.arsc".equals(n)) resources = true;
+                else if ("[Content_Types].xml".equals(n)) contentTypes = true;
+                else if (n.startsWith("word/")) word = true;
+                else if (n.startsWith("xl/")) xl = true;
+                else if (n.startsWith("ppt/")) ppt = true;
+            }
+        } catch (Exception ignored) {}
 
-        String clicked = consumeDownloadHint(sourceView);
-        if (!TextUtils.isEmpty(clicked)) return clicked;
-
-        String fromUrl = filenameFromUrl(url);
-        if (!TextUtils.isEmpty(fromUrl)) return fromUrl;
-
-        String ext = extensionForMime(mimeType);
-        return "download-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) + ext;
+        if (manifest && (dex || resources)) return ".apk";
+        if (contentTypes && word) return ".docx";
+        if (contentTypes && xl) return ".xlsx";
+        if (contentTypes && ppt) return ".pptx";
+        return ".zip";
     }
 
-    private String correctedDownloadMime(String fileName, String mimeType) {
-        String n = fileName == null ? "" : fileName.toLowerCase(Locale.ROOT);
-        if (n.endsWith(".apk")) return "application/vnd.android.package-archive";
-        if (n.endsWith(".zip")) return "application/zip";
-        if (n.endsWith(".pdf")) return "application/pdf";
-        if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg";
-        if (n.endsWith(".png")) return "image/png";
-        if (n.endsWith(".webp")) return "image/webp";
-        if (n.endsWith(".gif")) return "image/gif";
-        if (n.endsWith(".mp4")) return "video/mp4";
-        if (n.endsWith(".mp3")) return "audio/mpeg";
-        if (n.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-        if (n.endsWith(".pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-        return mimeType;
+    private String detectActualExtension(File file, String serverMime) {
+        byte[] h = new byte[32];
+        int n = 0;
+        try (InputStream in = new FileInputStream(file)) {
+            n = in.read(h);
+        } catch (Exception ignored) {}
+
+        if (n >= 4 && h[0] == 0x25 && h[1] == 0x50 && h[2] == 0x44 && h[3] == 0x46) return ".pdf";
+        if (n >= 8 && (h[0] & 0xff) == 0x89 && h[1] == 0x50 && h[2] == 0x4e && h[3] == 0x47) return ".png";
+        if (n >= 3 && (h[0] & 0xff) == 0xff && (h[1] & 0xff) == 0xd8 && (h[2] & 0xff) == 0xff) return ".jpg";
+        if (n >= 6 && h[0] == 'G' && h[1] == 'I' && h[2] == 'F' && h[3] == '8') return ".gif";
+        if (n >= 12 && h[0] == 'R' && h[1] == 'I' && h[2] == 'F' && h[3] == 'F' &&
+                h[8] == 'W' && h[9] == 'E' && h[10] == 'B' && h[11] == 'P') return ".webp";
+        if (n >= 12 && h[4] == 'f' && h[5] == 't' && h[6] == 'y' && h[7] == 'p') return ".mp4";
+        if (n >= 4 && h[0] == 'O' && h[1] == 'g' && h[2] == 'g' && h[3] == 'S') return ".ogg";
+        if (n >= 4 && h[0] == 'f' && h[1] == 'L' && h[2] == 'a' && h[3] == 'C') return ".flac";
+        if (n >= 12 && h[0] == 'R' && h[1] == 'I' && h[2] == 'F' && h[3] == 'F' &&
+                h[8] == 'W' && h[9] == 'A' && h[10] == 'V' && h[11] == 'E') return ".wav";
+        if (n >= 3 && h[0] == 'I' && h[1] == 'D' && h[2] == '3') return ".mp3";
+        if (n >= 4 && (h[0] & 0xff) == 0x1a && (h[1] & 0xff) == 0x45 &&
+                (h[2] & 0xff) == 0xdf && (h[3] & 0xff) == 0xa3) return ".mkv";
+        if (n >= 4 && h[0] == 'P' && h[1] == 'K' &&
+                ((h[2] == 3 && h[3] == 4) || (h[2] == 5 && h[3] == 6) || (h[2] == 7 && h[3] == 8))) {
+            return detectZipContainerType(file);
+        }
+        if (n >= 7 && (h[0] & 0xff) == 0x52 && (h[1] & 0xff) == 0x61 &&
+                (h[2] & 0xff) == 0x72 && (h[3] & 0xff) == 0x21) return ".rar";
+        if (n >= 6 && (h[0] & 0xff) == 0x37 && (h[1] & 0xff) == 0x7a &&
+                (h[2] & 0xff) == 0xbc && (h[3] & 0xff) == 0xaf) return ".7z";
+        if (n >= 2 && (h[0] & 0xff) == 0x1f && (h[1] & 0xff) == 0x8b) return ".gz";
+        if (n >= 2 && h[0] == 'M' && h[1] == 'Z') return ".exe";
+
+        return extensionForMime(serverMime);
+    }
+
+    private boolean extensionMatches(String name, String actualExt) {
+        if (TextUtils.isEmpty(name)) return false;
+        if (TextUtils.isEmpty(actualExt)) return true;
+        String ext = fileExtension(name);
+        if (TextUtils.isEmpty(ext)) return true;
+        if (ext.equalsIgnoreCase(actualExt)) return true;
+        if (actualExt.equals(".jpg") && ext.equalsIgnoreCase(".jpeg")) return true;
+        return false;
+    }
+
+    private String chooseResolvedDownloadName(String headerName, String clickedName,
+                                              String urlName, String actualExt) {
+        String[] candidates = new String[]{headerName, clickedName, urlName};
+        for (String candidate : candidates) {
+            String clean = sanitizeDownloadName(candidate);
+            if (TextUtils.isEmpty(clean) || isGenericDownloadName(clean)) continue;
+            if (!extensionMatches(clean, actualExt)) continue;
+            if (TextUtils.isEmpty(fileExtension(clean)) && !TextUtils.isEmpty(actualExt)) {
+                clean += actualExt;
+            }
+            return clean;
+        }
+
+        // If the server supplied a useful base name but a wrong/generic extension,
+        // keep the base and replace only the extension with the type verified from bytes.
+        String usefulBase = sanitizeDownloadName(headerName);
+        if (!TextUtils.isEmpty(usefulBase) && !isGenericDownloadName(usefulBase) && !TextUtils.isEmpty(actualExt)) {
+            return replaceFileExtension(usefulBase, actualExt);
+        }
+
+        return "download-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) +
+                (TextUtils.isEmpty(actualExt) ? "" : actualExt);
+    }
+
+    private File downloadToTemporaryFile(String startUrl, String userAgent, String cookie,
+                                         String referer, DownloadResolvedMeta meta) throws Exception {
+        String current = startUrl;
+        for (int redirects = 0; redirects < 10; redirects++) {
+            HttpURLConnection conn = (HttpURLConnection) new URL(current).openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setConnectTimeout(20000);
+            conn.setReadTimeout(45000);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Accept-Encoding", "identity");
+            if (!TextUtils.isEmpty(userAgent)) conn.setRequestProperty("User-Agent", userAgent);
+            if (!TextUtils.isEmpty(cookie)) conn.setRequestProperty("Cookie", cookie);
+            if (!TextUtils.isEmpty(referer)) conn.setRequestProperty("Referer", referer);
+
+            int code = conn.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String location = conn.getHeaderField("Location");
+                if (TextUtils.isEmpty(location)) {
+                    conn.disconnect();
+                    throw new Exception("Redirect without Location");
+                }
+                URL next = new URL(new URL(current), location);
+                referer = current;
+                current = next.toString();
+                conn.disconnect();
+                continue;
+            }
+
+            if (code < 200 || code >= 300) {
+                conn.disconnect();
+                throw new Exception("HTTP " + code);
+            }
+
+            meta.finalUrl = current;
+            meta.contentDisposition = conn.getHeaderField("Content-Disposition");
+            meta.contentType = conn.getContentType();
+            meta.headerName = filenameFromContentDisposition(meta.contentDisposition, meta.contentType);
+
+            File tmp = File.createTempFile("sfb-real-download-", ".tmp", getCacheDir());
+            try (InputStream in = new BufferedInputStream(conn.getInputStream());
+                 OutputStream out = new BufferedOutputStream(new FileOutputStream(tmp))) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                out.flush();
+            } catch (Exception e) {
+                tmp.delete();
+                conn.disconnect();
+                throw e;
+            }
+            conn.disconnect();
+            return tmp;
+        }
+        throw new Exception("Too many redirects");
+    }
+
+    private Uri saveVerifiedFileToDownloads(File temp, String fileName, String mimeType,
+                                            String sourceUrl, String userAgent, String cookie,
+                                            String referer) throws Exception {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE,
+                    TextUtils.isEmpty(mimeType) ? "application/octet-stream" : mimeType);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) throw new Exception("Downloads insert failed");
+            boolean ok = false;
+            try (InputStream in = new BufferedInputStream(new FileInputStream(temp));
+                 OutputStream out = new BufferedOutputStream(getContentResolver().openOutputStream(uri, "w"))) {
+                if (out == null) throw new Exception("Downloads output unavailable");
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                out.flush();
+                ok = true;
+            } finally {
+                if (!ok) {
+                    try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
+                }
+            }
+
+            android.content.ContentValues ready = new android.content.ContentValues();
+            ready.put(MediaStore.MediaColumns.IS_PENDING, 0);
+            getContentResolver().update(uri, ready, null, null);
+            return uri;
+        }
+
+        // Android 7-9: after resolving the real name/type, let the system DownloadManager
+        // perform the final public-Downloads write so legacy storage permissions are not required.
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(sourceUrl));
+        request.setTitle(fileName);
+        request.setDescription("STS Fast Browser");
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        if (!TextUtils.isEmpty(mimeType)) request.setMimeType(mimeType);
+        if (!TextUtils.isEmpty(userAgent)) request.addRequestHeader("User-Agent", userAgent);
+        if (!TextUtils.isEmpty(cookie)) request.addRequestHeader("Cookie", cookie);
+        if (!TextUtils.isEmpty(referer)) request.addRequestHeader("Referer", referer);
+        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        if (dm == null) throw new Exception("DownloadManager unavailable");
+        dm.enqueue(request);
+        return Uri.parse("content://downloads/my_downloads");
     }
 
     private void enqueueBrowserDownload(String url, String userAgent, String contentDisposition,
@@ -1394,60 +1627,82 @@ public class MainActivity extends android.app.Activity {
             Toast.makeText(this, "Download link नहीं मिला", Toast.LENGTH_SHORT).show();
             return;
         }
-
         if (!(url.startsWith("http://") || url.startsWith("https://"))) {
-            Toast.makeText(this, "यह download link WebView से direct save नहीं हो पा रहा", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "यह download link direct save नहीं हो पा रहा", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        try {
-            String fileName = safeDownloadFileName(url, contentDisposition, mimeType, sourceView);
-            String effectiveMime = correctedDownloadMime(fileName, mimeType);
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            request.setTitle(fileName);
-            request.setDescription("STS Fast Browser");
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setAllowedOverMetered(true);
-            request.setAllowedOverRoaming(true);
+        final String clickedName = consumeDownloadHint(sourceView);
 
-            if (!TextUtils.isEmpty(effectiveMime)) {
-                try { request.setMimeType(effectiveMime); } catch (Exception ignored) {}
-            }
-
-            String cookie = null;
-            try { cookie = CookieManager.getInstance().getCookie(url); } catch (Exception ignored) {}
-            if (TextUtils.isEmpty(cookie) && sourceView != null) {
-                try {
-                    String pageUrl = sourceView.getUrl();
-                    if (!TextUtils.isEmpty(pageUrl)) cookie = CookieManager.getInstance().getCookie(pageUrl);
-                } catch (Exception ignored) {}
-            }
-            if (!TextUtils.isEmpty(cookie)) request.addRequestHeader("Cookie", cookie);
-
-            String ua = userAgent;
-            if (TextUtils.isEmpty(ua) && sourceView != null) {
-                try { ua = sourceView.getSettings().getUserAgentString(); } catch (Exception ignored) {}
-            }
-            if (!TextUtils.isEmpty(ua)) request.addRequestHeader("User-Agent", ua);
-
-            if (sourceView != null) {
-                try {
-                    String referer = sourceView.getUrl();
-                    if (!TextUtils.isEmpty(referer) && (referer.startsWith("http://") || referer.startsWith("https://"))) {
-                        request.addRequestHeader("Referer", referer);
-                    }
-                } catch (Exception ignored) {}
-            }
-
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-
-            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            if (dm == null) throw new IllegalStateException("DownloadManager unavailable");
-            dm.enqueue(request);
-            Toast.makeText(this, "Download started: " + fileName, Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Toast.makeText(this, "Download start नहीं हो पाया", Toast.LENGTH_SHORT).show();
+        String ua = userAgent;
+        if (TextUtils.isEmpty(ua) && sourceView != null) {
+            try { ua = sourceView.getSettings().getUserAgentString(); } catch (Exception ignored) {}
         }
+        final String finalUa = ua;
+
+        String cookie = null;
+        try { cookie = CookieManager.getInstance().getCookie(url); } catch (Exception ignored) {}
+        if (TextUtils.isEmpty(cookie) && sourceView != null) {
+            try {
+                String pageUrl = sourceView.getUrl();
+                if (!TextUtils.isEmpty(pageUrl)) cookie = CookieManager.getInstance().getCookie(pageUrl);
+            } catch (Exception ignored) {}
+        }
+        final String finalCookie = cookie;
+
+        String referer = null;
+        if (sourceView != null) {
+            try {
+                String pageUrl = sourceView.getUrl();
+                if (!TextUtils.isEmpty(pageUrl) &&
+                        (pageUrl.startsWith("http://") || pageUrl.startsWith("https://"))) {
+                    referer = pageUrl;
+                }
+            } catch (Exception ignored) {}
+        }
+        final String finalReferer = referer;
+        final String listenerDisposition = contentDisposition;
+        final String listenerMime = mimeType;
+
+        Toast.makeText(this, "Download शुरू...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            File temp = null;
+            try {
+                DownloadResolvedMeta meta = new DownloadResolvedMeta();
+                temp = downloadToTemporaryFile(url, finalUa, finalCookie, finalReferer, meta);
+
+                String serverMime = !TextUtils.isEmpty(meta.contentType) ? meta.contentType : listenerMime;
+                String actualExt = detectActualExtension(temp, serverMime);
+                String headerName = !TextUtils.isEmpty(meta.headerName)
+                        ? meta.headerName
+                        : filenameFromContentDisposition(listenerDisposition, serverMime);
+                String urlName = filenameFromUrl(meta.finalUrl);
+                if (TextUtils.isEmpty(urlName)) urlName = filenameFromUrl(url);
+
+                String finalName = chooseResolvedDownloadName(headerName, clickedName, urlName, actualExt);
+                String finalMime = mimeForExtension(actualExt, serverMime);
+
+                saveVerifiedFileToDownloads(temp, finalName, finalMime,
+                        meta.finalUrl, finalUa, finalCookie, finalReferer);
+
+                final String doneName = finalName;
+                final String doneType = finalMime;
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Downloaded: " + doneName + "\n" + doneType,
+                        Toast.LENGTH_LONG
+                ).show());
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(
+                        this,
+                        "Download नहीं हुआ • server/file verification failed",
+                        Toast.LENGTH_LONG
+                ).show());
+            } finally {
+                if (temp != null) temp.delete();
+            }
+        }, "SFB-RealDownload").start();
     }
 
     private boolean openExternal(String url) {
@@ -4333,6 +4588,13 @@ public class MainActivity extends android.app.Activity {
             phoneDataThumbCache.evictAll();
         }
         super.onDestroy();
+    }
+
+    private static class DownloadResolvedMeta {
+        String finalUrl = "";
+        String contentDisposition = "";
+        String contentType = "";
+        String headerName = "";
     }
 
     private static class DownloadHint {
