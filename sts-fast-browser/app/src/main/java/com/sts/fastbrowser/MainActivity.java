@@ -4,6 +4,7 @@ import android.Manifest;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.app.PictureInPictureParams;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
@@ -601,8 +602,8 @@ public class MainActivity extends android.app.Activity {
                         openPdfTask(url, guessPdfName(url, contentDisposition));
                     } else if (isOfficeCandidate(url, mt)) {
                         openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
-                    } else if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
-                        loadBrowserUrl(targetWebView, url);
+                    } else {
+                        enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, targetWebView);
                     }
                     child.destroy();
                 });
@@ -668,7 +669,7 @@ public class MainActivity extends android.app.Activity {
             } else if (isOfficeCandidate(url, mt)) {
                 openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
             } else {
-                openExternal(url);
+                enqueueBrowserDownload(url, userAgent, contentDisposition, mimeType, targetWebView);
             }
         });
         targetWebView.setWebViewClient(new WebViewClient() {
@@ -1118,6 +1119,86 @@ public class MainActivity extends android.app.Activity {
             startActivity(intent);
         } catch (Exception e) {
             Toast.makeText(this, "Word/Excel file open नहीं हो पाई", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String safeDownloadFileName(String url, String contentDisposition, String mimeType) {
+        String guessed = null;
+        try {
+            guessed = URLUtil.guessFileName(url, contentDisposition, mimeType);
+        } catch (Exception ignored) {}
+
+        if (TextUtils.isEmpty(guessed)) guessed = "download";
+        guessed = guessed.replaceAll("[\\\\/:*?\"<>|\\r\\n]+", "_").trim();
+        if (TextUtils.isEmpty(guessed)) guessed = "download";
+
+        // Preserve APK extension when the server reports Android package MIME but the signed URL has no filename.
+        String mt = mimeType == null ? "" : mimeType.toLowerCase(Locale.ROOT);
+        if ((mt.contains("android.package-archive") || mt.contains("application/vnd.android.package-archive")) &&
+                !guessed.toLowerCase(Locale.ROOT).endsWith(".apk")) {
+            guessed += ".apk";
+        }
+        return guessed;
+    }
+
+    private void enqueueBrowserDownload(String url, String userAgent, String contentDisposition,
+                                        String mimeType, WebView sourceView) {
+        if (TextUtils.isEmpty(url)) {
+            Toast.makeText(this, "Download link नहीं मिला", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (!(url.startsWith("http://") || url.startsWith("https://"))) {
+            Toast.makeText(this, "यह download link WebView से direct save नहीं हो पा रहा", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        try {
+            String fileName = safeDownloadFileName(url, contentDisposition, mimeType);
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            request.setTitle(fileName);
+            request.setDescription("STS Fast Browser");
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setAllowedOverMetered(true);
+            request.setAllowedOverRoaming(true);
+
+            if (!TextUtils.isEmpty(mimeType)) {
+                try { request.setMimeType(mimeType); } catch (Exception ignored) {}
+            }
+
+            String cookie = null;
+            try { cookie = CookieManager.getInstance().getCookie(url); } catch (Exception ignored) {}
+            if (TextUtils.isEmpty(cookie) && sourceView != null) {
+                try {
+                    String pageUrl = sourceView.getUrl();
+                    if (!TextUtils.isEmpty(pageUrl)) cookie = CookieManager.getInstance().getCookie(pageUrl);
+                } catch (Exception ignored) {}
+            }
+            if (!TextUtils.isEmpty(cookie)) request.addRequestHeader("Cookie", cookie);
+
+            String ua = userAgent;
+            if (TextUtils.isEmpty(ua) && sourceView != null) {
+                try { ua = sourceView.getSettings().getUserAgentString(); } catch (Exception ignored) {}
+            }
+            if (!TextUtils.isEmpty(ua)) request.addRequestHeader("User-Agent", ua);
+
+            if (sourceView != null) {
+                try {
+                    String referer = sourceView.getUrl();
+                    if (!TextUtils.isEmpty(referer) && (referer.startsWith("http://") || referer.startsWith("https://"))) {
+                        request.addRequestHeader("Referer", referer);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+
+            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            if (dm == null) throw new IllegalStateException("DownloadManager unavailable");
+            dm.enqueue(request);
+            Toast.makeText(this, "Download started: " + fileName, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Download start नहीं हो पाया", Toast.LENGTH_SHORT).show();
         }
     }
 
