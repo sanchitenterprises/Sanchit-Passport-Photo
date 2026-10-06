@@ -4059,7 +4059,17 @@ public class MainActivity extends android.app.Activity {
                     continue;
                 }
 
-                Uri uri = ContentUris.withAppendedId(collection, id);
+                Uri itemCollection = collection;
+                if ("All Data".equals(mode)) {
+                    if ("PHOTO".equals(category)) {
+                        itemCollection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+                    } else if ("VIDEO".equals(category)) {
+                        itemCollection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+                    } else if ("AUDIO".equals(category)) {
+                        itemCollection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+                    }
+                }
+                Uri uri = ContentUris.withAppendedId(itemCollection, id);
                 out.add(new DocumentEntry(
                         uri.toString(),
                         name,
@@ -4795,6 +4805,11 @@ public class MainActivity extends android.app.Activity {
             for (DocumentEntry item : snapshot) {
                 if (category.equals(item.filterType)) filtered.add(item);
             }
+            filtered.sort((a, b) -> {
+                int byDate = Long.compare(b.modified, a.modified);
+                if (byDate != 0) return byDate;
+                return a.name.compareToIgnoreCase(b.name);
+            });
 
             int start = Math.max(0, Math.min(offset, filtered.size()));
             int end = Math.min(filtered.size(), start + PHONE_DATA_BATCH_SIZE);
