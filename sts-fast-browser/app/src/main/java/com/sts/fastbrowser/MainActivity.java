@@ -4365,6 +4365,14 @@ public class MainActivity extends android.app.Activity {
                 "body.media-grid .doc-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:0 2px 24px}body.media-grid .date-group{grid-column:1/-1;font-size:16px;padding:10px 8px 6px}" +
                 "body.media-grid .doc-item{display:block;min-height:0;padding:0 0 7px;border:0;text-align:left;overflow:hidden}body.media-grid .media-thumb-wrap{width:100%;aspect-ratio:1/1;margin:0}" +
                 "body.media-grid .file-body{padding:5px 4px 1px;display:block;width:100%}body.media-grid .file-name{display:block;width:100%;font-size:10px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left}body.media-grid .file-meta{display:none}" +
+                "body.all-data-grid .doc-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:6px 6px 24px}" +
+                "body.all-data-grid .date-group{grid-column:1/-1;font-size:16px;padding:10px 6px 4px}" +
+                "body.all-data-grid .doc-item{display:block;min-width:0;min-height:0;padding:0 0 8px;border:1px solid #1f1f1f;border-radius:8px;text-align:left;overflow:hidden;background:#0d0d0d}" +
+                "body.all-data-grid .media-thumb-wrap{display:block;width:100%;aspect-ratio:1/1;margin:0}" +
+                "body.all-data-grid .file-icon{width:54px;height:66px;margin:14px auto 10px}" +
+                "body.all-data-grid .file-body{display:block;width:100%;min-width:0;padding:5px 6px 3px;text-align:left}" +
+                "body.all-data-grid .file-name{display:block;width:100%;font-size:10px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left;word-break:normal}" +
+                "body.all-data-grid .file-meta{display:block;width:100%;font-size:9px;line-height:1.2;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
                 ".load-more{text-align:center;padding:18px 16px 30px;color:#777;font-size:13px}.empty,.center,.permission{text-align:center;padding:70px 24px;color:#aaa}" +
                 ".permission{padding-top:100px}.permission h2{color:#fff}.permission p{line-height:1.5}.permission button{margin-top:14px;border:0;" +
                 "border-radius:10px;padding:13px 20px;background:#4F8F8B;color:#fff;font-size:16px;font-weight:700}.folder{font-size:54px;color:#f0a348}" +
@@ -4372,7 +4380,7 @@ public class MainActivity extends android.app.Activity {
                 "@keyframes r{to{transform:rotate(360deg)}}body.grid:not(.media-grid) .doc-list{display:grid;grid-template-columns:1fr 1fr;gap:1px}" +
                 "body.grid:not(.media-grid) .date-group{grid-column:1/-1}body.grid:not(.media-grid) .doc-item{display:block;min-height:170px;text-align:center;padding:16px 8px}" +
                 "body.grid:not(.media-grid) .file-icon{margin:0 auto 10px}.hide{display:none!important}" +
-                "</style></head><body class='" + (isMediaMode(mode) ? "grid media-grid" : "") + "'>" +
+                "</style></head><body class='" + ("All Data".equals(mode) ? "all-data-grid" : (isMediaMode(mode) ? "grid media-grid" : "")) + "'>" +
                 "<div class='header'><div class='title-row'>" +
                 "<button id='modeButton' class='mode-title' onclick='toggleModeMenu(event)'>" + escapeDocsHtml(mode) + " ▾</button>" +
                 "<div class='top-count'><span id='shownCount'>" + count + "</span> items</div>" +
@@ -4390,7 +4398,7 @@ public class MainActivity extends android.app.Activity {
                 "<div id='normalMenu'>" +
                 "<button class='menu-item' onclick='STSDocuments.refresh()'>Refresh</button>" +
                 "<button id='gridMenuItem' class='menu-item' onclick='toggleGridFromMenu()'>" +
-                (isMediaMode(mode) ? "List view" : "Grid view") + "</button>" +
+                (("All Data".equals(mode) || isMediaMode(mode)) ? "List view" : "Grid view") + "</button>" +
                 "<button class='menu-item' onclick='toggleSortSub(event)'>Sort by ▸</button>" +
                 "<div id='sortSub' class='sort-sub'>" +
                 "<button class='sort-option' onclick=\"sortDocs('dateDesc')\">Date modified</button>" +
@@ -4422,7 +4430,7 @@ public class MainActivity extends android.app.Activity {
                 "function ensureLoadSentinel(text){var s=document.getElementById('loadMoreSentinel');if(!s){s=document.createElement('div');s.id='loadMoreSentinel';s.className='load-more';document.getElementById('docList').after(s);}s.textContent=text||'Scroll करने पर और files load होंगी…';return s;}" +
                 "function loadMajorMore(){if(!allDataMode||!majorCat||loadingMore||loadedCount>=totalCount&&totalCount>0)return false;loadingMore=true;try{var raw=STSDocuments.loadMajorCategory(majorCat,loadedCount);var o=raw?JSON.parse(raw):null;var list=document.getElementById('docList');if(o){totalCount=Number(o.total)||0;if(o.html){var box=document.createElement('div');box.innerHTML=o.html;while(box.firstChild)list.appendChild(box.firstChild);installSelection(list);}loadedCount=Number(o.loaded)||list.querySelectorAll('.doc-item').length;var oldEmpty=document.getElementById('majorEmpty');if(oldEmpty)oldEmpty.remove();if(totalCount===0){var empty=document.createElement('div');empty.id='majorEmpty';empty.className='empty';empty.textContent='कोई '+majorCat+' data नहीं मिला।';list.after(empty);}if(loadedCount<totalCount)ensureLoadSentinel('Scroll करने पर और '+majorCat+' files load होंगी…');else{var s=document.getElementById('loadMoreSentinel');if(s)s.remove();}applyFilter();}}catch(e){}loadingMore=false;return loadedCount<totalCount;}" +
                 "function switchMajorCategory(v){majorCat=v;cat=v;selected.clear();syncSelectionUi();" +
-                "var media=(v==='Photo'||v==='Video');document.body.classList.toggle('media-grid',media);document.body.classList.toggle('grid',media);" +
+                "document.body.classList.remove('all-data-grid');var media=(v==='Photo'||v==='Video');document.body.classList.toggle('media-grid',media);document.body.classList.toggle('grid',media);" +
                 "var gm=document.getElementById('gridMenuItem');if(gm)gm.textContent=media?'List view':'Grid view';" +
                 "var list=document.getElementById('docList');list.innerHTML='';var s=document.getElementById('loadMoreSentinel');if(s)s.remove();var empty=document.getElementById('majorEmpty');if(empty)empty.remove();loadedCount=0;totalCount=0;ensureLoadSentinel(v+' loading...');loadMajorMore();}" +
                 "function loadMoreNow(){if(allDataMode&&majorCat)return loadMajorMore();if(loadingMore||loadedCount>=totalCount)return false;loadingMore=true;try{var html=STSDocuments.loadMore(loadedCount);if(html){var box=document.createElement('div');box.innerHTML=html;var list=document.getElementById('docList');while(box.firstChild)list.appendChild(box.firstChild);loadedCount=list.querySelectorAll('.doc-item').length;installSelection(list);applyFilter();}if(loadedCount>=totalCount){var s=document.getElementById('loadMoreSentinel');if(s)s.remove();}}catch(e){}loadingMore=false;return loadedCount<totalCount;}" +
@@ -4432,8 +4440,8 @@ public class MainActivity extends android.app.Activity {
                 "function shareSelected(){var a=selectedUris();document.getElementById('docMenu').classList.remove('show');if(a.length)STSDocuments.shareSelected(JSON.stringify(a));}" +
                 "function deleteSelected(){var a=selectedUris();document.getElementById('docMenu').classList.remove('show');if(a.length)STSDocuments.removeSelected(JSON.stringify(a));}" +
                 "function toggleDocMenu(e){if(e)e.stopPropagation();document.getElementById('modeMenu').classList.remove('show');var m=document.getElementById('docMenu');m.classList.toggle('show');if(!m.classList.contains('show'))document.getElementById('sortSub').classList.remove('show');}" +
-                "function toggleGridFromMenu(){var media=document.body.classList.contains('media-grid');if(media){document.body.classList.toggle('media-grid');document.body.classList.toggle('grid',document.body.classList.contains('media-grid'));}else{document.body.classList.toggle('grid');}" +
-                "var b=document.getElementById('gridMenuItem');if(b)b.textContent=(document.body.classList.contains('grid')||document.body.classList.contains('media-grid'))?'List view':'Grid view';document.getElementById('docMenu').classList.remove('show');}" +
+                "function toggleGridFromMenu(){var allGrid=document.body.classList.contains('all-data-grid');var media=document.body.classList.contains('media-grid');if(allGrid){document.body.classList.remove('all-data-grid');}else if(allDataMode&&!majorCat&&!document.body.classList.contains('grid')){document.body.classList.add('all-data-grid');}else if(media){document.body.classList.toggle('media-grid');document.body.classList.toggle('grid',document.body.classList.contains('media-grid'));}else{document.body.classList.toggle('grid');}" +
+                "var b=document.getElementById('gridMenuItem');if(b)b.textContent=(document.body.classList.contains('all-data-grid')||document.body.classList.contains('grid')||document.body.classList.contains('media-grid'))?'List view':'Grid view';document.getElementById('docMenu').classList.remove('show');}" +
                 "function toggleSortSub(e){if(e)e.stopPropagation();document.getElementById('sortSub').classList.toggle('show');}" +
                 "function dateGroup(ms){var d=new Date(Number(ms)||0);if(!d.getTime())return 'Unknown date';" +
                 "var y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,'0'),day=String(d.getDate()).padStart(2,'0');return y+'/'+m+'/'+day;}" +
