@@ -1492,7 +1492,9 @@ public class MainActivity extends android.app.Activity {
 
     private String chooseResolvedDownloadName(String headerName, String clickedName,
                                               String urlName, String actualExt) {
-        String[] candidates = new String[]{headerName, clickedName, urlName};
+        // The filename the user actually tapped is the primary name.
+        // Server/CDN names are often temporary artifact names even when the bytes are correct.
+        String[] candidates = new String[]{clickedName, headerName, urlName};
         for (String candidate : candidates) {
             String clean = sanitizeDownloadName(candidate);
             if (TextUtils.isEmpty(clean) || isGenericDownloadName(clean)) continue;
@@ -2283,17 +2285,10 @@ public class MainActivity extends android.app.Activity {
 
     private void openDownloadsFolder() {
         try {
-            Intent intent = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
+            Intent intent = new Intent(this, DownloadsActivity.class);
             startActivity(intent);
-        } catch (Exception first) {
-            try {
-                Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                fallback.addCategory(Intent.CATEGORY_OPENABLE);
-                fallback.setType("*/*");
-                startActivity(fallback);
-            } catch (Exception second) {
-                Toast.makeText(this, "Downloads नहीं खुल पाया", Toast.LENGTH_SHORT).show();
-            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Downloads नहीं खुल पाया", Toast.LENGTH_SHORT).show();
         }
     }
 
