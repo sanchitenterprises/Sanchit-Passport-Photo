@@ -1587,7 +1587,7 @@ public class MainActivity extends android.app.Activity {
     private void showMainMenu(View anchor) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(4), dp(4), dp(4), dp(4));
+        box.setPadding(dp(2), dp(4), dp(2), dp(4));
 
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.WHITE);
@@ -1598,8 +1598,10 @@ public class MainActivity extends android.app.Activity {
         String adLabel = adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF";
         String hardAdLabel = hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF";
         int popupWidth = measureMainMenuWidth(
-                adLabel,
-                hardAdLabel,
+                "Ad Blocker: ON",
+                "Ad Blocker: OFF",
+                "Hard Ad Blocker: ON",
+                "Hard Ad Blocker: OFF",
                 "Add Website",
                 "Manage Websites",
                 "About"
@@ -1672,20 +1674,21 @@ public class MainActivity extends android.app.Activity {
     }
 
     private int measureMainMenuWidth(String... labels) {
-        android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
-        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
-        paint.setTextSize(15f * getResources().getDisplayMetrics().scaledDensity);
+        TextView probe = new TextView(this);
+        probe.setTextSize(15);
+        probe.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
 
         float widest = 0f;
         if (labels != null) {
             for (String label : labels) {
                 if (label == null) continue;
-                widest = Math.max(widest, paint.measureText(label));
+                widest = Math.max(widest, probe.getPaint().measureText(label));
             }
         }
 
-        // Text width + the same left/right padding used by each row + popup's outer padding/stroke breathing room.
-        return Math.max(dp(96), Math.round(widest) + dp(28));
+        // 10dp left text inset + 2dp outer padding on each side + tiny rounding safety.
+        // The longest label therefore finishes almost at the popup's right edge.
+        return Math.max(dp(96), (int) Math.ceil(widest) + dp(16));
     }
 
     private ImageButton makeHistoryButton(int iconRes, String description) {
@@ -1714,7 +1717,11 @@ public class MainActivity extends android.app.Activity {
         item.setTextSize(15);
         item.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         item.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
-        item.setPadding(dp(10), 0, dp(10), 0);
+        item.setSingleLine(true);
+        item.setMaxLines(1);
+        item.setHorizontallyScrolling(true);
+        item.setEllipsize(null);
+        item.setPadding(dp(10), 0, 0, 0);
         item.setBackground(new RippleDrawable(
                 ColorStateList.valueOf(Color.parseColor("#224F8F8B")),
                 new ColorDrawable(Color.TRANSPARENT),
