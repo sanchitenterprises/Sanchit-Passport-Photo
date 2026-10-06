@@ -1254,7 +1254,7 @@ public class MainActivity extends android.app.Activity {
                 popup.dismiss();
                 selectSite(slot, site);
             });
-            box.addView(item, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+            box.addView(item, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(43)));
         }
 
         TextView add = makePopupItem("＋  Add website");
@@ -1270,10 +1270,10 @@ public class MainActivity extends android.app.Activity {
     private TextView makePopupItem(String text) {
         TextView item = new TextView(this);
         item.setText(text);
-        item.setTextSize(15);
+        item.setTextSize(14);
         item.setTextColor(Color.parseColor("#172326"));
         item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(14), 0, dp(10), 0);
+        item.setPadding(dp(12), 0, dp(8), 0);
         GradientDrawable base = new GradientDrawable();
         base.setColor(Color.WHITE);
         base.setCornerRadius(dp(10));
@@ -1587,7 +1587,7 @@ public class MainActivity extends android.app.Activity {
     private void showMainMenu(View anchor) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(6), dp(6), dp(6), dp(6));
+        box.setPadding(dp(4), dp(4), dp(4), dp(4));
 
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.WHITE);
@@ -1595,7 +1595,7 @@ public class MainActivity extends android.app.Activity {
         bg.setStroke(dp(1), Color.parseColor("#D5DDDC"));
         box.setBackground(bg);
 
-        int popupWidth = dp(252);
+        int popupWidth = dp(210);
         PopupWindow popup = new PopupWindow(box, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
@@ -1605,7 +1605,7 @@ public class MainActivity extends android.app.Activity {
         LinearLayout navRow = new LinearLayout(this);
         navRow.setOrientation(LinearLayout.HORIZONTAL);
         navRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        navRow.setPadding(dp(6), dp(2), dp(6), dp(3));
+        navRow.setPadding(dp(4), dp(1), dp(4), dp(2));
 
         ImageButton back = makeHistoryButton(R.drawable.ic_back, "Back");
         ImageButton forward = makeHistoryButton(R.drawable.ic_forward, "Forward");
@@ -1632,12 +1632,12 @@ public class MainActivity extends android.app.Activity {
             }
         });
 
-        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(dp(44), dp(40));
-        navLp1.setMargins(0, 0, dp(5), 0);
-        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(dp(44), dp(40));
+        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(dp(36), dp(36));
+        navLp1.setMargins(0, 0, dp(4), 0);
+        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(dp(36), dp(36));
         navRow.addView(back, navLp1);
         navRow.addView(forward, navLp2);
-        box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
+        box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
 
         addMainMenuAction(box, adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF", () -> {
             popup.dismiss();
@@ -1668,9 +1668,12 @@ public class MainActivity extends android.app.Activity {
         ImageButton button = new ImageButton(this);
         button.setImageResource(iconRes);
         button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        button.setPadding(dp(10), dp(8), dp(10), dp(8));
+        button.setPadding(dp(7), dp(7), dp(7), dp(7));
         button.setContentDescription(description);
-        button.setBackground(makeRipple(Color.parseColor("#EEF3F2")));
+        button.setBackground(new RippleDrawable(
+                ColorStateList.valueOf(Color.parseColor("#22000000")),
+                new ColorDrawable(Color.TRANSPARENT),
+                null));
         applyPressAnimation(button);
         return button;
     }
