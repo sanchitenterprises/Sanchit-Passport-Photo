@@ -132,6 +132,9 @@ public class MainActivity extends android.app.Activity {
     private String slot1Url = GOOGLE_URL;
     private String slot2Name = GOOGLE_NAME;
     private String slot2Url = GOOGLE_URL;
+    private String d2HttpsUpgradeSource = null;
+    private String d2HttpsUpgradeTarget = null;
+    private boolean d2AllowHttpOnce = false;
     private volatile boolean slot1DocumentsHome = true;
     private volatile String phoneDataMode = "All Data";
     private volatile boolean documentAccessRequested = false;
@@ -566,7 +569,7 @@ public class MainActivity extends android.app.Activity {
                     } else if (isOfficeCandidate(url, mt)) {
                         openOfficeTask(url, guessOfficeName(url, contentDisposition, mt));
                     } else if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
-                        targetWebView.loadUrl(url);
+                        loadBrowserUrl(targetWebView, url);
                     }
                     child.destroy();
                 });
@@ -606,7 +609,7 @@ public class MainActivity extends android.app.Activity {
                         if (handle(url)) return true;
                         if (url.startsWith("http://") || url.startsWith("https://")) {
                             handled = true;
-                            targetWebView.loadUrl(url);
+                            loadBrowserUrl(targetWebView, url);
                             child.post(child::destroy);
                             return true;
                         }
@@ -658,6 +661,22 @@ public class MainActivity extends android.app.Activity {
                         openOfficeTask(uri.toString(), guessOfficeName(uri.toString(), null, null));
                         return true;
                     }
+                    if (view == webView2 && request.isForMainFrame() && "http".equals(scheme)) {
+                        if (d2AllowHttpOnce) {
+                            d2AllowHttpOnce = false;
+                            d2HttpsUpgradeSource = null;
+                            d2HttpsUpgradeTarget = null;
+                            return false;
+                        }
+                        String httpUrl = uri.toString();
+                        String httpsUrl = toHttpsUrl(httpUrl);
+                        if (!TextUtils.isEmpty(httpsUrl)) {
+                            d2HttpsUpgradeSource = httpUrl;
+                            d2HttpsUpgradeTarget = httpsUrl;
+                            view.loadUrl(httpsUrl);
+                            return true;
+                        }
+                    }
                     return false;
                 }
                 return openExternal(uri.toString());
@@ -667,11 +686,38 @@ public class MainActivity extends android.app.Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 updateYouTubeState(view, url);
-                if (view == webView2) syncD2AddressBar(url);
+                if (view == webView2) {
+                    syncD2AddressBar(url);
+                    if (!TextUtils.isEmpty(d2HttpsUpgradeTarget) &&
+                            url != null && url.equalsIgnoreCase(d2HttpsUpgradeTarget)) {
+                        d2HttpsUpgradeSource = null;
+                        d2HttpsUpgradeTarget = null;
+                        d2AllowHttpOnce = false;
+                    }
+                }
                 injectPdfHook(view);
                 injectBrowserCompatibility(view);
                 if (adBlockEnabled) injectNormalAdCleanup(view);
                 if (hardAdBlockEnabled) injectHardAdCleanup(view);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, android.webkit.WebResourceError error) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && request != null && request.isForMainFrame() &&
+                        view == webView2 && retryOriginalHttpAfterHttpsFailure(view, request.getUrl().toString())) {
+                    return;
+                }
+                super.onReceivedError(view, request, error);
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+                if (request != null && request.isForMainFrame() && view == webView2 &&
+                        errorResponse != null && errorResponse.getStatusCode() >= 400 &&
+                        retryOriginalHttpAfterHttpsFailure(view, request.getUrl().toString())) {
+                    return;
+                }
+                super.onReceivedHttpError(view, request, errorResponse);
             }
 
             @Override
@@ -1265,7 +1311,7 @@ public class MainActivity extends android.app.Activity {
         String selectedUrl = slot == 2 ? slot2Url : slot1Url;
         Site selected = findSiteByUrl(slot, selectedUrl);
         Runnable load = () -> {
-            if (target.getUrl() == null) target.loadUrl(selectedUrl);
+            if (target.getUrl() == null) loadBrowserUrl(target, selectedUrl);
         };
         if (selected != null && selected.hasPassword()) {
             showSitePasswordDialog(selected, load);
@@ -1302,7 +1348,8 @@ public class MainActivity extends android.app.Activity {
         if (wasDocumentsHome || !sameSelection || target.getUrl() == null) {
             target.animate().alpha(0.82f).setDuration(80).setListener(new AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(Animator animation) {
-                    target.loadUrl(site.url);
+                    if (slot == 2) loadBrowserUrl(target, site.url);
+                    else target.loadUrl(site.url);
                     target.animate().alpha(1f).setDuration(160).setListener(null).start();
                 }
             }).start();
@@ -1502,7 +1549,7 @@ public class MainActivity extends android.app.Activity {
         }
         showWebView(slot);
         WebView target = webViewForSlot(slot);
-        target.loadUrl(url);
+        loadBrowserUrl(target, url);
         return true;
     }
 
@@ -1520,7 +1567,7 @@ public class MainActivity extends android.app.Activity {
         }
         showWebView(2);
         WebView target = webViewForSlot(2);
-        target.loadUrl(slot2Url);
+        loadBrowserUrl(target, slot2Url);
     }
 
     private void refreshSlot(int slot) {
@@ -2277,6 +2324,41 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private String toHttpsUrl(String url) {
+        if (TextUtils.isEmpty(url) || !url.regionMatches(true, 0, "http://", 0, 7)) return null;
+        return "https://" + url.substring(7);
+    }
+
+    private void loadBrowserUrl(WebView target, String url) {
+        if (target == null || TextUtils.isEmpty(url)) return;
+        if (target == webView2 && url.regionMatches(true, 0, "http://", 0, 7)) {
+            String httpsUrl = toHttpsUrl(url);
+            if (!TextUtils.isEmpty(httpsUrl)) {
+                d2HttpsUpgradeSource = url;
+                d2HttpsUpgradeTarget = httpsUrl;
+                d2AllowHttpOnce = false;
+                target.loadUrl(httpsUrl);
+                return;
+            }
+        }
+        target.loadUrl(url);
+    }
+
+    private boolean retryOriginalHttpAfterHttpsFailure(WebView view, String failedUrl) {
+        if (view != webView2 || TextUtils.isEmpty(failedUrl) ||
+                TextUtils.isEmpty(d2HttpsUpgradeTarget) || TextUtils.isEmpty(d2HttpsUpgradeSource) ||
+                !failedUrl.equalsIgnoreCase(d2HttpsUpgradeTarget)) {
+            return false;
+        }
+
+        String fallback = d2HttpsUpgradeSource;
+        d2HttpsUpgradeTarget = null;
+        d2HttpsUpgradeSource = null;
+        d2AllowHttpOnce = true;
+        view.post(() -> view.loadUrl(fallback));
+        return true;
+    }
+
     private void syncD2AddressBar(String url) {
         if (slot2Button == null || slot2Button.hasFocus()) return;
         String shown = url;
@@ -2305,7 +2387,7 @@ public class MainActivity extends android.app.Activity {
 
         slot2Button.clearFocus();
         showWebView(2);
-        if (webView2 != null) webView2.loadUrl(destination);
+        if (webView2 != null) loadBrowserUrl(webView2, destination);
     }
 
     private List<Site> getSites(int slot) {
