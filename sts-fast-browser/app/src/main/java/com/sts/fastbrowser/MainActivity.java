@@ -488,6 +488,7 @@ public class MainActivity extends android.app.Activity {
             if (action == MotionEvent.ACTION_DOWN) {
                 customGesture[0] = false;
                 multiTouch[0] = false;
+                captureDownloadHintAtPoint(targetWebView, event.getX(), event.getY());
             }
 
             if (event.getPointerCount() >= 2) multiTouch[0] = true;
@@ -1183,6 +1184,40 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private void captureDownloadHintAtPoint(WebView view, float rawX, float rawY) {
+        if (view == null) return;
+        String x = String.format(Locale.US, "%.2f", rawX);
+        String y = String.format(Locale.US, "%.2f", rawY);
+        String js =
+                "(function(){try{" +
+                "var d=(window.devicePixelRatio||1),x=" + x + "/d,y=" + y + "/d;" +
+                "var e=document.elementFromPoint(x,y),a=e,c=0;" +
+                "while(a&&c<8){if(a.matches&&a.matches('a[href],button,[role=link],[role=button]'))break;a=a.parentElement;c++;}" +
+                "if(!a)return JSON.stringify({h:'',n:''});" +
+                "var h=String(a.href||a.getAttribute&&a.getAttribute('href')||'');" +
+                "var n=String((a.getAttribute&&a.getAttribute('download'))||(a.getAttribute&&a.getAttribute('aria-label'))||(a.getAttribute&&a.getAttribute('title'))||a.innerText||a.textContent||'').trim();" +
+                "return JSON.stringify({h:h,n:n});" +
+                "}catch(e){return JSON.stringify({h:'',n:''});}})()";
+        try {
+            view.evaluateJavascript(js, value -> {
+                try {
+                    if (TextUtils.isEmpty(value) || "null".equals(value)) return;
+                    JSONArray wrap = new JSONArray("[" + value + "]");
+                    String raw = wrap.optString(0, "");
+                    if (TextUtils.isEmpty(raw)) return;
+                    JSONObject obj = new JSONObject(raw);
+                    String href = obj.optString("h", "");
+                    String name = filenameFromClickedHref(href);
+                    if (TextUtils.isEmpty(name)) name = normalizeClickedDownloadName(obj.optString("n", ""));
+                    if (TextUtils.isEmpty(name)) return;
+                    synchronized (downloadHints) {
+                        downloadHints.put(view, new DownloadHint(href, name, System.currentTimeMillis()));
+                    }
+                } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {}
+    }
+
     private void injectDownloadNameHook(WebView view) {
         if (view == null) return;
         String js =
@@ -1203,7 +1238,7 @@ public class MainActivity extends android.app.Activity {
                 "var p=e.composedPath?e.composedPath():[];" +
                 "for(var i=0;i<p.length;i++){var x=p[i];if(x&&x.href)return x;}" +
                 "return e.target&&e.target.closest?e.target.closest('[href]'):null;}catch(z){return null;}}" +
-                "function remember(e){try{var a=exactLink(e);if(!a)return;var h=String(a.href||'');if(!/^https?:/i.test(h))return;" +
+                "function remember(e){try{var a=exactLink(e);if(!a)return;var h=String(a.href||a.getAttribute('href')||'');if(!h||/^javascript:/i.test(h))return;" +
                 "var n=fileNameFromExactLink(a);window.__stsLastDownloadHref=h;window.__stsLastDownloadName=n;window.__stsLastDownloadAt=Date.now();" +
                 "if(n&&window.STSDownload&&STSDownload.remember)STSDownload.remember(h,n);" +
                 "}catch(x){}}" +
@@ -1221,7 +1256,8 @@ public class MainActivity extends android.app.Activity {
 
         @JavascriptInterface
         public void remember(String href, String name) {
-            String clean = normalizeClickedDownloadName(name);
+            String clean = filenameFromClickedHref(href);
+            if (TextUtils.isEmpty(clean)) clean = normalizeClickedDownloadName(name);
             if (TextUtils.isEmpty(clean)) return;
             synchronized (downloadHints) {
                 downloadHints.put(owner, new DownloadHint(href, clean, System.currentTimeMillis()));
@@ -1251,7 +1287,10 @@ public class MainActivity extends android.app.Activity {
                             if (!TextUtils.isEmpty(raw)) {
                                 JSONObject meta = new JSONObject(raw);
                                 String clickedHref = meta.optString("h", "");
-                                String clickedName = normalizeClickedDownloadName(meta.optString("n", ""));
+                                String clickedName = filenameFromClickedHref(clickedHref);
+                                if (TextUtils.isEmpty(clickedName)) {
+                                    clickedName = normalizeClickedDownloadName(meta.optString("n", ""));
+                                }
                                 if (!TextUtils.isEmpty(clickedName)) {
                                     synchronized (downloadHints) {
                                         downloadHints.put(sourceView,
@@ -1288,9 +1327,19 @@ public class MainActivity extends android.app.Activity {
         if (lower.matches(".*\\bapk\\b.*")) ext = ".apk";
         else if (lower.matches(".*\\bzip\\b.*")) ext = ".zip";
         else if (lower.matches(".*\\bpdf\\b.*")) ext = ".pdf";
+        else if (lower.matches(".*\\bdocx\\b.*")) ext = ".docx";
+        else if (lower.matches(".*\\bxlsx\\b.*")) ext = ".xlsx";
+        else if (lower.matches(".*\\bpptx\\b.*")) ext = ".pptx";
+        else if (lower.matches(".*\\bjpg\\b.*|.*\\bjpeg\\b.*")) ext = ".jpg";
+        else if (lower.matches(".*\\bpng\\b.*")) ext = ".png";
+        else if (lower.matches(".*\\bwebp\\b.*")) ext = ".webp";
+        else if (lower.matches(".*\\bmp4\\b.*")) ext = ".mp4";
+        else if (lower.matches(".*\\bmp3\\b.*")) ext = ".mp3";
+        else if (lower.matches(".*\\brar\\b.*")) ext = ".rar";
+        else if (lower.matches(".*\\b7z\\b.*")) ext = ".7z";
         if (ext == null) return "";
 
-        n = n.replaceAll("(?i)\\b(download|apk|zip|pdf|kare|karen)\\b", " ")
+        n = n.replaceAll("(?i)\\b(download|apk|zip|pdf|docx|xlsx|pptx|jpg|jpeg|png|webp|mp4|mp3|rar|7z|kare|karen)\\b", " ")
                 .replace("डाउनलोड", " ")
                 .replace("करें", " ")
                 .replaceAll("\\s+", " ").trim();
@@ -1337,6 +1386,36 @@ public class MainActivity extends android.app.Activity {
         } catch (Exception ignored) {
             return "";
         }
+    }
+
+    private String filenameFromClickedHref(String href) {
+        if (TextUtils.isEmpty(href)) return "";
+        try {
+            Uri uri = Uri.parse(href);
+
+            // Exact path filename works for https://, sandbox:/, content-like/custom schemes, etc.
+            String last = uri.getLastPathSegment();
+            if (!TextUtils.isEmpty(last)) {
+                last = java.net.URLDecoder.decode(last, "UTF-8");
+                last = sanitizeDownloadName(last);
+                if (!isGenericDownloadName(last) &&
+                        last.matches("(?i).+\\.(apk|zip|pdf|docx?|xlsx?|pptx?|csv|txt|rtf|odt|ods|odp|jpg|jpeg|png|webp|gif|bmp|heic|heif|mp4|mkv|webm|mov|avi|mp3|m4a|aac|wav|ogg|flac|rar|7z|gz|exe|msi)$")) {
+                    return last;
+                }
+            }
+
+            // Common download APIs carry the real name in a query parameter.
+            String[] keys = new String[]{"filename", "file_name", "download_name", "name"};
+            for (String key : keys) {
+                String value = uri.getQueryParameter(key);
+                value = sanitizeDownloadName(value);
+                if (!TextUtils.isEmpty(value) && !isGenericDownloadName(value) &&
+                        value.matches("(?i).+\\.[a-z0-9]{1,8}$")) {
+                    return value;
+                }
+            }
+        } catch (Exception ignored) {}
+        return "";
     }
 
     private String filenameFromUrl(String url) {
