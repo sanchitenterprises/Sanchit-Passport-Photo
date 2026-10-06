@@ -866,6 +866,11 @@ public class MainActivity extends android.app.Activity {
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         s.setSupportZoom(true);
+        // Website <input type="file"> selections are usually returned as content:// URIs.
+        // Keep both file/content access explicitly enabled so WebView can consume the
+        // selected item after Android's picker returns it.
+        s.setAllowFileAccess(true);
+        s.setAllowContentAccess(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
@@ -894,40 +899,33 @@ public class MainActivity extends android.app.Activity {
             public boolean onShowFileChooser(WebView webView,
                                              ValueCallback<Uri[]> filePathCallback,
                                              WebChromeClient.FileChooserParams fileChooserParams) {
+                if (filePathCallback == null) return false;
+
+                // A WebView file-input callback is single-use. Cancel any older unfinished
+                // request first, then keep the new callback alive until Android returns.
                 if (pendingFileChooser != null) {
-                    pendingFileChooser.onReceiveValue(null);
-                    pendingFileChooser = null;
+                    try { pendingFileChooser.onReceiveValue(null); } catch (Exception ignored) {}
                 }
                 pendingFileChooser = filePathCallback;
 
                 try {
-                    Intent pick = fileChooserParams == null
-                            ? new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                            : fileChooserParams.createIntent();
-
-                    if (fileChooserParams == null) {
-                        pick.addCategory(Intent.CATEGORY_OPENABLE);
-                        pick.setType("*/*");
-                    }
-                    if (fileChooserParams != null &&
-                            fileChooserParams.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE) {
-                        pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                    }
-
-                    startActivityForResult(Intent.createChooser(pick, "Select file"), REQ_FILE_CHOOSER);
+                    Intent pick = buildWebsiteFilePickerIntent(fileChooserParams);
+                    Intent chooser = Intent.createChooser(pick, "Select file");
+                    chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivityForResult(chooser, REQ_FILE_CHOOSER);
                     return true;
                 } catch (Exception first) {
                     try {
-                        Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                        fallback.addCategory(Intent.CATEGORY_OPENABLE);
-                        fallback.setType("*/*");
-                        fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-                        startActivityForResult(fallback, REQ_FILE_CHOOSER);
+                        Intent fallback = buildWebsiteFilePickerIntent(null);
+                        Intent chooser = Intent.createChooser(fallback, "Select file");
+                        chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        startActivityForResult(chooser, REQ_FILE_CHOOSER);
                         return true;
                     } catch (Exception second) {
-                        if (pendingFileChooser != null) {
-                            pendingFileChooser.onReceiveValue(null);
-                            pendingFileChooser = null;
+                        ValueCallback<Uri[]> callback = pendingFileChooser;
+                        pendingFileChooser = null;
+                        if (callback != null) {
+                            try { callback.onReceiveValue(null); } catch (Exception ignored) {}
                         }
                         Toast.makeText(MainActivity.this, "File picker नहीं खुल पाया", Toast.LENGTH_SHORT).show();
                         return false;
@@ -4896,6 +4894,118 @@ public class MainActivity extends android.app.Activity {
         }
     }
 
+    private Intent buildWebsiteFilePickerIntent(WebChromeClient.FileChooserParams params) {
+        Intent pick = null;
+        if (params != null) {
+            try {
+                pick = params.createIntent();
+            } catch (Exception ignored) {
+                pick = null;
+            }
+        }
+
+        if (pick == null) {
+            pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            pick.setType("*/*");
+        }
+
+        if (TextUtils.isEmpty(pick.getType())) {
+            pick.setType("*/*");
+        }
+
+        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            pick.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        }
+
+        boolean multiple = params != null &&
+                params.getMode() == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE;
+        pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, multiple);
+
+        // Some OEM pickers ignore the MIME type in FileChooserParams#createIntent().
+        // Carry the site's accept= list explicitly when it contains usable MIME types.
+        if (params != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            String[] accept = params.getAcceptTypes();
+            ArrayList<String> clean = new ArrayList<>();
+            if (accept != null) {
+                for (String raw : accept) {
+                    if (TextUtils.isEmpty(raw)) continue;
+                    String[] parts = raw.split(",");
+                    for (String part : parts) {
+                        String mime = part == null ? "" : part.trim();
+                        if (!TextUtils.isEmpty(mime) && mime.contains("/") && !clean.contains(mime)) {
+                            clean.add(mime);
+                        }
+                    }
+                }
+            }
+            if (!clean.isEmpty()) {
+                pick.putExtra(Intent.EXTRA_MIME_TYPES, clean.toArray(new String[0]));
+                if (clean.size() == 1) pick.setType(clean.get(0));
+            }
+        }
+
+        return pick;
+    }
+
+    private Uri[] collectWebsiteFilePickerResult(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null) return null;
+
+        ArrayList<Uri> selected = new ArrayList<>();
+
+        // Read ClipData ourselves first. A few Android/OEM document providers return a
+        // valid multiple selection here while WebChromeClient.parseResult() gives null.
+        try {
+            ClipData clip = data.getClipData();
+            if (clip != null) {
+                for (int i = 0; i < clip.getItemCount(); i++) {
+                    Uri uri = clip.getItemAt(i).getUri();
+                    addWebsiteUploadUri(selected, uri, data);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        try {
+            addWebsiteUploadUri(selected, data.getData(), data);
+        } catch (Exception ignored) {}
+
+        // Keep the platform parser as a compatibility fallback for providers that package
+        // their result differently.
+        if (selected.isEmpty()) {
+            try {
+                Uri[] parsed = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
+                if (parsed != null) {
+                    for (Uri uri : parsed) addWebsiteUploadUri(selected, uri, data);
+                }
+            } catch (Exception ignored) {}
+        }
+
+        if (selected.isEmpty()) return null;
+        return selected.toArray(new Uri[0]);
+    }
+
+    private void addWebsiteUploadUri(ArrayList<Uri> selected, Uri uri, Intent resultData) {
+        if (uri == null || selected.contains(uri)) return;
+
+        // Retain read access when the provider supports it. This prevents a selected
+        // content:// URI from becoming unreadable before the webpage starts uploading.
+        if ("content".equalsIgnoreCase(uri.getScheme()) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            int returnedFlags = resultData == null ? 0 : resultData.getFlags();
+            int takeFlags = returnedFlags &
+                    (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            if ((returnedFlags & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0 &&
+                    (takeFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                try {
+                    getContentResolver().takePersistableUriPermission(uri,
+                            takeFlags & Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Exception ignored) {}
+            }
+        }
+
+        selected.add(uri);
+    }
+
     private boolean hasLocationPermission() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
@@ -4909,9 +5019,14 @@ public class MainActivity extends android.app.Activity {
         if (requestCode == REQ_FILE_CHOOSER) {
             ValueCallback<Uri[]> callback = pendingFileChooser;
             pendingFileChooser = null;
+
             if (callback != null) {
-                Uri[] result = WebChromeClient.FileChooserParams.parseResult(resultCode, data);
-                callback.onReceiveValue(result);
+                Uri[] result = collectWebsiteFilePickerResult(resultCode, data);
+                try {
+                    callback.onReceiveValue(result);
+                } catch (Exception ignored) {
+                    // The page may have navigated away while the picker was open.
+                }
             }
             return;
         }
