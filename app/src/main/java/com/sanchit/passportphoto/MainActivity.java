@@ -148,6 +148,13 @@ public class MainActivity extends Activity {
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
         beginRuntimeSession();
+
+        if(Build.VERSION.SDK_INT>=33){
+            getOnBackInvokedDispatcher().registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    ()->handleBackAction());
+        }
+
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         configureSystemBars();
         installGlobalSafeArea();
@@ -8677,7 +8684,7 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode,resultCode,data);
     }
 
-    @Override public void onBackPressed(){
+    private void handleBackAction(){
         if("PDF_VIEWER".equals(currentTool)){
             closePdfViewerResources();
             finish();
@@ -8709,6 +8716,10 @@ public class MainActivity extends Activity {
         }else{
             finish();
         }
+    }
+
+    @Override public void onBackPressed(){
+        handleBackAction();
     }
 
     @Override public void onTrimMemory(int level){
