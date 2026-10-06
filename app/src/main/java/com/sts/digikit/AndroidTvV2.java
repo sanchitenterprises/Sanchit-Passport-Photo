@@ -56,6 +56,7 @@ public class AndroidTvV2 {
     private static final String ID_CERT="client_cert_der";
     private static final String ID_KEY="client_key_pkcs8";
     private static final String ID_MODE="preferred_identity_mode";
+    private static final String TV_PIN_PREFIX="tv_cert_sha256_";
     private static final String MODE_PREFS="PREFS";
     private static final String MODE_KEYSTORE="KEYSTORE";
     private static final int PAIR_PORT=6467;
@@ -87,6 +88,51 @@ public class AndroidTvV2 {
         @Override public void checkClientTrusted(X509Certificate[] chain,String authType){}
         @Override public void checkServerTrusted(X509Certificate[] chain,String authType){}
         @Override public X509Certificate[] getAcceptedIssuers(){return new X509Certificate[0];}
+    }
+
+    private static String certFingerprint(X509Certificate cert) throws Exception{
+        byte[] digest=MessageDigest.getInstance("SHA-256").digest(cert.getEncoded());
+        StringBuilder b=new StringBuilder(digest.length*2);
+        for(byte x:digest) b.append(String.format(Locale.US,"%02X",x&0xff));
+        return b.toString();
+    }
+
+    private final class PinnedTrust implements X509TrustManager {
+        private final String expected;
+        PinnedTrust(String expected){this.expected=expected==null?"":expected.trim().toUpperCase(Locale.US);}
+
+        @Override public void checkClientTrusted(X509Certificate[] chain,String authType){}
+
+        @Override public void checkServerTrusted(X509Certificate[] chain,String authType)
+                throws java.security.cert.CertificateException{
+            try{
+                if(chain==null || chain.length==0) throw new SecurityException("TV certificate missing");
+                String actual=certFingerprint(chain[0]);
+                if(expected.isEmpty() || !expected.equals(actual)){
+                    throw new SecurityException("TV certificate changed");
+                }
+            }catch(java.security.cert.CertificateException e){
+                throw e;
+            }catch(Exception e){
+                throw new java.security.cert.CertificateException(e);
+            }
+        }
+
+        @Override public X509Certificate[] getAcceptedIssuers(){return new X509Certificate[0];}
+    }
+
+    private String savedTvPin(String ip){
+        if(ip==null || ip.trim().isEmpty()) return "";
+        return identityPrefs().getString(TV_PIN_PREFIX+ip.trim(),"");
+    }
+
+    private void saveTvPin(String ip,X509Certificate cert){
+        if(ip==null || ip.trim().isEmpty() || cert==null) return;
+        try{
+            identityPrefs().edit().putString(TV_PIN_PREFIX+ip.trim(),certFingerprint(cert)).apply();
+        }catch(Exception e){
+            Log.w(TAG,"Could not save TV certificate pin: "+e.getMessage());
+        }
     }
 
     private static class SingleKeyManager extends X509ExtendedKeyManager {
@@ -192,10 +238,12 @@ public class AndroidTvV2 {
         identityPrefs().edit().putString(ID_MODE,mode).apply();
     }
 
-    private SSLContext sslContext(Identity id) throws Exception{
+    private SSLContext sslContext(Identity id,String expectedPin) throws Exception{
         KeyManager km=new SingleKeyManager(KEY_ALIAS,id.key,id.cert);
         SSLContext ctx=SSLContext.getInstance("TLS");
-        ctx.init(new KeyManager[]{km},new TrustManager[]{new TrustAll()},new SecureRandom());
+        X509TrustManager trust=(expectedPin==null || expectedPin.trim().isEmpty())
+                ?new TrustAll():new PinnedTrust(expectedPin);
+        ctx.init(new KeyManager[]{km},new TrustManager[]{trust},new SecureRandom());
         return ctx;
     }
 
@@ -203,7 +251,8 @@ public class AndroidTvV2 {
         Socket plain=new Socket();
         try{
             plain.connect(new InetSocketAddress(ip,port),timeout);
-            SSLSocketFactory factory=sslContext(id).getSocketFactory();
+            String expectedPin=port==REMOTE_PORT?savedTvPin(ip):"";
+            SSLSocketFactory factory=sslContext(id,expectedPin).getSocketFactory();
             SSLSocket ssl=(SSLSocket)factory.createSocket(plain,ip,port,true);
             ssl.setUseClientMode(true);
             ssl.setSoTimeout(timeout);
@@ -215,6 +264,20 @@ public class AndroidTvV2 {
             if(!allowed.isEmpty()) ssl.setEnabledProtocols(allowed.toArray(new String[0]));
 
             ssl.startHandshake();
+
+            // Pairing itself uses the TV PIN challenge. For the remote service, use
+            // trust-on-first-use and pin the certificate so later connections cannot
+            // silently switch to a different device/certificate.
+            if(port==REMOTE_PORT && expectedPin.isEmpty()){
+                try{
+                    java.security.cert.Certificate[] peer=ssl.getSession().getPeerCertificates();
+                    if(peer.length>0 && peer[0] instanceof X509Certificate){
+                        saveTvPin(ip,(X509Certificate)peer[0]);
+                    }
+                }catch(Exception pinError){
+                    Log.w(TAG,"Could not pin TV certificate: "+pinError.getMessage());
+                }
+            }
             return ssl;
         }catch(Exception e){
             try{plain.close();}catch(Exception ignored){}
@@ -365,6 +428,10 @@ public class AndroidTvV2 {
 
         String ip=pairingIp;
         closePairing();
+
+        // Explicit re-pairing is the recovery path if the TV legitimately replaces
+        // its TLS certificate. Clear any old pin and learn the fresh remote cert.
+        identityPrefs().edit().remove(TV_PIN_PREFIX+ip).apply();
         savePreferredIdentityMode(MODE_PREFS);
         return connect(ip);
     }
@@ -466,7 +533,7 @@ public class AndroidTvV2 {
                             .setUnknown1(1)
                             .setUnknown2("1")
                             .setPackageName("com.sts.digikit")
-                            .setAppVersion("1.0")
+                            .setAppVersion(BuildConfig.VERSION_NAME)
                             .build();
                     Remotemessage.RemoteConfigure cfg=Remotemessage.RemoteConfigure.newBuilder()
                             .setCode1(activeFeatures)
@@ -521,6 +588,12 @@ public class AndroidTvV2 {
         remoteIn=null;
         remoteOut=null;
         if(remoteStarted!=null) remoteStarted.countDown();
+
+        Thread reader=remoteReader;
+        remoteReader=null;
+        if(reader!=null && reader!=Thread.currentThread()){
+            try{reader.interrupt();}catch(Exception ignored){}
+        }
     }
 
     public void close(){
