@@ -1633,9 +1633,11 @@ public class MainActivity extends android.app.Activity {
         });
 
         LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(dp(36), dp(36));
-        navLp1.setMargins(0, 0, dp(4), 0);
+        LinearLayout.LayoutParams spacerLp = new LinearLayout.LayoutParams(0, dp(1), 1f);
         LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(dp(36), dp(36));
         navRow.addView(back, navLp1);
+        View navSpacer = new View(this);
+        navRow.addView(navSpacer, spacerLp);
         navRow.addView(forward, navLp2);
         box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
 
@@ -1688,12 +1690,12 @@ public class MainActivity extends android.app.Activity {
         item.setText(label);
         item.setTextColor(Color.parseColor("#172326"));
         item.setTextSize(15);
-        item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(14), 0, dp(10), 0);
-        GradientDrawable base = new GradientDrawable();
-        base.setColor(Color.WHITE);
-        base.setCornerRadius(dp(9));
-        item.setBackground(new RippleDrawable(ColorStateList.valueOf(Color.parseColor("#224F8F8B")), base, null));
+        item.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        item.setPadding(dp(8), 0, dp(10), 0);
+        item.setBackground(new RippleDrawable(
+                ColorStateList.valueOf(Color.parseColor("#224F8F8B")),
+                new ColorDrawable(Color.TRANSPARENT),
+                null));
         item.setClickable(true);
         item.setFocusable(true);
         item.setOnClickListener(v -> {
