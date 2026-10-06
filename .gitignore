@@ -1,0 +1,4 @@
+.sts-signing/
+.gradle/
+**/build/
+local.properties
