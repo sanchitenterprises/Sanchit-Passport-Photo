@@ -46,6 +46,8 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
+import android.webkit.WebStorage;
+import android.webkit.WebViewDatabase;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
@@ -1715,6 +1717,7 @@ public class MainActivity extends android.app.Activity {
                 "Hard Ad Blocker: OFF",
                 "Add Website",
                 "Manage Websites",
+                "Clear Data",
                 "About"
         );
         PopupWindow popup = new PopupWindow(box, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true);
@@ -1774,6 +1777,10 @@ public class MainActivity extends android.app.Activity {
         addMainMenuAction(box, "Manage Websites", () -> {
             popup.dismiss();
             showManageSitesDialog();
+        });
+        addMainMenuAction(box, "Clear Data", () -> {
+            popup.dismiss();
+            showClearDataDialog();
         });
         addMainMenuAction(box, "About", () -> {
             popup.dismiss();
@@ -2154,6 +2161,97 @@ public class MainActivity extends android.app.Activity {
                     updateSlotLabels();
                     Toast.makeText(this, "Website removed", Toast.LENGTH_SHORT).show();
                 }).show();
+    }
+
+    private void showClearDataDialog() {
+        String[] options = new String[] {
+                "Clear Cache / Temporary Data",
+                "Clear All Browser Data"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("Clear Data")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        clearBrowserCacheKeepLogin();
+                    } else if (which == 1) {
+                        confirmClearAllBrowserData();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void clearBrowserCacheKeepLogin() {
+        try {
+            if (webView1 != null) webView1.clearCache(true);
+            if (webView2 != null) webView2.clearCache(true);
+            synchronized (phoneDataThumbCache) {
+                phoneDataThumbCache.evictAll();
+            }
+            // Deliberately do NOT clear cookies, WebStorage, IndexedDB or session/site storage.
+            CookieManager.getInstance().flush();
+            Toast.makeText(this, "Cache cleared • Login saved", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Cache clear नहीं हो पाया", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void confirmClearAllBrowserData() {
+        new AlertDialog.Builder(this)
+                .setTitle("Clear All Browser Data?")
+                .setMessage("इससे cache के साथ cookies, login/session और website storage भी हट जाएगा। Websites से logout हो सकते हैं।")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear All", (dialog, which) -> clearAllBrowserData())
+                .show();
+    }
+
+    private void clearAllBrowserData() {
+        try {
+            if (webView1 != null) {
+                webView1.stopLoading();
+                webView1.clearCache(true);
+                webView1.clearHistory();
+                webView1.clearFormData();
+                webView1.clearSslPreferences();
+            }
+            if (webView2 != null) {
+                webView2.stopLoading();
+                webView2.clearCache(true);
+                webView2.clearHistory();
+                webView2.clearFormData();
+                webView2.clearSslPreferences();
+            }
+
+            WebStorage.getInstance().deleteAllData();
+
+            WebViewDatabase db = WebViewDatabase.getInstance(this);
+            if (db != null) {
+                db.clearFormData();
+                db.clearHttpAuthUsernamePassword();
+                db.clearUsernamePassword();
+            }
+
+            CookieManager cookies = CookieManager.getInstance();
+            cookies.removeSessionCookies(null);
+            cookies.removeAllCookies(value -> {
+                try { cookies.flush(); } catch (Exception ignored) {}
+                runOnUiThread(() -> {
+                    if (webView1 != null) webView1.loadUrl("about:blank");
+                    if (webView2 != null) webView2.loadUrl("about:blank");
+                    webView1Loading = false;
+                    webView2Loading = false;
+                    updateLoadingOverlayForActiveSlot();
+                    Toast.makeText(this, "All browser data cleared", Toast.LENGTH_SHORT).show();
+                });
+            });
+
+            synchronized (phoneDataThumbCache) {
+                phoneDataThumbCache.evictAll();
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Browser data clear नहीं हो पाया", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private String currentAppVersion() {
