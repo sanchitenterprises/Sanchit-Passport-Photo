@@ -1557,8 +1557,8 @@ public class MainActivity extends android.app.Activity {
 
         LinearLayout navRow = new LinearLayout(this);
         navRow.setOrientation(LinearLayout.HORIZONTAL);
-        navRow.setGravity(Gravity.CENTER);
-        navRow.setPadding(dp(4), dp(3), dp(4), dp(5));
+        navRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        navRow.setPadding(dp(6), dp(2), dp(6), dp(3));
 
         ImageButton back = makeHistoryButton(R.drawable.ic_back, "Back");
         ImageButton forward = makeHistoryButton(R.drawable.ic_forward, "Forward");
@@ -1585,13 +1585,12 @@ public class MainActivity extends android.app.Activity {
             }
         });
 
-        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        navLp1.setMargins(0, 0, dp(3), 0);
-        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        navLp2.setMargins(dp(3), 0, 0, 0);
+        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(dp(44), dp(40));
+        navLp1.setMargins(0, 0, dp(5), 0);
+        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(dp(44), dp(40));
         navRow.addView(back, navLp1);
         navRow.addView(forward, navLp2);
-        box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+        box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)));
 
         addMainMenuAction(box, adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF", () -> {
             popup.dismiss();
@@ -1622,7 +1621,7 @@ public class MainActivity extends android.app.Activity {
         ImageButton button = new ImageButton(this);
         button.setImageResource(iconRes);
         button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        button.setPadding(dp(14), dp(10), dp(14), dp(10));
+        button.setPadding(dp(10), dp(8), dp(10), dp(8));
         button.setContentDescription(description);
         button.setBackground(makeRipple(Color.parseColor("#EEF3F2")));
         applyPressAnimation(button);
