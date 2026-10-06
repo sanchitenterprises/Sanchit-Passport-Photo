@@ -1595,7 +1595,15 @@ public class MainActivity extends android.app.Activity {
         bg.setStroke(dp(1), Color.parseColor("#D5DDDC"));
         box.setBackground(bg);
 
-        int popupWidth = dp(210);
+        String adLabel = adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF";
+        String hardAdLabel = hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF";
+        int popupWidth = measureMainMenuWidth(
+                adLabel,
+                hardAdLabel,
+                "Add Website",
+                "Manage Websites",
+                "About"
+        );
         PopupWindow popup = new PopupWindow(box, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
@@ -1638,11 +1646,11 @@ public class MainActivity extends android.app.Activity {
         navRow.addView(forward, navLp2);
         box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
 
-        addMainMenuAction(box, adBlockEnabled ? "Ad Blocker: ON" : "Ad Blocker: OFF", () -> {
+        addMainMenuAction(box, adLabel, () -> {
             popup.dismiss();
             setAdBlockEnabled(!adBlockEnabled, true);
         });
-        addMainMenuAction(box, hardAdBlockEnabled ? "Hard Ad Blocker: ON" : "Hard Ad Blocker: OFF", () -> {
+        addMainMenuAction(box, hardAdLabel, () -> {
             popup.dismiss();
             setHardAdBlockEnabled(!hardAdBlockEnabled, true);
         });
@@ -1661,6 +1669,23 @@ public class MainActivity extends android.app.Activity {
 
         int xOff = anchor.getWidth() - popupWidth;
         popup.showAsDropDown(anchor, xOff, dp(2));
+    }
+
+    private int measureMainMenuWidth(String... labels) {
+        android.graphics.Paint paint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.NORMAL));
+        paint.setTextSize(15f * getResources().getDisplayMetrics().scaledDensity);
+
+        float widest = 0f;
+        if (labels != null) {
+            for (String label : labels) {
+                if (label == null) continue;
+                widest = Math.max(widest, paint.measureText(label));
+            }
+        }
+
+        // Text width + the same left/right padding used by each row + popup's outer padding/stroke breathing room.
+        return Math.max(dp(96), Math.round(widest) + dp(28));
     }
 
     private ImageButton makeHistoryButton(int iconRes, String description) {
@@ -1687,8 +1712,9 @@ public class MainActivity extends android.app.Activity {
         item.setText(label);
         item.setTextColor(Color.parseColor("#172326"));
         item.setTextSize(15);
-        item.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(8), 0, dp(10), 0);
+        item.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        item.setTextAlignment(View.TEXT_ALIGNMENT_VIEW_START);
+        item.setPadding(dp(10), 0, dp(10), 0);
         item.setBackground(new RippleDrawable(
                 ColorStateList.valueOf(Color.parseColor("#224F8F8B")),
                 new ColorDrawable(Color.TRANSPARENT),
