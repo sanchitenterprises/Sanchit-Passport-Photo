@@ -1604,8 +1604,8 @@ public class MainActivity extends android.app.Activity {
 
         LinearLayout navRow = new LinearLayout(this);
         navRow.setOrientation(LinearLayout.HORIZONTAL);
-        navRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        navRow.setPadding(dp(4), dp(1), dp(4), dp(2));
+        navRow.setGravity(Gravity.CENTER_VERTICAL);
+        navRow.setPadding(0, dp(1), 0, dp(2));
 
         ImageButton back = makeHistoryButton(R.drawable.ic_back, "Back");
         ImageButton forward = makeHistoryButton(R.drawable.ic_forward, "Forward");
@@ -1632,12 +1632,9 @@ public class MainActivity extends android.app.Activity {
             }
         });
 
-        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(dp(36), dp(36));
-        LinearLayout.LayoutParams spacerLp = new LinearLayout.LayoutParams(0, dp(1), 1f);
-        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(dp(36), dp(36));
+        LinearLayout.LayoutParams navLp1 = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        LinearLayout.LayoutParams navLp2 = new LinearLayout.LayoutParams(0, dp(40), 1f);
         navRow.addView(back, navLp1);
-        View navSpacer = new View(this);
-        navRow.addView(navSpacer, spacerLp);
         navRow.addView(forward, navLp2);
         box.addView(navRow, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)));
 
@@ -1670,10 +1667,10 @@ public class MainActivity extends android.app.Activity {
         ImageButton button = new ImageButton(this);
         button.setImageResource(iconRes);
         button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        button.setPadding(dp(7), dp(7), dp(7), dp(7));
+        button.setPadding(dp(30), dp(8), dp(30), dp(8));
         button.setContentDescription(description);
         button.setBackground(new RippleDrawable(
-                ColorStateList.valueOf(Color.parseColor("#22000000")),
+                ColorStateList.valueOf(Color.parseColor("#18000000")),
                 new ColorDrawable(Color.TRANSPARENT),
                 null));
         applyPressAnimation(button);
