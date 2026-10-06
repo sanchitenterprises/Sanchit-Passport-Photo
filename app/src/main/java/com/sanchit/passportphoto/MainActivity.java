@@ -54,6 +54,35 @@ public class MainActivity extends Activity {
     private FrameLayout globalContentRoot;
     private int safeInsetLeft=0,safeInsetTop=0,safeInsetRight=0,safeInsetBottom=0;
 
+    // Runtime health marker: foreground crashes leave the marker dirty, while a
+    // normal background/exit marks it clean. This avoids treating normal Android
+    // process eviction as an app crash.
+    private static final String RUNTIME_SAFETY_PREFS="sts_runtime_safety";
+    private static final String RUNTIME_CLEAN_KEY="last_session_clean";
+    private boolean previousSessionInterrupted=false;
+
+    private void beginRuntimeSession(){
+        try{
+            android.content.SharedPreferences safety=getSharedPreferences(RUNTIME_SAFETY_PREFS,MODE_PRIVATE);
+            previousSessionInterrupted=!safety.getBoolean(RUNTIME_CLEAN_KEY,true);
+            safety.edit().putBoolean(RUNTIME_CLEAN_KEY,false).apply();
+        }catch(Throwable ignored){}
+    }
+
+    private void markRuntimeActive(){
+        try{
+            getSharedPreferences(RUNTIME_SAFETY_PREFS,MODE_PRIVATE)
+                    .edit().putBoolean(RUNTIME_CLEAN_KEY,false).apply();
+        }catch(Throwable ignored){}
+    }
+
+    private void markRuntimeClean(){
+        try{
+            getSharedPreferences(RUNTIME_SAFETY_PREFS,MODE_PRIVATE)
+                    .edit().putBoolean(RUNTIME_CLEAN_KEY,true).apply();
+        }catch(Throwable ignored){}
+    }
+
     private static final int REQ_EMBEDDED_SCANNER_CAMERA=9012;
     private static final int REQ_GALLERY_SCAN=9013;
     private static final int REQ_THERMAL_BLUETOOTH=9014;
@@ -118,6 +147,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
+        beginRuntimeSession();
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
         configureSystemBars();
         installGlobalSafeArea();
@@ -126,6 +156,9 @@ public class MainActivity extends Activity {
         vibrationEnabled=sp.getBoolean("vibration",true);
         language=sp.getString("language","ENGLISH");
         logEvent("App started");
+        if(previousSessionInterrupted){
+            logEvent("Previous foreground session ended unexpectedly; runtime state recovered");
+        }
         if(!handleIncomingPdfIntent(getIntent())){
             showCalculator();
         }
@@ -6182,7 +6215,7 @@ public class MainActivity extends Activity {
                 con.setRequestProperty("Pragma","no-cache");
                 con.setRequestProperty("Accept","*/*");
                 con.setRequestProperty("Accept-Encoding","identity");
-                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) STS-DigiKit/1.0.20");
+                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) STS-DigiKit/"+BuildConfig.VERSION_NAME);
                 con.setRequestProperty("Referer","https://speed.cloudflare.com/");
                 con.setRequestProperty("Origin","https://speed.cloudflare.com");
 
@@ -6241,7 +6274,7 @@ public class MainActivity extends Activity {
                 con.setRequestProperty("Content-Type","application/octet-stream");
                 con.setRequestProperty("Accept","*/*");
                 con.setRequestProperty("Cache-Control","no-cache");
-                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) STS-DigiKit/1.0.20");
+                con.setRequestProperty("User-Agent","Mozilla/5.0 (Linux; Android) STS-DigiKit/"+BuildConfig.VERSION_NAME);
                 con.setRequestProperty("Referer","https://speed.cloudflare.com/");
                 con.setRequestProperty("Origin","https://speed.cloudflare.com");
                 con.setFixedLengthStreamingMode(totalBytes);
@@ -8454,12 +8487,18 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume(){
         super.onResume();
+        markRuntimeActive();
         if("SCAN".equals(currentTool) && scannerActive && embeddedScanner!=null){
             if(Build.VERSION.SDK_INT<23 ||
                     checkSelfPermission(android.Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED){
                 try{embeddedScanner.resume();}catch(Throwable ignored){}
             }
         }
+    }
+
+    @Override protected void onStop(){
+        markRuntimeClean();
+        super.onStop();
     }
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
@@ -8672,8 +8711,30 @@ public class MainActivity extends Activity {
         }
     }
 
+    @Override public void onTrimMemory(int level){
+        super.onTrimMemory(level);
+        if(viewerPageCache!=null && level>=android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW){
+            try{
+                int target=Math.max(1,viewerPageCache.maxSize()/2);
+                viewerPageCache.trimToSize(target);
+            }catch(Throwable ignored){}
+        }
+    }
+
+    @Override public void onLowMemory(){
+        super.onLowMemory();
+        if(viewerPageCache!=null){
+            try{viewerPageCache.evictAll();}catch(Throwable ignored){}
+        }
+    }
+
     @Override protected void onDestroy(){
+        markRuntimeClean();
         closePdfViewerResources();
+        if(androidTvV2!=null){
+            try{androidTvV2.close();}catch(Throwable ignored){}
+            androidTvV2=null;
+        }
         super.onDestroy();
     }
 }
