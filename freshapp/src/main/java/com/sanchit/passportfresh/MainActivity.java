@@ -668,8 +668,10 @@ public class MainActivity extends Activity {
                         boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
                         // Dark/medium pixels near a strong person mask are likely hair.
                         // This protects hair strands and fills small blue holes inside the hair mass.
+                        boolean skinLike = isSkinLikeColor(r, g, b);
                         boolean hairCandidate = headZone
-                                && luminance < 185f
+                                && !skinLike
+                                && luminance < 165f
                                 && hairSupport > 0.30f;
 
                         float a;
@@ -694,6 +696,16 @@ public class MainActivity extends Activity {
                             }
                         }
 
+                        // Ear / cheek / jaw skin-edge refinement:
+                        // skin pixels must not inherit hair-preservation. Use a tighter,
+                        // narrower feather and a small inward cut to remove the pale halo.
+                        boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
+                        if (skinEdge) {
+                            float skinA = smoothStep(0.44f, 0.62f, confidence);
+                            float keep = 0.30f + 0.35f * (1f - smoothAmount);
+                            a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
+                        }
+
                         // Color-aware edge de-fringe:
                         // on semi-transparent boundary pixels, follow the mask gradient inward,
                         // sample the real foreground color and pull white/grey halo pixels toward it.
@@ -715,12 +727,14 @@ public class MainActivity extends Activity {
                                 boolean lightHalo = edgeLum > 150f
                                         && edgeChroma < 72
                                         && innerLum + 18f < edgeLum;
+                                boolean innerSkin = isSkinLikeColor(ir, ig, ib);
 
                                 float edgeBand = 1f - Math.abs(a * 2f - 1f); // strongest around 50% alpha
                                 float matchStrength = (0.18f + 0.46f * smoothAmount) * edgeBand;
 
                                 if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
-                                if (lightHalo) matchStrength = Math.max(matchStrength, 0.82f * edgeBand);
+                                if (skinEdge && innerSkin) matchStrength = Math.max(matchStrength, 0.88f * edgeBand);
+                                if (lightHalo) matchStrength = Math.max(matchStrength, 0.86f * edgeBand);
 
                                 matchStrength = Math.max(0f, Math.min(0.90f, matchStrength));
                                 r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
@@ -771,6 +785,19 @@ public class MainActivity extends Activity {
         } catch (RejectedExecutionException ignored) {
             // Activity/worker already closed; ignore late render requests safely.
         }
+    }
+
+    private boolean isSkinLikeColor(int r, int g, int b) {
+        if (r < 45 || g < 25 || b < 15) return false;
+        int max = Math.max(r, Math.max(g, b));
+        int min = Math.min(r, Math.min(g, b));
+        if (max - min < 10) return false;
+
+        // YCbCr skin range works better across fair/wheatish/darker Indian skin
+        // than a fixed RGB threshold.
+        float cb = 128f - 0.168736f * r - 0.331264f * g + 0.5f * b;
+        float cr = 128f + 0.5f * r - 0.418688f * g - 0.081312f * b;
+        return cb >= 72f && cb <= 132f && cr >= 128f && cr <= 184f && r >= g * 0.92f;
     }
 
     private int sampleInnerForegroundColor(int[] src, int w, int h, int x, int y,
@@ -826,8 +853,14 @@ public class MainActivity extends Activity {
                         Math.round(smx * (w - 1f) / Math.max(1f, mw - 1f))));
                 int sy = Math.max(0, Math.min(h - 1,
                         Math.round(smy * (h - 1f) / Math.max(1f, mh - 1f))));
-                bestColor = src[sy * w + sx];
-                bestConfidence = conf;
+                int candidate = src[sy * w + sx];
+
+                if (bestColor == -1
+                        || isSkinLikeColor(Color.red(candidate), Color.green(candidate), Color.blue(candidate))
+                        || conf > bestConfidence + 0.08f) {
+                    bestColor = candidate;
+                    bestConfidence = conf;
+                }
             }
 
             if (bestConfidence > 0.88f) break;
