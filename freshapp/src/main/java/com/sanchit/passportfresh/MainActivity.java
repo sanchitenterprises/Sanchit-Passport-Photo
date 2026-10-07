@@ -709,10 +709,7 @@ public class MainActivity extends Activity {
                     for (int x = 0; x < w; x++) {
                         int idx = y * w + x;
 
-                        if (erase != null && Color.alpha(erase[idx]) > 8) {
-                            dst[idx] = BLUE;
-                            continue;
-                        }
+                        float manualErase = erase == null ? 0f : (Color.alpha(erase[idx]) / 255f);
 
                         int mx = Math.min(mw - 1, Math.max(0, Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
 
@@ -829,6 +826,13 @@ public class MainActivity extends Activity {
                                     b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
                                 }
                             }
+                        }
+
+                        // Manual BRUSH / Local Color Clean mask. A full-alpha mask removes
+                        // the pixel completely; the soft outer brush ring only reduces alpha,
+                        // producing a smooth natural edge instead of a hard cut.
+                        if (manualErase > 0f) {
+                            a *= (1f - Math.max(0f, Math.min(1f, manualErase)));
                         }
 
                         // Do not brighten the semi-transparent edge itself; that was creating
