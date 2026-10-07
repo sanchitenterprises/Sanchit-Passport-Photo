@@ -92,7 +92,7 @@ public class MainActivity extends Activity {
     private int maskHeight;
     private Uri cameraUri;
     private boolean compareOriginal;
-    private boolean objectRemoveOn = true;
+    private boolean objectRemoveOn = false;
     private boolean strokeChanged;
     private volatile boolean destroyed;
     private int renderToken;
@@ -201,7 +201,7 @@ public class MainActivity extends Activity {
 
         LinearLayout row2 = buttonRow();
         compareButton = button("COMPARE", false);
-        objectButton = button("OBJECT REMOVE ✓", false);
+        objectButton = button("OBJECT REMOVE", false);
         objectButton.setTextSize(13);
         row2.addView(compareButton, weightedButton());
         row2.addView(objectButton, weightedButton());
@@ -763,7 +763,7 @@ public class MainActivity extends Activity {
 
     private void toggleObjectRemove() {
         objectRemoveOn = !objectRemoveOn;
-        objectButton.setText(objectRemoveOn ? "OBJECT REMOVE ON ✓" : "OBJECT REMOVE OFF");
+        objectButton.setText(objectRemoveOn ? "OBJECT REMOVE ✓" : "OBJECT REMOVE");
     }
 
     private boolean handleEraseTouch(View v, MotionEvent e) {
@@ -866,8 +866,8 @@ public class MainActivity extends Activity {
         brightnessSeek.setProgress(22);
         smoothSeek.setProgress(35);
         brushSeek.setProgress(42);
-        objectRemoveOn = true;
-        objectButton.setText("OBJECT REMOVE ON ✓");
+        objectRemoveOn = false;
+        objectButton.setText("OBJECT REMOVE");
         createEmptyEraseMask();
         clearHistory();
         if (personMask != null) renderResult();
