@@ -1198,23 +1198,45 @@ public class MainActivity extends Activity {
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
             gestureWasScaling = true;
+            brushStrokeStarted = false;
+            brushStrokeChanged = false;
             return true;
         }
-        if (action == MotionEvent.ACTION_POINTER_UP) {
-            return true;
-        }
+        if (action == MotionEvent.ACTION_POINTER_UP) return true;
 
         if (action == MotionEvent.ACTION_DOWN) {
             lastPanX = e.getX();
             lastPanY = e.getY();
+            lastBrushViewX = e.getX();
+            lastBrushViewY = e.getY();
             panMoved = false;
             gestureWasScaling = false;
+            brushStrokeStarted = false;
+            brushStrokeChanged = false;
             return true;
         }
 
         if (action == MotionEvent.ACTION_MOVE) {
             if (e.getPointerCount() > 1 || (scaleGestureDetector != null && scaleGestureDetector.isInProgress())) {
                 gestureWasScaling = true;
+                brushStrokeStarted = false;
+                brushStrokeChanged = false;
+                return true;
+            }
+
+            if (brushModeOn && !compareOriginal && resultBitmap != null) {
+                float dx = e.getX() - lastBrushViewX;
+                float dy = e.getY() - lastBrushViewY;
+                if (Math.abs(dx) > dp(1) || Math.abs(dy) > dp(1)) {
+                    if (!brushStrokeStarted) {
+                        pushUndo();
+                        clearDeque(redoMasks);
+                        brushStrokeStarted = true;
+                    }
+                    drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
+                    lastBrushViewX = e.getX();
+                    lastBrushViewY = e.getY();
+                }
                 return true;
             }
 
@@ -1232,7 +1254,24 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_UP) {
-            if (colorCleanOn && !compareOriginal && resultBitmap != null
+            if (brushModeOn && !compareOriginal && resultBitmap != null && !gestureWasScaling) {
+                if (!brushStrokeStarted) {
+                    pushUndo();
+                    clearDeque(redoMasks);
+                    brushStrokeStarted = true;
+                    drawBrushSegment(e.getX(), e.getY(), e.getX(), e.getY());
+                }
+                if (brushStrokeChanged) {
+                    updateHistoryButtons();
+                    status.setText("Brush apply • edge smooth / leftover clean");
+                    renderResult();
+                } else if (!undoMasks.isEmpty()) {
+                    undoMasks.pop();
+                    updateHistoryButtons();
+                }
+                brushStrokeStarted = false;
+                brushStrokeChanged = false;
+            } else if (colorCleanOn && !compareOriginal && resultBitmap != null
                     && !panMoved && !gestureWasScaling
                     && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
                 applyLocalColorCleanAt(e.getX(), e.getY());
@@ -1242,11 +1281,82 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_CANCEL) {
+            brushStrokeStarted = false;
+            brushStrokeChanged = false;
             gestureWasScaling = false;
             return true;
         }
 
         return true;
+    }
+
+    private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
+        try {
+            if (eraseMask == null) createEmptyEraseMask();
+            if (eraseMask == null) return;
+
+            Matrix inv = new Matrix();
+            if (!photoMatrix.invert(inv)) return;
+
+            float[] pts = new float[]{vx1, vy1, vx2, vy2};
+            inv.mapPoints(pts);
+
+            float x1 = pts[0], y1 = pts[1], x2 = pts[2], y2 = pts[3];
+            float distance = (float)Math.hypot(x2 - x1, y2 - y1);
+            float radius = Math.max(3f,
+                    (8f + brushSizeValue * 0.42f) / Math.max(1f, zoomFactor));
+            int steps = Math.max(1, (int)Math.ceil(distance / Math.max(1f, radius * 0.35f)));
+
+            for (int i = 0; i <= steps; i++) {
+                float t = steps == 0 ? 0f : i / (float)steps;
+                float x = x1 + (x2 - x1) * t;
+                float y = y1 + (y2 - y1) * t;
+                paintSoftErasePoint(x, y, radius);
+            }
+            brushStrokeChanged = true;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void paintSoftErasePoint(float cx, float cy, float radius) {
+        int w = eraseMask.getWidth();
+        int h = eraseMask.getHeight();
+        int left = Math.max(0, (int)Math.floor(cx - radius));
+        int top = Math.max(0, (int)Math.floor(cy - radius));
+        int right = Math.min(w - 1, (int)Math.ceil(cx + radius));
+        int bottom = Math.min(h - 1, (int)Math.ceil(cy + radius));
+        if (right < left || bottom < top) return;
+
+        int rw = right - left + 1;
+        int rh = bottom - top + 1;
+        int[] px = new int[rw * rh];
+        eraseMask.getPixels(px, 0, rw, left, top, rw, rh);
+
+        float inner = radius * 0.58f;
+        float feather = Math.max(1f, radius - inner);
+
+        for (int yy = 0; yy < rh; yy++) {
+            float py = top + yy + 0.5f;
+            for (int xx = 0; xx < rw; xx++) {
+                float pxX = left + xx + 0.5f;
+                float d = (float)Math.hypot(pxX - cx, py - cy);
+                if (d > radius) continue;
+
+                float strength;
+                if (d <= inner) strength = 1f;
+                else {
+                    float u = 1f - (d - inner) / feather;
+                    strength = u * u * (3f - 2f * u);
+                }
+
+                int index = yy * rw + xx;
+                int oldA = Color.alpha(px[index]);
+                int newA = Math.max(oldA, Math.round(255f * strength));
+                px[index] = Color.argb(newA, 255, 255, 255);
+            }
+        }
+
+        eraseMask.setPixels(px, 0, rw, left, top, rw, rh);
     }
 
     private void applyLocalColorCleanAt(float viewX, float viewY) {
