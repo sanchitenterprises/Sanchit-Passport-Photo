@@ -8,11 +8,11 @@ android {
         applicationId 'com.sanchit.passportfresh'
         minSdk 24
         targetSdk 35
-        versionCode 4
+        versionCode 5
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'
         }
-        versionName '1.0.3'
+        versionName '1.0.4'
     }
 
     buildTypes {
