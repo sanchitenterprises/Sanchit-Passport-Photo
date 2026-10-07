@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
     private ImageView processingLogo;
     private View processingShade;
     private View brushCursor;
+    private View colorCleanCursor;
     private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
     private SeekBar smoothSeek;
@@ -184,6 +185,17 @@ public class MainActivity extends Activity {
         brushCursorLp.gravity = Gravity.TOP | Gravity.LEFT;
         preview.addView(brushCursor, brushCursorLp);
 
+        colorCleanCursor = new View(this);
+        GradientDrawable colorCleanCursorBg = new GradientDrawable();
+        colorCleanCursorBg.setShape(GradientDrawable.OVAL);
+        colorCleanCursorBg.setColor(0x33FFFFFF);
+        colorCleanCursorBg.setStroke(dp(3), 0xFF4F8F8B);
+        colorCleanCursor.setBackground(colorCleanCursorBg);
+        colorCleanCursor.setVisibility(View.GONE);
+        FrameLayout.LayoutParams colorCursorLp = new FrameLayout.LayoutParams(dp(26), dp(26));
+        colorCursorLp.gravity = Gravity.TOP | Gravity.LEFT;
+        preview.addView(colorCleanCursor, colorCursorLp);
+
         processingShade = new View(this);
         processingShade.setBackgroundColor(0x66FFFFFF);
         processingShade.setVisibility(View.GONE);
@@ -220,14 +232,15 @@ public class MainActivity extends Activity {
         root.addView(controls, new LinearLayout.LayoutParams(-1, 0, 0.42f));
 
         LinearLayout row1 = buttonRow();
-        Button camera = button("📷 कैमरा", false);
-        Button gallery = button("🖼 फोटो चुनें", true);
-        row1.addView(camera, weightedButton());
-        row1.addView(gallery, weightedButton());
+        undoButton = button("UNDO", false);
+        redoButton = button("REDO", false);
+        row1.addView(undoButton, weightedButton());
+        row1.addView(redoButton, weightedButton());
         controls.addView(row1, weightedControlRow(1.0f));
 
         brightnessSeek = compactSlider(controls, "Brightness", 22);
         smoothSeek = compactSlider(controls, "Smooth BG", 35);
+        brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row2 = buttonRow();
         compareButton = button("COMPARE", false);
@@ -242,17 +255,17 @@ public class MainActivity extends Activity {
         controls.addView(row2, weightedControlRow(1.0f));
 
         LinearLayout row3 = buttonRow();
-        undoButton = button("UNDO", false);
-        redoButton = button("REDO", false);
-        row3.addView(undoButton, weightedButton());
-        row3.addView(redoButton, weightedButton());
+        Button camera = button("📷 कैमरा", false);
+        Button gallery = button("🖼 फोटो चुनें", true);
+        row3.addView(camera, weightedButton());
+        row3.addView(gallery, weightedButton());
         controls.addView(row3, weightedControlRow(1.0f));
-
-        brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row4 = buttonRow();
         processButton = button("SHARE", true);
         saveButton = button("SAVE", false);
+        saveButton.setTextColor(Color.WHITE);
+        saveButton.setBackground(rounded(0xFF4F8F5B, 13));
         row4.addView(processButton, weightedButton());
         row4.addView(saveButton, weightedButton());
         controls.addView(row4, weightedControlRow(1.0f));
@@ -694,11 +707,11 @@ public class MainActivity extends Activity {
                 }
 
                 float smoothAmount = smooth / 100f;
-                int blurRadius = Math.round(smoothAmount * 10f);
+                int blurRadius = Math.round(smoothAmount * 14f);
                 float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
-                if (smoothAmount > 0.35f) {
+                if (smoothAmount > 0.20f) {
                     smoothMask = blurMask(smoothMask, mw, mh,
-                            Math.max(1, Math.round(smoothAmount * 3f)));
+                            Math.max(1, Math.round(smoothAmount * 5f)));
                 }
 
                 // Hair-safe refinement:
@@ -709,8 +722,8 @@ public class MainActivity extends Activity {
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                 // Normal body edge cleanup.
-                float threshold = 0.51f + (0.07f * smoothAmount);
-                float feather = 0.14f + (0.08f * smoothAmount);
+                float threshold = 0.50f + (0.06f * smoothAmount);
+                float feather = 0.16f + (0.12f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
@@ -763,7 +776,7 @@ public class MainActivity extends Activity {
                             a = smoothStep(low, high, confidence);
                             if (smoothAmount > 0f && a > 0f && a < 1f) {
                                 float softened = smoothStep(0f, 1f, a);
-                                float softMix = 0.25f + 0.45f * smoothAmount;
+                                float softMix = 0.35f + 0.50f * smoothAmount;
                                 a = a * (1f - softMix) + softened * softMix;
                                 float edgeCut = 0.06f * smoothAmount;
                                 a = Math.max(0f, Math.min(1f,
@@ -1181,6 +1194,7 @@ public class MainActivity extends Activity {
         if (brushModeOn) {
             colorCleanOn = false;
             objectButton.setText("LOCAL COLOR CLEAN");
+            if (colorCleanCursor != null) colorCleanCursor.setVisibility(View.GONE);
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
@@ -1201,6 +1215,8 @@ public class MainActivity extends Activity {
         if (colorCleanOn) {
             brushModeOn = false;
             brushButton.setText("BRUSH");
+            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
+            imageView.post(() -> showColorCleanCursor(imageView.getWidth() * 0.5f, imageView.getHeight() * 0.5f));
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
         }
@@ -1210,6 +1226,7 @@ public class MainActivity extends Activity {
             compareButton.setText("COMPARE");
         }
         objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
+        if (!colorCleanOn && colorCleanCursor != null) colorCleanCursor.setVisibility(View.GONE);
         status.setText(colorCleanOn
                 ? "Zoom करें और हटाने वाले colour पर एक बार tap करें"
                 : "Local Color Clean OFF");
@@ -1233,6 +1250,7 @@ public class MainActivity extends Activity {
             lastBrushViewX = e.getX();
             lastBrushViewY = e.getY();
             if (brushModeOn) showBrushCursor(e.getX(), e.getY());
+            if (colorCleanOn) showColorCleanCursor(e.getX(), e.getY());
             panMoved = false;
             gestureWasScaling = false;
             brushStrokeStarted = false;
@@ -1258,12 +1276,16 @@ public class MainActivity extends Activity {
                         clearDeque(redoMasks);
                         brushStrokeStarted = true;
                     }
-                    drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
+                    float[] p1 = brushTargetPoint(lastBrushViewX, lastBrushViewY);
+                    float[] p2 = brushTargetPoint(e.getX(), e.getY());
+                    drawBrushSegment(p1[0], p1[1], p2[0], p2[1]);
                     lastBrushViewX = e.getX();
                     lastBrushViewY = e.getY();
                 }
                 return true;
             }
+
+            if (colorCleanOn) showColorCleanCursor(e.getX(), e.getY());
 
             float dx = e.getX() - lastPanX;
             float dy = e.getY() - lastPanY;
@@ -1285,7 +1307,8 @@ public class MainActivity extends Activity {
                     pushUndo();
                     clearDeque(redoMasks);
                     brushStrokeStarted = true;
-                    drawBrushSegment(e.getX(), e.getY(), e.getX(), e.getY());
+                    float[] bp = brushTargetPoint(e.getX(), e.getY());
+                    drawBrushSegment(bp[0], bp[1], bp[0], bp[1]);
                 }
                 if (brushStrokeChanged) {
                     updateHistoryButtons();
@@ -1300,7 +1323,8 @@ public class MainActivity extends Activity {
             } else if (colorCleanOn && !compareOriginal && resultBitmap != null
                     && !panMoved && !gestureWasScaling
                     && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
-                applyLocalColorCleanAt(e.getX(), e.getY());
+                float[] cp = colorCleanTargetPoint(e.getX(), e.getY());
+                applyLocalColorCleanAt(cp[0], cp[1]);
             }
             gestureWasScaling = false;
             return true;
@@ -1314,6 +1338,39 @@ public class MainActivity extends Activity {
         }
 
         return true;
+    }
+
+    private float[] brushTargetPoint(float fingerX, float fingerY) {
+        float offset = dp(48);
+        float tx = fingerX;
+        float ty = fingerY - offset;
+        if (ty < dp(6)) ty = fingerY + offset;
+        return new float[]{tx, ty};
+    }
+
+    private float[] colorCleanTargetPoint(float fingerX, float fingerY) {
+        float offset = dp(42);
+        float tx = fingerX + dp(18);
+        float ty = fingerY - offset;
+        if (ty < dp(6)) ty = fingerY + offset;
+        if (tx > imageView.getWidth() - dp(6)) tx = fingerX - dp(18);
+        return new float[]{tx, ty};
+    }
+
+    private void showColorCleanCursor(float fingerX, float fingerY) {
+        if (!colorCleanOn || colorCleanCursor == null || imageView == null) return;
+        float[] p = colorCleanTargetPoint(fingerX, fingerY);
+        int size = dp(26);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) colorCleanCursor.getLayoutParams();
+        lp.width = size;
+        lp.height = size;
+        lp.leftMargin = Math.round(p[0] - size * 0.5f);
+        lp.topMargin = Math.round(p[1] - size * 0.5f);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        colorCleanCursor.setLayoutParams(lp);
+        colorCleanCursor.setVisibility(View.VISIBLE);
+        colorCleanCursor.bringToFront();
+        if (status != null) status.bringToFront();
     }
 
     private float currentBrushScreenRadius() {
@@ -1331,13 +1388,14 @@ public class MainActivity extends Activity {
 
     private void showBrushCursor(float viewX, float viewY) {
         if (!brushModeOn || brushCursor == null || imageView == null) return;
+        float[] target = brushTargetPoint(viewX, viewY);
         float radius = currentBrushScreenRadius();
         int size = Math.max(dp(12), Math.round(radius * 2f));
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) brushCursor.getLayoutParams();
         lp.width = size;
         lp.height = size;
-        lp.leftMargin = Math.round(viewX - radius);
-        lp.topMargin = Math.round(viewY - radius);
+        lp.leftMargin = Math.round(target[0] - radius);
+        lp.topMargin = Math.round(target[1] - radius);
         lp.gravity = Gravity.TOP | Gravity.LEFT;
         brushCursor.setLayoutParams(lp);
         brushCursor.setVisibility(View.VISIBLE);
@@ -1874,18 +1932,18 @@ public class MainActivity extends Activity {
         }
 
         float smoothAmount = smooth / 100f;
-        int blurRadius = Math.round(smoothAmount * 10f);
+        int blurRadius = Math.round(smoothAmount * 14f);
         float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
-        if (smoothAmount > 0.35f) {
+        if (smoothAmount > 0.20f) {
             smoothMask = blurMask(smoothMask, mw, mh,
-                    Math.max(1, Math.round(smoothAmount * 3f)));
+                    Math.max(1, Math.round(smoothAmount * 5f)));
         }
         int hairRadius = 2 + Math.round(smoothAmount * 2f);
         float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
-        float threshold = 0.51f + (0.07f * smoothAmount);
-        float feather = 0.14f + (0.08f * smoothAmount);
+        float threshold = 0.50f + (0.06f * smoothAmount);
+        float feather = 0.16f + (0.12f * smoothAmount);
         float low = threshold - feather * 0.5f;
         float high = threshold + feather * 0.5f;
         float brighten = (brightness / 100f) * 0.32f;
@@ -1939,7 +1997,7 @@ public class MainActivity extends Activity {
                     a = smoothStep(low, high, confidence);
                     if (smoothAmount > 0f && a > 0f && a < 1f) {
                         float softened = smoothStep(0f, 1f, a);
-                        float softMix = 0.25f + 0.45f * smoothAmount;
+                        float softMix = 0.35f + 0.50f * smoothAmount;
                         a = a * (1f - softMix) + softened * softMix;
                         float edgeCut = 0.06f * smoothAmount;
                         a = Math.max(0f, Math.min(1f,
