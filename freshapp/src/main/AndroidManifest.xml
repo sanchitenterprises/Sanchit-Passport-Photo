@@ -9,7 +9,7 @@
 
     <application
         android:theme="@style/AppTheme"
-        android:label="STS Passport Size Photo"
+        android:label="STS Photo Background Remover"
         android:icon="@drawable/ic_passport_logo"
         android:roundIcon="@drawable/ic_passport_logo"
         android:allowBackup="true"
