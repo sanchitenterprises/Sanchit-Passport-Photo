@@ -633,8 +633,8 @@ public class MainActivity extends Activity {
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                 // Normal body edge cleanup.
-                float threshold = 0.42f + (0.16f * smoothAmount);
-                float feather = 0.18f - (0.05f * smoothAmount);
+                float threshold = 0.50f + (0.10f * smoothAmount);
+                float feather = 0.12f - (0.025f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
@@ -706,11 +706,15 @@ public class MainActivity extends Activity {
                             a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
                         }
 
-                        // Color-aware edge de-fringe:
-                        // on semi-transparent boundary pixels, follow the mask gradient inward,
-                        // sample the real foreground color and pull white/grey halo pixels toward it.
-                        if (a > 0.04f && a < 0.985f) {
+                        // Proper local matte decontamination:
+                        // The original source often has a white/light background baked into
+                        // semi-transparent boundary pixels. Sample both directions of the mask:
+                        // inward = true subject color, outward = old background color. Remove
+                        // the old background contribution before compositing over blue.
+                        if (a > 0.025f && a < 0.995f) {
                             int inner = sampleInnerForegroundColor(src, w, h, x, y,
+                                    smoothMask, mw, mh, mx, my, confidence);
+                            int outer = sampleOuterBackgroundColor(src, w, h, x, y,
                                     smoothMask, mw, mh, mx, my, confidence);
 
                             if (inner != -1) {
@@ -718,28 +722,51 @@ public class MainActivity extends Activity {
                                 int ig = Color.green(inner);
                                 int ib = Color.blue(inner);
 
-                                float edgeLum = 0.299f * r + 0.587f * g + 0.114f * b;
-                                float innerLum = 0.299f * ir + 0.587f * ig + 0.114f * ib;
-                                int edgeMax = Math.max(r, Math.max(g, b));
-                                int edgeMin = Math.min(r, Math.min(g, b));
-                                int edgeChroma = edgeMax - edgeMin;
+                                float edgeBand = 1f - Math.abs(a * 2f - 1f);
+                                float matchStrength = 0.20f + 0.35f * edgeBand;
 
-                                boolean lightHalo = edgeLum > 150f
-                                        && edgeChroma < 72
-                                        && innerLum + 18f < edgeLum;
-                                boolean innerSkin = isSkinLikeColor(ir, ig, ib);
+                                if (outer != -1) {
+                                    int or = Color.red(outer);
+                                    int og = Color.green(outer);
+                                    int ob = Color.blue(outer);
 
-                                float edgeBand = 1f - Math.abs(a * 2f - 1f); // strongest around 50% alpha
-                                float matchStrength = (0.18f + 0.46f * smoothAmount) * edgeBand;
+                                    float dInner = colorDistanceSq(r, g, b, ir, ig, ib);
+                                    float dOuter = colorDistanceSq(r, g, b, or, og, ob);
 
-                                if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
-                                if (skinEdge && innerSkin) matchStrength = Math.max(matchStrength, 0.88f * edgeBand);
-                                if (lightHalo) matchStrength = Math.max(matchStrength, 0.86f * edgeBand);
+                                    // Recover foreground from C = A*F + (1-A)*B.
+                                    // Clamp A away from zero to avoid unstable color explosions.
+                                    float solveA = Math.max(0.34f, Math.min(0.96f, a));
+                                    int fr = clamp255(Math.round((r - (1f - solveA) * or) / solveA));
+                                    int fg = clamp255(Math.round((g - (1f - solveA) * og) / solveA));
+                                    int fb = clamp255(Math.round((b - (1f - solveA) * ob) / solveA));
 
-                                matchStrength = Math.max(0f, Math.min(0.90f, matchStrength));
-                                r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
-                                g = clamp255(Math.round(g * (1f - matchStrength) + ig * matchStrength));
-                                b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
+                                    // Recovered color is blended toward a real inward subject
+                                    // sample, which prevents false colors on skin and white clothes.
+                                    float recover = 0.48f + 0.34f * edgeBand;
+                                    fr = clamp255(Math.round(fr * recover + ir * (1f - recover)));
+                                    fg = clamp255(Math.round(fg * recover + ig * (1f - recover)));
+                                    fb = clamp255(Math.round(fb * recover + ib * (1f - recover)));
+
+                                    boolean outerContaminated = dOuter + 120f < dInner;
+                                    if (outerContaminated) {
+                                        matchStrength = Math.max(matchStrength, 0.78f);
+                                        if (!hairCandidate) {
+                                            // Trim a little farther inward on skin/clothes so
+                                            // the old white matte cannot remain as a visible rim.
+                                            a *= skinEdge ? 0.78f : 0.84f;
+                                        }
+                                    }
+
+                                    r = clamp255(Math.round(r * (1f - matchStrength) + fr * matchStrength));
+                                    g = clamp255(Math.round(g * (1f - matchStrength) + fg * matchStrength));
+                                    b = clamp255(Math.round(b * (1f - matchStrength) + fb * matchStrength));
+                                } else {
+                                    if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
+                                    if (skinEdge) matchStrength = Math.max(matchStrength, 0.72f * edgeBand);
+                                    r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
+                                    g = clamp255(Math.round(g * (1f - matchStrength) + ig * matchStrength));
+                                    b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
+                                }
                             }
                         }
 
@@ -864,6 +891,74 @@ public class MainActivity extends Activity {
             }
 
             if (bestConfidence > 0.88f) break;
+        }
+
+        return bestColor;
+    }
+
+    private float colorDistanceSq(int r1, int g1, int b1, int r2, int g2, int b2) {
+        float dr = r1 - r2;
+        float dg = g1 - g2;
+        float db = b1 - b2;
+        return dr * dr + dg * dg + db * db;
+    }
+
+    private int sampleOuterBackgroundColor(int[] src, int w, int h, int x, int y,
+            float[] mask, int mw, int mh, int mx, int my, float currentConfidence) {
+        if (src == null || mask == null || mw < 2 || mh < 2) return -1;
+
+        int left = Math.max(0, mx - 1);
+        int right = Math.min(mw - 1, mx + 1);
+        int top = Math.max(0, my - 1);
+        int bottom = Math.min(mh - 1, my + 1);
+
+        float gx = mask[my * mw + right] - mask[my * mw + left];
+        float gy = mask[bottom * mw + mx] - mask[top * mw + mx];
+        float len = (float)Math.sqrt(gx * gx + gy * gy);
+
+        if (len < 0.015f) {
+            float worst = currentConfidence;
+            int worstX = mx;
+            int worstY = my;
+            for (int yy = Math.max(0, my - 2); yy <= Math.min(mh - 1, my + 2); yy++) {
+                for (int xx = Math.max(0, mx - 2); xx <= Math.min(mw - 1, mx + 2); xx++) {
+                    float v = mask[yy * mw + xx];
+                    if (v < worst) {
+                        worst = v;
+                        worstX = xx;
+                        worstY = yy;
+                    }
+                }
+            }
+            gx = mx - worstX;
+            gy = my - worstY;
+            len = (float)Math.sqrt(gx * gx + gy * gy);
+        }
+
+        if (len < 0.001f) return -1;
+        gx /= len;
+        gy /= len;
+
+        int bestColor = -1;
+        float bestConfidence = currentConfidence;
+
+        // Walk opposite the foreground gradient to find a clean patch of the
+        // original background immediately outside the person.
+        for (int step = 1; step <= 7; step++) {
+            int smx = Math.max(0, Math.min(mw - 1, Math.round(mx - gx * step)));
+            int smy = Math.max(0, Math.min(mh - 1, Math.round(my - gy * step)));
+            float conf = mask[smy * mw + smx];
+
+            if (conf <= bestConfidence - 0.035f || (bestColor == -1 && conf < 0.42f)) {
+                int sx = Math.max(0, Math.min(w - 1,
+                        Math.round(smx * (w - 1f) / Math.max(1f, mw - 1f))));
+                int sy = Math.max(0, Math.min(h - 1,
+                        Math.round(smy * (h - 1f) / Math.max(1f, mh - 1f))));
+                bestColor = src[sy * w + sx];
+                bestConfidence = conf;
+            }
+
+            if (bestConfidence < 0.12f) break;
         }
 
         return bestColor;
