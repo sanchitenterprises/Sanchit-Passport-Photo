@@ -100,7 +100,7 @@ public class MainActivity extends Activity {
         root.setPadding(dp(10), dp(8), dp(10), dp(8));
 
         TextView title = new TextView(this);
-        title.setText("Sanchit Passport Photo V1.2.0");
+        title.setText("Sanchit Passport Photo V1.2.1");
         title.setTextSize(28);
         title.setTextColor(Color.DKGRAY);
         title.setGravity(Gravity.CENTER);
