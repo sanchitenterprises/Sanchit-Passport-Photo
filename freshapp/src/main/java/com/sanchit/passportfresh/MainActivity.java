@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private TextView status;
     private ImageView processingLogo;
     private View processingShade;
+    private View brushCursor;
     private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
     private SeekBar smoothSeek;
@@ -83,7 +84,6 @@ public class MainActivity extends Activity {
     private Button undoButton;
     private Button redoButton;
     private Button processButton;
-    private Button resetButton;
     private Button saveButton;
 
     private Segmenter segmenter;
@@ -146,16 +146,16 @@ public class MainActivity extends Activity {
         headerText.setPadding(dp(8), 0, 0, 0);
 
         TextView title = new TextView(this);
-        title.setText("STS Passport Size Photo");
+        title.setText("STS Photo Background Remover");
         title.setTextColor(0xFF1F2933);
-        title.setTextSize(20);
+        title.setTextSize(18);
         title.setSingleLine(true);
         headerText.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Auto BG • Blue #4A90C2 • Offline");
+        subtitle.setText("Created by Sanchit Kumar");
         subtitle.setTextColor(0xFF6B7280);
-        subtitle.setTextSize(12);
+        subtitle.setTextSize(10);
         subtitle.setSingleLine(true);
         headerText.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
 
@@ -172,6 +172,17 @@ public class MainActivity extends Activity {
         imageView.setScaleType(ImageView.ScaleType.MATRIX);
         imageView.setBackgroundColor(0xFFE7EBEF);
         preview.addView(imageView, new FrameLayout.LayoutParams(-1, -1));
+
+        brushCursor = new View(this);
+        GradientDrawable brushCursorBg = new GradientDrawable();
+        brushCursorBg.setShape(GradientDrawable.OVAL);
+        brushCursorBg.setColor(0x22FFFFFF);
+        brushCursorBg.setStroke(dp(2), 0xFF111111);
+        brushCursor.setBackground(brushCursorBg);
+        brushCursor.setVisibility(View.GONE);
+        FrameLayout.LayoutParams brushCursorLp = new FrameLayout.LayoutParams(dp(30), dp(30));
+        brushCursorLp.gravity = Gravity.TOP | Gravity.LEFT;
+        preview.addView(brushCursor, brushCursorLp);
 
         processingShade = new View(this);
         processingShade.setBackgroundColor(0x66FFFFFF);
@@ -241,16 +252,10 @@ public class MainActivity extends Activity {
 
         LinearLayout row4 = buttonRow();
         processButton = button("SHARE", true);
-        resetButton = button("RESET", false);
+        saveButton = button("SAVE", false);
         row4.addView(processButton, weightedButton());
-        row4.addView(resetButton, weightedButton());
+        row4.addView(saveButton, weightedButton());
         controls.addView(row4, weightedControlRow(1.0f));
-
-        // Save stays available without adding another scroll row.
-        saveButton = button("फोटो सेव करें", false);
-        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, 0, 0.9f);
-        saveLp.setMargins(dp(3), dp(2), dp(3), dp(1));
-        controls.addView(saveButton, saveLp);
 
         setContentView(root);
 
@@ -262,7 +267,6 @@ public class MainActivity extends Activity {
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
         processButton.setOnClickListener(v -> sharePhoto());
-        resetButton.setOnClickListener(v -> resetEdits());
         saveButton.setOnClickListener(v -> savePhoto());
 
         SeekBar.OnSeekBarChangeListener redraw = new SeekBar.OnSeekBarChangeListener() {
@@ -282,6 +286,10 @@ public class MainActivity extends Activity {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
                 if (brushModeOn) {
                     brushSizeValue = p;
+                    if (brushCursor != null && brushCursor.getVisibility() == View.VISIBLE) {
+                        showBrushCursor(lastBrushViewX > 0 ? lastBrushViewX : imageView.getWidth() * 0.5f,
+                                lastBrushViewY > 0 ? lastBrushViewY : imageView.getHeight() * 0.5f);
+                    }
                     if (fromUser && status != null) status.setText("Brush Size " + p + "%");
                 } else {
                     colorToleranceValue = p;
@@ -307,6 +315,10 @@ public class MainActivity extends Activity {
                 zoomFactor = limited;
                 constrainPhotoMatrix();
                 imageView.setImageMatrix(photoMatrix);
+                if (brushModeOn && brushCursor != null && brushCursor.getVisibility() == View.VISIBLE) {
+                    showBrushCursor(lastBrushViewX > 0 ? lastBrushViewX : detector.getFocusX(),
+                            lastBrushViewY > 0 ? lastBrushViewY : detector.getFocusY());
+                }
                 if (status != null) status.setText("Zoom " + Math.round(zoomFactor * 100f) + "%");
                 return true;
             }
@@ -389,7 +401,6 @@ public class MainActivity extends Activity {
         brushButton.setEnabled(enabled);
         objectButton.setEnabled(enabled);
         processButton.setEnabled(enabled);
-        resetButton.setEnabled(enabled);
         saveButton.setEnabled(enabled);
         updateHistoryButtons();
     }
@@ -474,7 +485,7 @@ public class MainActivity extends Activity {
             values.put(MediaStore.Images.Media.DISPLAY_NAME, "Passport_" + System.currentTimeMillis() + ".jpg");
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
             if (Build.VERSION.SDK_INT >= 29) {
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo/Camera");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Photo Background Remover/Camera");
             }
 
             cameraUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
@@ -683,8 +694,12 @@ public class MainActivity extends Activity {
                 }
 
                 float smoothAmount = smooth / 100f;
-                int blurRadius = Math.round(smoothAmount * 7f);
+                int blurRadius = Math.round(smoothAmount * 10f);
                 float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
+                if (smoothAmount > 0.35f) {
+                    smoothMask = blurMask(smoothMask, mw, mh,
+                            Math.max(1, Math.round(smoothAmount * 3f)));
+                }
 
                 // Hair-safe refinement:
                 // use a small max/dilation support mask to close tiny holes inside hair,
@@ -694,8 +709,8 @@ public class MainActivity extends Activity {
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                 // Normal body edge cleanup.
-                float threshold = 0.50f + (0.10f * smoothAmount);
-                float feather = 0.12f - (0.025f * smoothAmount);
+                float threshold = 0.51f + (0.07f * smoothAmount);
+                float feather = 0.14f + (0.08f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
@@ -747,8 +762,10 @@ public class MainActivity extends Activity {
                         } else {
                             a = smoothStep(low, high, confidence);
                             if (smoothAmount > 0f && a > 0f && a < 1f) {
-                                a = (float)Math.pow(a, 1.0f + 1.8f * smoothAmount);
-                                float edgeCut = 0.18f * smoothAmount;
+                                float softened = smoothStep(0f, 1f, a);
+                                float softMix = 0.25f + 0.45f * smoothAmount;
+                                a = a * (1f - softMix) + softened * softMix;
+                                float edgeCut = 0.06f * smoothAmount;
                                 a = Math.max(0f, Math.min(1f,
                                         (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                             }
@@ -1167,9 +1184,11 @@ public class MainActivity extends Activity {
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • zoom करके edge/छूटा colour manually साफ करें");
+            status.setText("Brush ON • circle देखकर edge/छूटा colour manually साफ करें");
+            imageView.post(() -> showBrushCursor(imageView.getWidth() * 0.5f, imageView.getHeight() * 0.5f));
         } else {
             brushButton.setText("BRUSH");
+            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
             status.setText("Brush OFF");
@@ -1213,6 +1232,7 @@ public class MainActivity extends Activity {
             lastPanY = e.getY();
             lastBrushViewX = e.getX();
             lastBrushViewY = e.getY();
+            if (brushModeOn) showBrushCursor(e.getX(), e.getY());
             panMoved = false;
             gestureWasScaling = false;
             brushStrokeStarted = false;
@@ -1229,6 +1249,7 @@ public class MainActivity extends Activity {
             }
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
+                showBrushCursor(e.getX(), e.getY());
                 float dx = e.getX() - lastBrushViewX;
                 float dy = e.getY() - lastBrushViewY;
                 if (Math.abs(dx) > dp(1) || Math.abs(dy) > dp(1)) {
@@ -1259,6 +1280,7 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             if (brushModeOn && !compareOriginal && resultBitmap != null && !gestureWasScaling) {
+                showBrushCursor(e.getX(), e.getY());
                 if (!brushStrokeStarted) {
                     pushUndo();
                     clearDeque(redoMasks);
@@ -1294,6 +1316,35 @@ public class MainActivity extends Activity {
         return true;
     }
 
+    private float currentBrushScreenRadius() {
+        float density = getResources().getDisplayMetrics().density;
+        return density * (6f + 22f * (brushSizeValue / 100f));
+    }
+
+    private float currentImageScale() {
+        float[] values = new float[9];
+        photoMatrix.getValues(values);
+        float sx = values[Matrix.MSCALE_X];
+        float sy = values[Matrix.MSKEW_Y];
+        return Math.max(0.0001f, (float)Math.sqrt(sx * sx + sy * sy));
+    }
+
+    private void showBrushCursor(float viewX, float viewY) {
+        if (!brushModeOn || brushCursor == null || imageView == null) return;
+        float radius = currentBrushScreenRadius();
+        int size = Math.max(dp(12), Math.round(radius * 2f));
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) brushCursor.getLayoutParams();
+        lp.width = size;
+        lp.height = size;
+        lp.leftMargin = Math.round(viewX - radius);
+        lp.topMargin = Math.round(viewY - radius);
+        lp.gravity = Gravity.TOP | Gravity.LEFT;
+        brushCursor.setLayoutParams(lp);
+        brushCursor.setVisibility(View.VISIBLE);
+        brushCursor.bringToFront();
+        if (status != null) status.bringToFront();
+    }
+
     private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
         try {
             if (eraseMask == null) createEmptyEraseMask();
@@ -1307,8 +1358,7 @@ public class MainActivity extends Activity {
 
             float x1 = pts[0], y1 = pts[1], x2 = pts[2], y2 = pts[3];
             float distance = (float)Math.hypot(x2 - x1, y2 - y1);
-            float radius = Math.max(3f,
-                    (8f + brushSizeValue * 0.42f) / Math.max(1f, zoomFactor));
+            float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
             int steps = Math.max(1, (int)Math.ceil(distance / Math.max(1f, radius * 0.35f)));
 
             for (int i = 0; i <= steps; i++) {
@@ -1589,25 +1639,6 @@ public class MainActivity extends Activity {
         if (redoButton != null) redoButton.setEnabled(originalBitmap != null && !redoMasks.isEmpty());
     }
 
-    private void resetEdits() {
-        if (originalBitmap == null) return;
-        brightnessSeek.setProgress(22);
-        smoothSeek.setProgress(35);
-        colorToleranceValue = 22;
-        brushSizeValue = 30;
-        brushModeOn = false;
-        colorCleanOn = false;
-        brushButton.setText("BRUSH");
-        objectButton.setText("LOCAL COLOR CLEAN");
-        if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
-        brushSeek.setProgress(colorToleranceValue);
-        imageView.post(this::resetZoom);
-        createEmptyEraseMask();
-        clearHistory();
-        if (personMask != null) renderResult();
-        else segmentPhoto();
-    }
-
     private void clearHistory() {
         clearDeque(undoMasks);
         clearDeque(redoMasks);
@@ -1631,13 +1662,13 @@ public class MainActivity extends Activity {
             worker.execute(() -> {
                 Uri uri = null;
                 try {
-                    String name = "STS_Passport_Size_Photo_Share_" + System.currentTimeMillis() + ".jpg";
+                    String name = "STS_Photo_Background_Remover_Share_" + System.currentTimeMillis() + ".jpg";
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                     values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
 
                     if (Build.VERSION.SDK_INT >= 29) {
-                        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo/Shared");
+                        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Photo Background Remover/Shared");
                         values.put(MediaStore.Images.Media.IS_PENDING, 1);
                     } else {
                         File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
@@ -1730,7 +1761,7 @@ public class MainActivity extends Activity {
                 renderFullResolutionForSave(full, previewSource, saveMask, saveMaskW, saveMaskH,
                         saveErase, saveBrightness, saveSmooth);
 
-                String name = "STS_Passport_Size_Photo_" + System.currentTimeMillis() + ".jpg";
+                String name = "STS_Photo_Background_Remover_" + System.currentTimeMillis() + ".jpg";
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                 values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
@@ -1738,11 +1769,11 @@ public class MainActivity extends Activity {
                 values.put(MediaStore.Images.Media.HEIGHT, full.getHeight());
 
                 if (Build.VERSION.SDK_INT >= 29) {
-                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo");
+                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Photo Background Remover");
                     values.put(MediaStore.Images.Media.IS_PENDING, 1);
                 } else {
                     File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                            "STS Passport Size Photo");
+                            "STS Photo Background Remover");
                     if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("folder");
                     File file = new File(dir, name);
                     values.put(MediaStore.Images.Media.DATA, file.getAbsolutePath());
