@@ -5,6 +5,7 @@ import android.animation.Animator;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -37,6 +38,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -87,8 +89,6 @@ public class MainActivity extends Activity {
     private Button objectButton;
     private Button undoButton;
     private Button redoButton;
-    private Button processButton;
-    private Button saveButton;
 
     private Segmenter segmenter;
     private Bitmap originalBitmap;
@@ -157,13 +157,26 @@ public class MainActivity extends Activity {
         headerText.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Created by Sanchit Kumar");
+        subtitle.setText("Created by Sanchit Kumar • v" + BuildConfig.VERSION_NAME);
         subtitle.setTextColor(0xFF6B7280);
         subtitle.setTextSize(10);
         subtitle.setSingleLine(true);
         headerText.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
 
         header.addView(headerText, new LinearLayout.LayoutParams(0, -1, 1f));
+
+        TextView menuButton = new TextView(this);
+        menuButton.setText("⋮");
+        menuButton.setTextSize(28);
+        menuButton.setTextColor(0xFF1F2933);
+        menuButton.setGravity(Gravity.CENTER);
+        menuButton.setClickable(true);
+        menuButton.setFocusable(true);
+        menuButton.setBackground(rippleRounded(0xFFF0F6F6, 14, 0x33000000));
+        attachTouchAnimation(menuButton);
+        LinearLayout.LayoutParams menuLp = new LinearLayout.LayoutParams(dp(42), dp(48));
+        header.addView(menuButton, menuLp);
+
         LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(-1, dp(60));
         headerLp.bottomMargin = dp(6);
         root.addView(header, headerLp);
@@ -248,15 +261,6 @@ public class MainActivity extends Activity {
         row3.addView(gallery, weightedButton());
         controls.addView(row3, weightedControlRow(1.0f));
 
-        LinearLayout row4 = buttonRow();
-        processButton = button("SHARE", true);
-        saveButton = button("SAVE", false);
-        saveButton.setTextColor(Color.WHITE);
-        saveButton.setBackground(rippleRounded(0xFF4F8F5B, 13, 0x66FFFFFF));
-        row4.addView(processButton, weightedButton());
-        row4.addView(saveButton, weightedButton());
-        controls.addView(row4, weightedControlRow(1.0f));
-
         setContentView(root);
 
         camera.setOnClickListener(v -> openCamera());
@@ -266,8 +270,7 @@ public class MainActivity extends Activity {
         objectButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
-        processButton.setOnClickListener(v -> sharePhoto());
-        saveButton.setOnClickListener(v -> savePhoto());
+        menuButton.setOnClickListener(v -> showTopMenu(menuButton));
 
         SeekBar.OnSeekBarChangeListener redraw = new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
@@ -433,8 +436,6 @@ public class MainActivity extends Activity {
         compareButton.setEnabled(enabled);
         brushButton.setEnabled(enabled);
         objectButton.setEnabled(enabled);
-        processButton.setEnabled(enabled);
-        saveButton.setEnabled(enabled);
         updateHistoryButtons();
     }
 
@@ -481,6 +482,38 @@ public class MainActivity extends Activity {
             processingLogo.setVisibility(View.GONE);
         }
         if (processingShade != null) processingShade.setVisibility(View.GONE);
+    }
+
+    private void showTopMenu(View anchor) {
+        PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add("Share");
+        popup.getMenu().add("Save");
+        popup.getMenu().add("About");
+        popup.setOnMenuItemClickListener(item -> {
+            String title = item.getTitle().toString();
+            if ("Share".equals(title)) {
+                sharePhoto();
+                return true;
+            }
+            if ("Save".equals(title)) {
+                savePhoto();
+                return true;
+            }
+            if ("About".equals(title)) {
+                showAbout();
+                return true;
+            }
+            return false;
+        });
+        popup.show();
+    }
+
+    private void showAbout() {
+        new AlertDialog.Builder(this)
+                .setTitle("STS Photo Background Remover")
+                .setMessage("Created by Sanchit Kumar\nVersion " + BuildConfig.VERSION_NAME)
+                .setPositiveButton("OK", null)
+                .show();
     }
 
     private void openGallery() {
