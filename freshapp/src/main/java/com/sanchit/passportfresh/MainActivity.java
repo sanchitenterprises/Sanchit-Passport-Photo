@@ -8,6 +8,7 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -16,8 +17,11 @@ import android.graphics.Color;
 import android.graphics.ImageDecoder;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -73,8 +77,7 @@ public class MainActivity extends Activity {
     private TextView status;
     private ImageView processingLogo;
     private View processingShade;
-    private View brushCursor;
-    private View colorCleanCursor;
+    private LensView magnifierLens;
     private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
     private SeekBar smoothSeek;
@@ -126,7 +129,7 @@ public class MainActivity extends Activity {
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(246, 248, 250));
+        root.setBackgroundColor(0xFFF0F6F6);
         root.setPadding(dp(8), dp(6), dp(8), dp(7));
 
         // Compact professional header: fixed, no scrolling.
@@ -134,7 +137,7 @@ public class MainActivity extends Activity {
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(8), dp(3), dp(8), dp(3));
-        header.setBackground(rounded(Color.WHITE, 16));
+        header.setBackground(rounded(0xFFF9FCFC, 16));
 
         ImageView headerLogo = new ImageView(this);
         headerLogo.setImageResource(com.sanchit.passportfresh.R.drawable.ic_passport_logo);
@@ -167,34 +170,18 @@ public class MainActivity extends Activity {
 
         // Preview area gets most free space and never scrolls.
         FrameLayout preview = new FrameLayout(this);
-        preview.setBackground(rounded(0xFFE7EBEF, 18));
+        preview.setBackground(rounded(0xFFE4ECEF, 18));
 
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.MATRIX);
-        imageView.setBackgroundColor(0xFFE7EBEF);
+        imageView.setBackgroundColor(0xFFE4ECEF);
         preview.addView(imageView, new FrameLayout.LayoutParams(-1, -1));
 
-        brushCursor = new View(this);
-        GradientDrawable brushCursorBg = new GradientDrawable();
-        brushCursorBg.setShape(GradientDrawable.OVAL);
-        brushCursorBg.setColor(0x22FFFFFF);
-        brushCursorBg.setStroke(dp(2), 0xFF111111);
-        brushCursor.setBackground(brushCursorBg);
-        brushCursor.setVisibility(View.GONE);
-        FrameLayout.LayoutParams brushCursorLp = new FrameLayout.LayoutParams(dp(30), dp(30));
-        brushCursorLp.gravity = Gravity.TOP | Gravity.LEFT;
-        preview.addView(brushCursor, brushCursorLp);
-
-        colorCleanCursor = new View(this);
-        GradientDrawable colorCleanCursorBg = new GradientDrawable();
-        colorCleanCursorBg.setShape(GradientDrawable.OVAL);
-        colorCleanCursorBg.setColor(0x33FFFFFF);
-        colorCleanCursorBg.setStroke(dp(3), 0xFF4F8F8B);
-        colorCleanCursor.setBackground(colorCleanCursorBg);
-        colorCleanCursor.setVisibility(View.GONE);
-        FrameLayout.LayoutParams colorCursorLp = new FrameLayout.LayoutParams(dp(26), dp(26));
-        colorCursorLp.gravity = Gravity.TOP | Gravity.LEFT;
-        preview.addView(colorCleanCursor, colorCursorLp);
+        magnifierLens = new LensView(this);
+        magnifierLens.setVisibility(View.GONE);
+        FrameLayout.LayoutParams lensLp = new FrameLayout.LayoutParams(dp(132), dp(132));
+        lensLp.gravity = Gravity.TOP | Gravity.LEFT;
+        preview.addView(magnifierLens, lensLp);
 
         processingShade = new View(this);
         processingShade.setBackgroundColor(0x66FFFFFF);
@@ -228,7 +215,7 @@ public class MainActivity extends Activity {
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(dp(5), dp(5), dp(5), dp(5));
-        controls.setBackground(rounded(Color.WHITE, 18));
+        controls.setBackground(rounded(0xFFF8FBFA, 18));
         root.addView(controls, new LinearLayout.LayoutParams(-1, 0, 0.42f));
 
         LinearLayout row1 = buttonRow();
@@ -265,7 +252,7 @@ public class MainActivity extends Activity {
         processButton = button("SHARE", true);
         saveButton = button("SAVE", false);
         saveButton.setTextColor(Color.WHITE);
-        saveButton.setBackground(rounded(0xFF4F8F5B, 13));
+        saveButton.setBackground(rippleRounded(0xFF4F8F5B, 13, 0x66FFFFFF));
         row4.addView(processButton, weightedButton());
         row4.addView(saveButton, weightedButton());
         controls.addView(row4, weightedControlRow(1.0f));
@@ -299,10 +286,6 @@ public class MainActivity extends Activity {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
                 if (brushModeOn) {
                     brushSizeValue = p;
-                    if (brushCursor != null && brushCursor.getVisibility() == View.VISIBLE) {
-                        showBrushCursor(lastBrushViewX > 0 ? lastBrushViewX : imageView.getWidth() * 0.5f,
-                                lastBrushViewY > 0 ? lastBrushViewY : imageView.getHeight() * 0.5f);
-                    }
                     if (fromUser && status != null) status.setText("Brush Size " + p + "%");
                 } else {
                     colorToleranceValue = p;
@@ -316,6 +299,7 @@ public class MainActivity extends Activity {
                 scaleGestureDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override public boolean onScaleBegin(ScaleGestureDetector detector) {
                 gestureWasScaling = true;
+                hideLens();
                 return resultBitmap != null || originalBitmap != null;
             }
 
@@ -328,10 +312,6 @@ public class MainActivity extends Activity {
                 zoomFactor = limited;
                 constrainPhotoMatrix();
                 imageView.setImageMatrix(photoMatrix);
-                if (brushModeOn && brushCursor != null && brushCursor.getVisibility() == View.VISIBLE) {
-                    showBrushCursor(lastBrushViewX > 0 ? lastBrushViewX : detector.getFocusX(),
-                            lastBrushViewY > 0 ? lastBrushViewY : detector.getFocusY());
-                }
                 if (status != null) status.setText("Zoom " + Math.round(zoomFactor * 100f) + "%");
                 return true;
             }
@@ -366,9 +346,25 @@ public class MainActivity extends Activity {
         b.setText(text);
         b.setTextSize(14);
         b.setAllCaps(false);
-        b.setTextColor(primary ? Color.WHITE : 0xFF1F2933);
         b.setPadding(dp(6), 0, dp(6), 0);
-        b.setBackground(rounded(primary ? 0xFF5B7FA3 : 0xFFE9EEF3, 13));
+
+        int bgColor;
+        int textColor = Color.WHITE;
+        if (text.contains("UNDO")) bgColor = 0xFF7C7399;
+        else if (text.contains("REDO")) bgColor = 0xFF7E9B76;
+        else if (text.contains("COMPARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
+        else if (text.contains("BRUSH")) bgColor = 0xFF4F8F8B;
+        else if (text.contains("LOCAL")) bgColor = 0xFF5B7FA3;
+        else if (text.contains("कैमरा")) bgColor = 0xFF7C7399;
+        else if (text.contains("फोटो")) bgColor = 0xFF5B7FA3;
+        else if (text.contains("SHARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
+        else if (primary) bgColor = 0xFF5B7FA3;
+        else { bgColor = 0xFFE8F0EF; textColor = 0xFF1F2933; }
+
+        b.setTextColor(textColor);
+        b.setBackground(rippleRounded(bgColor, 13,
+                textColor == Color.WHITE ? 0x66FFFFFF : 0x33000000));
+        attachTouchAnimation(b);
         return b;
     }
 
@@ -389,10 +385,34 @@ public class MainActivity extends Activity {
         SeekBar seek = new SeekBar(this);
         seek.setMax(100);
         seek.setProgress(progressValue);
+        if (Build.VERSION.SDK_INT >= 21) {
+            int accent = "Brightness".equals(name) ? 0xFFB39B7A
+                    : ("Smooth BG".equals(name) ? 0xFF4F8F8B : 0xFF7C7399);
+            seek.setProgressTintList(ColorStateList.valueOf(accent));
+            seek.setThumbTintList(ColorStateList.valueOf(accent));
+        }
         row.addView(seek, new LinearLayout.LayoutParams(0, -1, 1f));
 
         parent.addView(row, weightedControlRow(0.82f));
         return seek;
+    }
+
+    private RippleDrawable rippleRounded(int color, int radiusDp, int rippleColor) {
+        GradientDrawable content = rounded(color, radiusDp);
+        GradientDrawable mask = rounded(Color.WHITE, radiusDp);
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), content, mask);
+    }
+
+    private void attachTouchAnimation(View v) {
+        v.setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                view.animate().scaleX(0.96f).scaleY(0.96f).alpha(0.90f).setDuration(90).start();
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                view.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(130).start();
+            }
+            return false;
+        });
     }
 
     private GradientDrawable rounded(int color, int radiusDp) {
@@ -1194,19 +1214,17 @@ public class MainActivity extends Activity {
         if (brushModeOn) {
             colorCleanOn = false;
             objectButton.setText("LOCAL COLOR CLEAN");
-            if (colorCleanCursor != null) colorCleanCursor.setVisibility(View.GONE);
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • circle देखकर edge/छूटा colour manually साफ करें");
-            imageView.post(() -> showBrushCursor(imageView.getWidth() * 0.5f, imageView.getHeight() * 0.5f));
+            status.setText("Brush ON • finger रखें, lens में exact edge देखकर साफ करें");
         } else {
             brushButton.setText("BRUSH");
-            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
             status.setText("Brush OFF");
         }
+        hideLens();
     }
 
     private void toggleColorClean() {
@@ -1215,8 +1233,6 @@ public class MainActivity extends Activity {
         if (colorCleanOn) {
             brushModeOn = false;
             brushButton.setText("BRUSH");
-            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
-            imageView.post(() -> showColorCleanCursor(imageView.getWidth() * 0.5f, imageView.getHeight() * 0.5f));
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
         }
@@ -1226,10 +1242,10 @@ public class MainActivity extends Activity {
             compareButton.setText("COMPARE");
         }
         objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
-        if (!colorCleanOn && colorCleanCursor != null) colorCleanCursor.setVisibility(View.GONE);
         status.setText(colorCleanOn
-                ? "Zoom करें और हटाने वाले colour पर एक बार tap करें"
+                ? "Finger रखें • lens में exact colour देखकर clean करें"
                 : "Local Color Clean OFF");
+        hideLens();
     }
 
     private boolean handlePhotoTouch(View v, MotionEvent e) {
@@ -1240,6 +1256,7 @@ public class MainActivity extends Activity {
             gestureWasScaling = true;
             brushStrokeStarted = false;
             brushStrokeChanged = false;
+            hideLens();
             return true;
         }
         if (action == MotionEvent.ACTION_POINTER_UP) return true;
@@ -1249,12 +1266,13 @@ public class MainActivity extends Activity {
             lastPanY = e.getY();
             lastBrushViewX = e.getX();
             lastBrushViewY = e.getY();
-            if (brushModeOn) showBrushCursor(e.getX(), e.getY());
-            if (colorCleanOn) showColorCleanCursor(e.getX(), e.getY());
             panMoved = false;
             gestureWasScaling = false;
             brushStrokeStarted = false;
             brushStrokeChanged = false;
+            if ((brushModeOn || colorCleanOn) && !compareOriginal && resultBitmap != null) {
+                showLens(e.getX(), e.getY());
+            }
             return true;
         }
 
@@ -1263,11 +1281,12 @@ public class MainActivity extends Activity {
                 gestureWasScaling = true;
                 brushStrokeStarted = false;
                 brushStrokeChanged = false;
+                hideLens();
                 return true;
             }
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
-                showBrushCursor(e.getX(), e.getY());
+                showLens(e.getX(), e.getY());
                 float dx = e.getX() - lastBrushViewX;
                 float dy = e.getY() - lastBrushViewY;
                 if (Math.abs(dx) > dp(1) || Math.abs(dy) > dp(1)) {
@@ -1276,16 +1295,17 @@ public class MainActivity extends Activity {
                         clearDeque(redoMasks);
                         brushStrokeStarted = true;
                     }
-                    float[] p1 = brushTargetPoint(lastBrushViewX, lastBrushViewY);
-                    float[] p2 = brushTargetPoint(e.getX(), e.getY());
-                    drawBrushSegment(p1[0], p1[1], p2[0], p2[1]);
+                    drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
                     lastBrushViewX = e.getX();
                     lastBrushViewY = e.getY();
                 }
                 return true;
             }
 
-            if (colorCleanOn) showColorCleanCursor(e.getX(), e.getY());
+            if (colorCleanOn && !compareOriginal && resultBitmap != null) {
+                showLens(e.getX(), e.getY());
+                return true;
+            }
 
             float dx = e.getX() - lastPanX;
             float dy = e.getY() - lastPanY;
@@ -1302,13 +1322,12 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             if (brushModeOn && !compareOriginal && resultBitmap != null && !gestureWasScaling) {
-                showBrushCursor(e.getX(), e.getY());
+                showLens(e.getX(), e.getY());
                 if (!brushStrokeStarted) {
                     pushUndo();
                     clearDeque(redoMasks);
                     brushStrokeStarted = true;
-                    float[] bp = brushTargetPoint(e.getX(), e.getY());
-                    drawBrushSegment(bp[0], bp[1], bp[0], bp[1]);
+                    drawBrushSegment(e.getX(), e.getY(), e.getX(), e.getY());
                 }
                 if (brushStrokeChanged) {
                     updateHistoryButtons();
@@ -1320,11 +1339,15 @@ public class MainActivity extends Activity {
                 }
                 brushStrokeStarted = false;
                 brushStrokeChanged = false;
+                hideLens();
             } else if (colorCleanOn && !compareOriginal && resultBitmap != null
                     && !panMoved && !gestureWasScaling
                     && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
-                float[] cp = colorCleanTargetPoint(e.getX(), e.getY());
-                applyLocalColorCleanAt(cp[0], cp[1]);
+                showLens(e.getX(), e.getY());
+                applyLocalColorCleanAt(e.getX(), e.getY());
+                hideLens();
+            } else {
+                hideLens();
             }
             gestureWasScaling = false;
             return true;
@@ -1334,43 +1357,11 @@ public class MainActivity extends Activity {
             brushStrokeStarted = false;
             brushStrokeChanged = false;
             gestureWasScaling = false;
+            hideLens();
             return true;
         }
 
         return true;
-    }
-
-    private float[] brushTargetPoint(float fingerX, float fingerY) {
-        float offset = dp(48);
-        float tx = fingerX;
-        float ty = fingerY - offset;
-        if (ty < dp(6)) ty = fingerY + offset;
-        return new float[]{tx, ty};
-    }
-
-    private float[] colorCleanTargetPoint(float fingerX, float fingerY) {
-        float offset = dp(42);
-        float tx = fingerX + dp(18);
-        float ty = fingerY - offset;
-        if (ty < dp(6)) ty = fingerY + offset;
-        if (tx > imageView.getWidth() - dp(6)) tx = fingerX - dp(18);
-        return new float[]{tx, ty};
-    }
-
-    private void showColorCleanCursor(float fingerX, float fingerY) {
-        if (!colorCleanOn || colorCleanCursor == null || imageView == null) return;
-        float[] p = colorCleanTargetPoint(fingerX, fingerY);
-        int size = dp(26);
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) colorCleanCursor.getLayoutParams();
-        lp.width = size;
-        lp.height = size;
-        lp.leftMargin = Math.round(p[0] - size * 0.5f);
-        lp.topMargin = Math.round(p[1] - size * 0.5f);
-        lp.gravity = Gravity.TOP | Gravity.LEFT;
-        colorCleanCursor.setLayoutParams(lp);
-        colorCleanCursor.setVisibility(View.VISIBLE);
-        colorCleanCursor.bringToFront();
-        if (status != null) status.bringToFront();
     }
 
     private float currentBrushScreenRadius() {
@@ -1386,21 +1377,51 @@ public class MainActivity extends Activity {
         return Math.max(0.0001f, (float)Math.sqrt(sx * sx + sy * sy));
     }
 
-    private void showBrushCursor(float viewX, float viewY) {
-        if (!brushModeOn || brushCursor == null || imageView == null) return;
-        float[] target = brushTargetPoint(viewX, viewY);
-        float radius = currentBrushScreenRadius();
-        int size = Math.max(dp(12), Math.round(radius * 2f));
-        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) brushCursor.getLayoutParams();
-        lp.width = size;
-        lp.height = size;
-        lp.leftMargin = Math.round(target[0] - radius);
-        lp.topMargin = Math.round(target[1] - radius);
+    private void showLens(float viewX, float viewY) {
+        if (magnifierLens == null || imageView == null) return;
+        Bitmap shown = compareOriginal ? originalBitmap : (resultBitmap != null ? resultBitmap : originalBitmap);
+        if (shown == null) return;
+
+        Matrix inv = new Matrix();
+        if (!photoMatrix.invert(inv)) return;
+        float[] pt = new float[]{viewX, viewY};
+        inv.mapPoints(pt);
+
+        float magnification = 3.4f;
+        float lensRadiusPx = dp(66);
+        float sourceRadius = lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
+        float brushRing = brushModeOn
+                ? Math.min(dp(52), currentBrushScreenRadius() * magnification)
+                : 0f;
+
+        magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
+                brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
+                brushRing);
+
+        int lensSize = dp(132);
+        int margin = dp(8);
+        int gap = dp(28);
+        int left = Math.round(viewX - lensSize * 0.5f);
+        int top = Math.round(viewY - lensSize - gap);
+        if (top < margin) top = Math.round(viewY + gap);
+
+        left = Math.max(margin, Math.min(imageView.getWidth() - lensSize - margin, left));
+        top = Math.max(margin, Math.min(imageView.getHeight() - lensSize - margin, top));
+
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams)magnifierLens.getLayoutParams();
+        lp.width = lensSize;
+        lp.height = lensSize;
+        lp.leftMargin = left;
+        lp.topMargin = top;
         lp.gravity = Gravity.TOP | Gravity.LEFT;
-        brushCursor.setLayoutParams(lp);
-        brushCursor.setVisibility(View.VISIBLE);
-        brushCursor.bringToFront();
+        magnifierLens.setLayoutParams(lp);
+        magnifierLens.setVisibility(View.VISIBLE);
+        magnifierLens.bringToFront();
         if (status != null) status.bringToFront();
+    }
+
+    private void hideLens() {
+        if (magnifierLens != null) magnifierLens.setVisibility(View.GONE);
     }
 
     private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
@@ -2085,6 +2106,95 @@ public class MainActivity extends Activity {
             }
 
             full.setPixels(row, 0, w, 0, y, w, 1);
+        }
+    }
+
+    private static class LensView extends View {
+        static final int MODE_BRUSH = 1;
+        static final int MODE_COLOR_CLEAN = 2;
+
+        private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint guidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path clip = new Path();
+
+        private Bitmap source;
+        private float sourceX;
+        private float sourceY;
+        private float sourceRadius = 20f;
+        private int mode = MODE_BRUSH;
+        private float brushRingPx;
+
+        LensView(android.content.Context context) {
+            super(context);
+            borderPaint.setStyle(Paint.Style.STROKE);
+            borderPaint.setStrokeWidth(4f);
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+        }
+
+        void setLens(Bitmap bitmap, float x, float y, float radius, int lensMode, float brushRing) {
+            source = bitmap;
+            sourceX = x;
+            sourceY = y;
+            sourceRadius = Math.max(2f, radius);
+            mode = lensMode;
+            brushRingPx = brushRing;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float cx = getWidth() * 0.5f;
+            float cy = getHeight() * 0.5f;
+            float radius = Math.min(getWidth(), getHeight()) * 0.5f - 5f;
+
+            clip.reset();
+            clip.addCircle(cx, cy, radius, Path.Direction.CW);
+            canvas.save();
+            canvas.clipPath(clip);
+            canvas.drawColor(0xFFF7FBFC);
+
+            if (source != null && !source.isRecycled()) {
+                float l = Math.max(0f, sourceX - sourceRadius);
+                float t = Math.max(0f, sourceY - sourceRadius);
+                float r = Math.min(source.getWidth() - 1f, sourceX + sourceRadius);
+                float b = Math.min(source.getHeight() - 1f, sourceY + sourceRadius);
+
+                int il = Math.max(0, Math.min(source.getWidth() - 1, Math.round(l)));
+                int it = Math.max(0, Math.min(source.getHeight() - 1, Math.round(t)));
+                int ir = Math.max(il + 1, Math.min(source.getWidth(), Math.round(r)));
+                int ib = Math.max(it + 1, Math.min(source.getHeight(), Math.round(b)));
+
+                Rect src = new Rect(il, it, ir, ib);
+                RectF dst = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
+                canvas.drawBitmap(source, src, dst, bitmapPaint);
+            }
+            canvas.restore();
+
+            int accent = mode == MODE_BRUSH ? 0xFF4F8F8B : 0xFF5B7FA3;
+            borderPaint.setColor(accent);
+            canvas.drawCircle(cx, cy, radius, borderPaint);
+
+            guidePaint.setStyle(Paint.Style.STROKE);
+            guidePaint.setStrokeWidth(2.5f);
+            guidePaint.setColor(0xEE111111);
+            canvas.drawLine(cx - 13f, cy, cx + 13f, cy, guidePaint);
+            canvas.drawLine(cx, cy - 13f, cx, cy + 13f, guidePaint);
+
+            if (mode == MODE_BRUSH && brushRingPx > 0f) {
+                float rr = Math.min(radius * 0.72f, brushRingPx);
+                guidePaint.setColor(0xEEFFFFFF);
+                guidePaint.setStrokeWidth(5f);
+                canvas.drawCircle(cx, cy, rr, guidePaint);
+                guidePaint.setColor(0xEE111111);
+                guidePaint.setStrokeWidth(2f);
+                canvas.drawCircle(cx, cy, rr, guidePaint);
+            } else {
+                guidePaint.setStyle(Paint.Style.FILL);
+                guidePaint.setColor(accent);
+                canvas.drawCircle(cx, cy, 5f, guidePaint);
+            }
         }
     }
 
