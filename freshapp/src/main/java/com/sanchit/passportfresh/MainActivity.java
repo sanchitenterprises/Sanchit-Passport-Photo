@@ -1696,7 +1696,7 @@ public class MainActivity extends Activity {
     }
 
     private void savePhoto() {
-        if (resultBitmap == null) {
+        if (resultBitmap == null || originalBitmap == null || personMask == null) {
             toast("पहले फोटो तैयार करें");
             return;
         }
@@ -1707,16 +1707,35 @@ public class MainActivity extends Activity {
             return;
         }
 
-        final Bitmap copy = resultBitmap.copy(Bitmap.Config.ARGB_8888, false);
-        setBusy(true, "फोटो सेव हो रही है…");
+        final Uri saveSourceUri = sourceUri;
+        final Bitmap previewSource = originalBitmap.copy(Bitmap.Config.ARGB_8888, false);
+        final Bitmap saveErase = eraseMask == null ? null : eraseMask.copy(Bitmap.Config.ALPHA_8, false);
+        final float[] saveMask = personMask.clone();
+        final int saveMaskW = maskWidth;
+        final int saveMaskH = maskHeight;
+        final int saveBrightness = brightnessSeek.getProgress();
+        final int saveSmooth = smoothSeek.getProgress();
+
+        setBusy(true, "Original size में फोटो सेव हो रही है…");
 
         worker.execute(() -> {
             Uri uri = null;
+            Bitmap full = null;
             try {
+                if (saveSourceUri == null) throw new IllegalStateException("source uri missing");
+
+                full = decodeOriginalFull(saveSourceUri);
+                if (full == null) throw new IllegalStateException("full decode failed");
+
+                renderFullResolutionForSave(full, previewSource, saveMask, saveMaskW, saveMaskH,
+                        saveErase, saveBrightness, saveSmooth);
+
                 String name = "STS_Passport_Size_Photo_" + System.currentTimeMillis() + ".jpg";
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                 values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                values.put(MediaStore.Images.Media.WIDTH, full.getWidth());
+                values.put(MediaStore.Images.Media.HEIGHT, full.getHeight());
 
                 if (Build.VERSION.SDK_INT >= 29) {
                     values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo");
@@ -1733,7 +1752,7 @@ public class MainActivity extends Activity {
                 if (uri == null) throw new IllegalStateException("insert");
 
                 try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
-                    if (out == null || !copy.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
+                    if (out == null || !full.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
                         throw new IllegalStateException("write");
                     }
                 }
@@ -1744,9 +1763,19 @@ public class MainActivity extends Activity {
                     getContentResolver().update(uri, ready, null, null);
                 }
 
+                final int savedW = full.getWidth();
+                final int savedH = full.getHeight();
                 runOnUiThread(() -> {
-                    setBusy(false, "Saved");
-                    toast("फोटो सेव हो गई");
+                    setBusy(false, "Saved • Original Size " + savedW + "×" + savedH);
+                    toast("Original size में फोटो सेव हो गई");
+                });
+            } catch (OutOfMemoryError oom) {
+                if (uri != null) {
+                    try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
+                }
+                runOnUiThread(() -> {
+                    setBusy(false, "Original-size save memory error");
+                    toast("Original size save के लिए memory कम है");
                 });
             } catch (Exception ex) {
                 if (uri != null) {
@@ -1757,9 +1786,211 @@ public class MainActivity extends Activity {
                     toast("फोटो सेव नहीं हुई");
                 });
             } finally {
-                if (!copy.isRecycled()) copy.recycle();
+                if (full != null && !full.isRecycled()) full.recycle();
+                if (previewSource != null && !previewSource.isRecycled()) previewSource.recycle();
+                if (saveErase != null && !saveErase.isRecycled()) saveErase.recycle();
             }
         });
+    }
+
+    private Bitmap decodeOriginalFull(Uri uri) throws Exception {
+        if (Build.VERSION.SDK_INT >= 28) {
+            ImageDecoder.Source src = ImageDecoder.createSource(getContentResolver(), uri);
+            Bitmap decoded = ImageDecoder.decodeBitmap(src, (decoder, info, source) -> {
+                decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                decoder.setMutableRequired(true);
+            });
+            if (decoded.getConfig() == Bitmap.Config.ARGB_8888 && decoded.isMutable()) return decoded;
+            Bitmap copy = decoded.copy(Bitmap.Config.ARGB_8888, true);
+            if (decoded != copy && !decoded.isRecycled()) decoded.recycle();
+            return copy;
+        }
+
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        opts.inMutable = true;
+        opts.inSampleSize = 1;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            Bitmap b = BitmapFactory.decodeStream(in, null, opts);
+            if (b == null) return null;
+            if (b.getConfig() == Bitmap.Config.ARGB_8888 && b.isMutable()) return b;
+            Bitmap copy = b.copy(Bitmap.Config.ARGB_8888, true);
+            if (b != copy && !b.isRecycled()) b.recycle();
+            return copy;
+        }
+    }
+
+    private void renderFullResolutionForSave(Bitmap full, Bitmap previewSource,
+            float[] mask, int mw, int mh, Bitmap manualMask,
+            int brightness, int smooth) {
+
+        int w = full.getWidth();
+        int h = full.getHeight();
+        int pw = previewSource.getWidth();
+        int ph = previewSource.getHeight();
+
+        int[] previewSrc = new int[pw * ph];
+        previewSource.getPixels(previewSrc, 0, pw, 0, 0, pw, ph);
+
+        int[] manual = null;
+        int manualW = 0;
+        int manualH = 0;
+        if (manualMask != null) {
+            manualW = manualMask.getWidth();
+            manualH = manualMask.getHeight();
+            manual = new int[manualW * manualH];
+            manualMask.getPixels(manual, 0, manualW, 0, 0, manualW, manualH);
+        }
+
+        float smoothAmount = smooth / 100f;
+        int blurRadius = Math.round(smoothAmount * 7f);
+        float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
+        int hairRadius = 2 + Math.round(smoothAmount * 2f);
+        float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
+        int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
+
+        float threshold = 0.50f + (0.10f * smoothAmount);
+        float feather = 0.12f - (0.025f * smoothAmount);
+        float low = threshold - feather * 0.5f;
+        float high = threshold + feather * 0.5f;
+        float brighten = (brightness / 100f) * 0.32f;
+
+        int br = Color.red(BLUE);
+        int bg = Color.green(BLUE);
+        int bb = Color.blue(BLUE);
+
+        int[] row = new int[w];
+
+        for (int y = 0; y < h; y++) {
+            full.getPixels(row, 0, w, 0, y, w, 1);
+
+            int my = Math.min(mh - 1, Math.max(0,
+                    Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+            int py = Math.min(ph - 1, Math.max(0,
+                    Math.round(y * (ph - 1f) / Math.max(1f, h - 1f))));
+
+            for (int x = 0; x < w; x++) {
+                int mx = Math.min(mw - 1, Math.max(0,
+                        Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                int px = Math.min(pw - 1, Math.max(0,
+                        Math.round(x * (pw - 1f) / Math.max(1f, w - 1f))));
+
+                int color = row[x];
+                int r = Color.red(color);
+                int g = Color.green(color);
+                int b = Color.blue(color);
+                float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
+
+                int maskIndex = Math.min(smoothMask.length - 1, my * mw + mx);
+                float confidence = smoothMask[maskIndex];
+                float hairSupport = hairSupportMask[maskIndex];
+
+                boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
+                boolean skinLike = isSkinLikeColor(r, g, b);
+                boolean hairCandidate = headZone
+                        && !skinLike
+                        && luminance < 165f
+                        && hairSupport > 0.30f;
+
+                float a;
+                if (hairCandidate) {
+                    confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
+                    float hairThreshold = 0.31f + 0.04f * smoothAmount;
+                    float hairFeather = 0.30f + 0.06f * smoothAmount;
+                    a = smoothStep(hairThreshold - hairFeather * 0.5f,
+                            hairThreshold + hairFeather * 0.5f, confidence);
+                    if (hairSupport > 0.62f && a < 0.58f) a = 0.58f;
+                } else {
+                    a = smoothStep(low, high, confidence);
+                    if (smoothAmount > 0f && a > 0f && a < 1f) {
+                        a = (float)Math.pow(a, 1.0f + 1.8f * smoothAmount);
+                        float edgeCut = 0.18f * smoothAmount;
+                        a = Math.max(0f, Math.min(1f,
+                                (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
+                    }
+                }
+
+                boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
+                if (skinEdge) {
+                    float skinA = smoothStep(0.44f, 0.62f, confidence);
+                    float keep = 0.30f + 0.35f * (1f - smoothAmount);
+                    a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
+                }
+
+                if (a > 0.025f && a < 0.995f) {
+                    int inner = sampleInnerForegroundColor(previewSrc, pw, ph, px, py,
+                            smoothMask, mw, mh, mx, my, confidence);
+                    int outer = sampleOuterBackgroundColor(previewSrc, pw, ph, px, py,
+                            smoothMask, mw, mh, mx, my, confidence);
+
+                    if (inner != -1) {
+                        int ir = Color.red(inner);
+                        int ig = Color.green(inner);
+                        int ib = Color.blue(inner);
+                        float edgeBand = 1f - Math.abs(a * 2f - 1f);
+                        float matchStrength = 0.20f + 0.35f * edgeBand;
+
+                        if (outer != -1) {
+                            int or = Color.red(outer);
+                            int og = Color.green(outer);
+                            int ob = Color.blue(outer);
+                            float dInner = colorDistanceSq(r, g, b, ir, ig, ib);
+                            float dOuter = colorDistanceSq(r, g, b, or, og, ob);
+
+                            float solveA = Math.max(0.34f, Math.min(0.96f, a));
+                            int fr = clamp255(Math.round((r - (1f - solveA) * or) / solveA));
+                            int fg = clamp255(Math.round((g - (1f - solveA) * og) / solveA));
+                            int fb = clamp255(Math.round((b - (1f - solveA) * ob) / solveA));
+
+                            float recover = 0.48f + 0.34f * edgeBand;
+                            fr = clamp255(Math.round(fr * recover + ir * (1f - recover)));
+                            fg = clamp255(Math.round(fg * recover + ig * (1f - recover)));
+                            fb = clamp255(Math.round(fb * recover + ib * (1f - recover)));
+
+                            boolean outerContaminated = dOuter + 120f < dInner;
+                            if (outerContaminated) {
+                                matchStrength = Math.max(matchStrength, 0.78f);
+                                if (!hairCandidate) a *= skinEdge ? 0.78f : 0.84f;
+                            }
+
+                            r = clamp255(Math.round(r * (1f - matchStrength) + fr * matchStrength));
+                            g = clamp255(Math.round(g * (1f - matchStrength) + fg * matchStrength));
+                            b = clamp255(Math.round(b * (1f - matchStrength) + fb * matchStrength));
+                        } else {
+                            if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
+                            if (skinEdge) matchStrength = Math.max(matchStrength, 0.72f * edgeBand);
+                            r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
+                            g = clamp255(Math.round(g * (1f - matchStrength) + ig * matchStrength));
+                            b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
+                        }
+                    }
+                }
+
+                if (manual != null) {
+                    int ex = Math.min(manualW - 1, Math.max(0,
+                            Math.round(x * (manualW - 1f) / Math.max(1f, w - 1f))));
+                    int ey = Math.min(manualH - 1, Math.max(0,
+                            Math.round(y * (manualH - 1f) / Math.max(1f, h - 1f))));
+                    float eraseA = Color.alpha(manual[ey * manualW + ex]) / 255f;
+                    a *= (1f - eraseA);
+                }
+
+                if (a > 0.03f && brighten > 0f) {
+                    float interior = smoothStep(0.48f, 0.93f, a);
+                    float localBrighten = brighten * interior;
+                    r = clamp255(Math.round(r + (255 - r) * localBrighten));
+                    g = clamp255(Math.round(g + (255 - g) * localBrighten));
+                    b = clamp255(Math.round(b + (255 - b) * localBrighten));
+                }
+
+                int rr = clamp255(Math.round(r * a + br * (1f - a)));
+                int gg = clamp255(Math.round(g * a + bg * (1f - a)));
+                int bbv = clamp255(Math.round(b * a + bb * (1f - a)));
+                row[x] = Color.rgb(rr, gg, bbv);
+            }
+
+            full.setPixels(row, 0, w, 0, y, w, 1);
+        }
     }
 
     private void releasePhoto() {
