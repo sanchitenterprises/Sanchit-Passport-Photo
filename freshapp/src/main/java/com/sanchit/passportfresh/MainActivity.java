@@ -40,7 +40,7 @@ import com.google.mlkit.vision.segmentation.selfie.SelfieSegmenterOptions;
 import java.io.File;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.FloatBuffer;
+import java.nio.ByteOrder;\nimport java.nio.FloatBuffer;\nimport java.util.concurrent.RejectedExecutionException;
 import java.util.ArrayDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
     private static final int REQ_SAVE_PERMISSION = 204;
 
     private static final int BLUE = Color.rgb(74, 144, 194);
-    private static final int MAX_SIDE = 1800;
+    private static final int MAX_SIDE = 1440;
     private static final int MAX_HISTORY = 8;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -84,17 +84,13 @@ public class MainActivity extends Activity {
     private boolean compareOriginal;
     private boolean objectRemoveOn = true;
     private boolean strokeChanged;
+    private volatile boolean destroyed;
     private int renderToken;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         buildUi();
-
-        SelfieSegmenterOptions options = new SelfieSegmenterOptions.Builder()
-                .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
-                .build();
-        segmenter = Segmentation.getClient(options);
     }
 
     private void buildUi() {
@@ -436,26 +432,55 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void ensureSegmenter() {
+        if (segmenter != null || destroyed) return;
+        SelfieSegmenterOptions options = new SelfieSegmenterOptions.Builder()
+                .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                .build();
+        segmenter = Segmentation.getClient(options);
+    }
+
     private void segmentPhoto() {
-        if (originalBitmap == null) {
-            toast("पहले फोटो चुनें");
+        if (destroyed || originalBitmap == null) {
+            if (!destroyed) toast("पहले फोटो चुनें");
             return;
         }
+
+        ensureSegmenter();
+        if (segmenter == null) {
+            toast("BG remover तैयार नहीं हुआ");
+            return;
+        }
+
+        final Bitmap inputBitmap = originalBitmap;
+        final int token = ++renderToken;
         setBusy(true, "Auto background remove…");
-        InputImage image = InputImage.fromBitmap(originalBitmap, 0);
-        segmenter.process(image)
-                .addOnSuccessListener(this::copyMaskAndRender)
-                .addOnFailureListener(e -> {
-                    setBusy(false, "Auto BG failed");
-                    toast("Auto BG process नहीं हुआ");
-                });
+
+        try {
+            InputImage image = InputImage.fromBitmap(inputBitmap, 0);
+            segmenter.process(image)
+                    .addOnSuccessListener(mask -> {
+                        if (destroyed || token != renderToken) return;
+                        copyMaskAndRender(mask);
+                    })
+                    .addOnFailureListener(e -> {
+                        if (destroyed || token != renderToken) return;
+                        setBusy(false, "Auto BG failed");
+                        toast("Auto BG process नहीं हुआ");
+                    });
+        } catch (Exception e) {
+            if (!destroyed) {
+                setBusy(false, "Auto BG failed");
+                toast("Auto BG process नहीं हुआ");
+            }
+        }
     }
 
     private void copyMaskAndRender(SegmentationMask mask) {
         try {
             maskWidth = mask.getWidth();
             maskHeight = mask.getHeight();
-            FloatBuffer fb = mask.getBuffer().asFloatBuffer();
+            FloatBuffer fb = mask.getBuffer().duplicate().order(ByteOrder.nativeOrder()).asFloatBuffer();
             personMask = new float[fb.remaining()];
             fb.get(personMask);
             renderResult();
@@ -466,7 +491,7 @@ public class MainActivity extends Activity {
     }
 
     private void renderResult() {
-        if (originalBitmap == null || personMask == null) return;
+        if (destroyed || originalBitmap == null || personMask == null || worker.isShutdown()) return;
 
         final Bitmap source = originalBitmap;
         final float[] mask = personMask;
@@ -479,7 +504,8 @@ public class MainActivity extends Activity {
 
         setBusy(true, "Blue background तैयार हो रहा है…");
 
-        worker.execute(() -> {
+        try {
+            worker.execute(() -> {
             Bitmap out = null;
             try {
                 int w = source.getWidth();
@@ -495,8 +521,12 @@ public class MainActivity extends Activity {
                 }
 
                 float smoothAmount = smooth / 100f;
-                float threshold = 0.42f + (0.25f * smoothAmount);
-                float feather = 0.20f - (0.08f * smoothAmount);
+                int blurRadius = Math.round(smoothAmount * 6f);
+                float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
+
+                // Higher Smooth = wider feather + slight inward cleanup to remove rough/dirty edges.
+                float threshold = 0.46f + (0.08f * smoothAmount);
+                float feather = 0.12f + (0.28f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
@@ -516,7 +546,7 @@ public class MainActivity extends Activity {
                         }
 
                         int mx = Math.min(mw - 1, Math.max(0, Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
-                        float confidence = mask[Math.min(mask.length - 1, my * mw + mx)];
+                        float confidence = smoothMask[Math.min(smoothMask.length - 1, my * mw + mx)];
                         float a = smoothStep(low, high, confidence);
 
                         int c = src[idx];
@@ -540,8 +570,7 @@ public class MainActivity extends Activity {
                 out = Bitmap.createBitmap(dst, w, h, Bitmap.Config.ARGB_8888);
                 final Bitmap ready = out;
                 runOnUiThread(() -> {
-                    if (token != renderToken) {
-                        if (!ready.isRecycled()) ready.recycle();
+                    if (destroyed || isFinishing() || (Build.VERSION.SDK_INT >= 17 && isDestroyed()) || token != renderToken) {
                         return;
                     }
                     replaceResult(ready);
@@ -551,15 +580,55 @@ public class MainActivity extends Activity {
                     setBusy(false, "Ready • Blue BG applied");
                 });
             } catch (Exception e) {
-                if (out != null && !out.isRecycled()) out.recycle();
                 runOnUiThread(() -> {
-                    setBusy(false, "Processing error");
-                    toast("Processing error");
+                    if (!destroyed) {
+                        setBusy(false, "Processing error");
+                        toast("Processing error");
+                    }
                 });
-            } finally {
-                if (localErase != null && !localErase.isRecycled()) localErase.recycle();
             }
         });
+        } catch (RejectedExecutionException ignored) {
+            // Activity/worker already closed; ignore late render requests safely.
+        }
+    }
+
+    private float[] blurMask(float[] src, int w, int h, int radius) {
+        if (src == null || radius <= 0 || w <= 1 || h <= 1) return src;
+
+        float[] tmp = new float[src.length];
+        float[] out = new float[src.length];
+        int window = radius * 2 + 1;
+
+        for (int y = 0; y < h; y++) {
+            int row = y * w;
+            float sum = 0f;
+            for (int k = -radius; k <= radius; k++) {
+                int x = Math.max(0, Math.min(w - 1, k));
+                sum += src[row + x];
+            }
+            for (int x = 0; x < w; x++) {
+                tmp[row + x] = sum / window;
+                int removeX = Math.max(0, x - radius);
+                int addX = Math.min(w - 1, x + radius + 1);
+                sum += src[row + addX] - src[row + removeX];
+            }
+        }
+
+        for (int x = 0; x < w; x++) {
+            float sum = 0f;
+            for (int k = -radius; k <= radius; k++) {
+                int y = Math.max(0, Math.min(h - 1, k));
+                sum += tmp[y * w + x];
+            }
+            for (int y = 0; y < h; y++) {
+                out[y * w + x] = sum / window;
+                int removeY = Math.max(0, y - radius);
+                int addY = Math.min(h - 1, y + radius + 1);
+                sum += tmp[addY * w + x] - tmp[removeY * w + x];
+            }
+        }
+        return out;
     }
 
     private float smoothStep(float edge0, float edge1, float x) {
@@ -573,9 +642,6 @@ public class MainActivity extends Activity {
     }
 
     private void replaceResult(Bitmap b) {
-        if (resultBitmap != null && resultBitmap != originalBitmap && !resultBitmap.isRecycled()) {
-            resultBitmap.recycle();
-        }
         resultBitmap = b;
     }
 
@@ -649,7 +715,6 @@ public class MainActivity extends Activity {
 
     private void createEmptyEraseMask() {
         if (originalBitmap == null) return;
-        if (eraseMask != null && !eraseMask.isRecycled()) eraseMask.recycle();
         eraseMask = Bitmap.createBitmap(originalBitmap.getWidth(), originalBitmap.getHeight(), Bitmap.Config.ALPHA_8);
     }
 
@@ -657,8 +722,7 @@ public class MainActivity extends Activity {
         if (eraseMask == null) createEmptyEraseMask();
         if (eraseMask == null) return;
         if (undoMasks.size() >= MAX_HISTORY) {
-            Bitmap old = undoMasks.removeLast();
-            if (!old.isRecycled()) old.recycle();
+            undoMasks.removeLast();
         }
         undoMasks.push(eraseMask.copy(Bitmap.Config.ALPHA_8, true));
     }
@@ -667,7 +731,6 @@ public class MainActivity extends Activity {
         if (undoMasks.isEmpty()) return;
         if (eraseMask != null) redoMasks.push(eraseMask.copy(Bitmap.Config.ALPHA_8, true));
         Bitmap previous = undoMasks.pop();
-        if (eraseMask != null && !eraseMask.isRecycled()) eraseMask.recycle();
         eraseMask = previous;
         updateHistoryButtons();
         renderResult();
@@ -677,13 +740,11 @@ public class MainActivity extends Activity {
         if (redoMasks.isEmpty()) return;
         if (eraseMask != null) {
             if (undoMasks.size() >= MAX_HISTORY) {
-                Bitmap old = undoMasks.removeLast();
-                if (!old.isRecycled()) old.recycle();
+                undoMasks.removeLast();
             }
             undoMasks.push(eraseMask.copy(Bitmap.Config.ALPHA_8, true));
         }
         Bitmap next = redoMasks.pop();
-        if (eraseMask != null && !eraseMask.isRecycled()) eraseMask.recycle();
         eraseMask = next;
         updateHistoryButtons();
         renderResult();
@@ -714,10 +775,7 @@ public class MainActivity extends Activity {
     }
 
     private void clearDeque(ArrayDeque<Bitmap> q) {
-        while (!q.isEmpty()) {
-            Bitmap b = q.pop();
-            if (b != null && !b.isRecycled()) b.recycle();
-        }
+        q.clear();
     }
 
     private void savePhoto() {
@@ -789,9 +847,8 @@ public class MainActivity extends Activity {
 
     private void releasePhoto() {
         renderToken++;
-        if (originalBitmap != null && !originalBitmap.isRecycled()) originalBitmap.recycle();
-        if (resultBitmap != null && resultBitmap != originalBitmap && !resultBitmap.isRecycled()) resultBitmap.recycle();
-        if (eraseMask != null && !eraseMask.isRecycled()) eraseMask.recycle();
+        // Do not manually recycle bitmaps here: an ML/render callback may still hold a reference.
+        // Nulling references lets Android reclaim them safely after pending work finishes.
         originalBitmap = null;
         resultBitmap = null;
         eraseMask = null;
@@ -805,11 +862,18 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        destroyed = true;
         renderToken++;
         if (segmenter != null) {
             try { segmenter.close(); } catch (Exception ignored) {}
+            segmenter = null;
         }
-        releasePhoto();
+        originalBitmap = null;
+        resultBitmap = null;
+        eraseMask = null;
+        personMask = null;
+        undoMasks.clear();
+        redoMasks.clear();
         worker.shutdownNow();
         super.onDestroy();
     }
