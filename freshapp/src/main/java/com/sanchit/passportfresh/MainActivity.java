@@ -1,6 +1,9 @@
 package com.sanchit.passportfresh;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.app.Activity;
 import android.content.ClipData;
 import android.content.ContentValues;
@@ -13,6 +16,7 @@ import android.graphics.Color;
 import android.graphics.ImageDecoder;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -21,6 +25,7 @@ import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -64,6 +69,9 @@ public class MainActivity extends Activity {
     private ImageView imageView;
     private ProgressBar progress;
     private TextView status;
+    private ImageView processingLogo;
+    private View processingShade;
+    private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
     private SeekBar smoothSeek;
     private SeekBar brushSeek;
@@ -98,111 +106,129 @@ public class MainActivity extends Activity {
     private void buildUi() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.WHITE);
-        root.setPadding(dp(10), dp(8), dp(10), dp(8));
+        root.setBackgroundColor(Color.rgb(246, 248, 250));
+        root.setPadding(dp(8), dp(6), dp(8), dp(7));
+
+        // Compact professional header: fixed, no scrolling.
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(8), dp(3), dp(8), dp(3));
+        header.setBackground(rounded(Color.WHITE, 16));
+
+        ImageView headerLogo = new ImageView(this);
+        headerLogo.setImageResource(com.sanchit.passportfresh.R.drawable.ic_passport_logo);
+        headerLogo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        header.addView(headerLogo, new LinearLayout.LayoutParams(dp(48), dp(48)));
+
+        LinearLayout headerText = new LinearLayout(this);
+        headerText.setOrientation(LinearLayout.VERTICAL);
+        headerText.setGravity(Gravity.CENTER_VERTICAL);
+        headerText.setPadding(dp(8), 0, 0, 0);
 
         TextView title = new TextView(this);
-        title.setText("Sanchit Passport Photo New");
-        title.setTextColor(0xFF454545);
-        title.setTextSize(27);
-        title.setGravity(Gravity.CENTER);
-        root.addView(title, new LinearLayout.LayoutParams(-1, -2));
+        title.setText("Sanchit Passport Photo");
+        title.setTextColor(0xFF1F2933);
+        title.setTextSize(20);
+        title.setSingleLine(true);
+        headerText.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Auto BG Remove • Blue #4A90C2 • Offline");
-        subtitle.setTextColor(0xFF777777);
-        subtitle.setTextSize(14);
-        subtitle.setGravity(Gravity.CENTER);
-        subtitle.setPadding(0, dp(2), 0, dp(7));
-        root.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
+        subtitle.setText("Auto BG • Blue #4A90C2 • Offline");
+        subtitle.setTextColor(0xFF6B7280);
+        subtitle.setTextSize(12);
+        subtitle.setSingleLine(true);
+        headerText.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
 
+        header.addView(headerText, new LinearLayout.LayoutParams(0, -1, 1f));
+        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(-1, dp(60));
+        headerLp.bottomMargin = dp(6);
+        root.addView(header, headerLp);
+
+        // Preview area gets most free space and never scrolls.
         FrameLayout preview = new FrameLayout(this);
-        preview.setBackgroundColor(0xFFE9E9E9);
+        preview.setBackground(rounded(0xFFE7EBEF, 18));
 
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        imageView.setBackgroundColor(0xFFE9E9E9);
+        imageView.setBackgroundColor(0xFFE7EBEF);
         preview.addView(imageView, new FrameLayout.LayoutParams(-1, -1));
 
-        progress = new ProgressBar(this);
-        progress.setVisibility(View.GONE);
-        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(dp(48), dp(48));
-        pp.gravity = Gravity.CENTER;
-        preview.addView(progress, pp);
+        processingShade = new View(this);
+        processingShade.setBackgroundColor(0x66FFFFFF);
+        processingShade.setVisibility(View.GONE);
+        preview.addView(processingShade, new FrameLayout.LayoutParams(-1, -1));
+
+        processingLogo = new ImageView(this);
+        processingLogo.setImageResource(com.sanchit.passportfresh.R.drawable.ic_passport_logo);
+        processingLogo.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        processingLogo.setVisibility(View.GONE);
+        FrameLayout.LayoutParams logoLp = new FrameLayout.LayoutParams(dp(82), dp(82));
+        logoLp.gravity = Gravity.CENTER;
+        preview.addView(processingLogo, logoLp);
 
         status = new TextView(this);
         status.setText("फोटो चुनें");
-        status.setTextSize(13);
-        status.setTextColor(0xFF333333);
-        status.setBackgroundColor(0xDDFFFFFF);
-        status.setPadding(dp(9), dp(5), dp(9), dp(5));
-        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(-2, -2);
-        sp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        sp.bottomMargin = dp(8);
-        preview.addView(status, sp);
+        status.setTextSize(12);
+        status.setTextColor(0xFF1F2933);
+        status.setBackground(rounded(0xEFFFFFFF, 12));
+        status.setPadding(dp(10), dp(5), dp(10), dp(5));
+        FrameLayout.LayoutParams statusLp = new FrameLayout.LayoutParams(-2, -2);
+        statusLp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        statusLp.bottomMargin = dp(8);
+        preview.addView(status, statusLp);
 
-        root.addView(preview, new LinearLayout.LayoutParams(-1, 0, 1f));
+        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(-1, 0, 0.58f);
+        previewLp.bottomMargin = dp(6);
+        root.addView(preview, previewLp);
 
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(false);
+        // Fixed-height weighted control panel; there is intentionally NO ScrollView.
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.VERTICAL);
-        controls.setPadding(0, dp(6), 0, 0);
-        scroll.addView(controls, new ScrollView.LayoutParams(-1, -2));
+        controls.setPadding(dp(5), dp(5), dp(5), dp(5));
+        controls.setBackground(rounded(Color.WHITE, 18));
+        root.addView(controls, new LinearLayout.LayoutParams(-1, 0, 0.42f));
 
-        LinearLayout row1 = row();
-        Button camera = button("📷 कैमरा");
-        Button gallery = button("🖼 फोटो चुनें");
-        row1.addView(camera, rowButton());
-        row1.addView(gallery, rowButton());
-        controls.addView(row1);
+        LinearLayout row1 = buttonRow();
+        Button camera = button("📷 कैमरा", false);
+        Button gallery = button("🖼 फोटो चुनें", true);
+        row1.addView(camera, weightedButton());
+        row1.addView(gallery, weightedButton());
+        controls.addView(row1, weightedControlRow(1.0f));
 
-        controls.addView(label("Fairness / Brightness"));
-        brightnessSeek = new SeekBar(this);
-        brightnessSeek.setMax(100);
-        brightnessSeek.setProgress(22);
-        controls.addView(brightnessSeek, new LinearLayout.LayoutParams(-1, -2));
+        brightnessSeek = compactSlider(controls, "Brightness", 22);
+        smoothSeek = compactSlider(controls, "Smooth BG", 35);
 
-        controls.addView(label("Smooth BG"));
-        smoothSeek = new SeekBar(this);
-        smoothSeek.setMax(100);
-        smoothSeek.setProgress(35);
-        controls.addView(smoothSeek, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout row2 = buttonRow();
+        compareButton = button("COMPARE", false);
+        objectButton = button("OBJECT REMOVE ✓", false);
+        objectButton.setTextSize(13);
+        row2.addView(compareButton, weightedButton());
+        row2.addView(objectButton, weightedButton());
+        controls.addView(row2, weightedControlRow(1.0f));
 
-        LinearLayout row2 = row();
-        compareButton = button("COMPARE");
-        objectButton = button("OBJECT REMOVE ON ✓");
-        row2.addView(compareButton, rowButton());
-        row2.addView(objectButton, rowButton());
-        controls.addView(row2);
+        LinearLayout row3 = buttonRow();
+        undoButton = button("UNDO", false);
+        redoButton = button("REDO", false);
+        row3.addView(undoButton, weightedButton());
+        row3.addView(redoButton, weightedButton());
+        controls.addView(row3, weightedControlRow(1.0f));
 
-        LinearLayout row3 = row();
-        undoButton = button("UNDO");
-        redoButton = button("REDO");
-        row3.addView(undoButton, rowButton());
-        row3.addView(redoButton, rowButton());
-        controls.addView(row3);
+        brushSeek = compactSlider(controls, "Brush Size", 42);
 
-        controls.addView(label("Object Remove Brush Size"));
-        brushSeek = new SeekBar(this);
-        brushSeek.setMax(100);
-        brushSeek.setProgress(42);
-        controls.addView(brushSeek, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout row4 = buttonRow();
+        processButton = button("SHARE", true);
+        resetButton = button("RESET", false);
+        row4.addView(processButton, weightedButton());
+        row4.addView(resetButton, weightedButton());
+        controls.addView(row4, weightedControlRow(1.0f));
 
-        LinearLayout row4 = row();
-        processButton = button("फिर से PROCESS");
-        resetButton = button("RESET");
-        row4.addView(processButton, rowButton());
-        row4.addView(resetButton, rowButton());
-        controls.addView(row4);
-
-        saveButton = button("फोटो सेव करें");
-        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, dp(58));
-        saveLp.setMargins(dp(3), dp(3), dp(3), dp(3));
+        // Save stays available without adding another scroll row.
+        saveButton = button("फोटो सेव करें", false);
+        LinearLayout.LayoutParams saveLp = new LinearLayout.LayoutParams(-1, 0, 0.9f);
+        saveLp.setMargins(dp(3), dp(2), dp(3), dp(1));
         controls.addView(saveButton, saveLp);
 
-        int controlsHeight = Math.max(dp(330), (int)(getResources().getDisplayMetrics().heightPixels * 0.43f));
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, controlsHeight));
         setContentView(root);
 
         camera.setOnClickListener(v -> openCamera());
@@ -211,7 +237,7 @@ public class MainActivity extends Activity {
         objectButton.setOnClickListener(v -> toggleObjectRemove());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
-        processButton.setOnClickListener(v -> segmentPhoto());
+        processButton.setOnClickListener(v -> sharePhoto());
         resetButton.setOnClickListener(v -> resetEdits());
         saveButton.setOnClickListener(v -> savePhoto());
 
@@ -234,34 +260,63 @@ public class MainActivity extends Activity {
         updateHistoryButtons();
     }
 
-    private LinearLayout row() {
+    private LinearLayout buttonRow() {
         LinearLayout r = new LinearLayout(this);
         r.setOrientation(LinearLayout.HORIZONTAL);
-        r.setPadding(0, dp(2), 0, dp(2));
+        r.setGravity(Gravity.CENTER);
         return r;
     }
 
-    private LinearLayout.LayoutParams rowButton() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(57), 1f);
-        lp.setMargins(dp(3), 0, dp(3), 0);
+    private LinearLayout.LayoutParams weightedControlRow(float weight) {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, 0, weight);
+        lp.setMargins(0, dp(1), 0, dp(1));
         return lp;
     }
 
-    private Button button(String text) {
+    private LinearLayout.LayoutParams weightedButton() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
+        lp.setMargins(dp(3), dp(2), dp(3), dp(2));
+        return lp;
+    }
+
+    private Button button(String text, boolean primary) {
         Button b = new Button(this);
         b.setText(text);
-        b.setTextSize(15);
+        b.setTextSize(14);
         b.setAllCaps(false);
+        b.setTextColor(primary ? Color.WHITE : 0xFF1F2933);
+        b.setPadding(dp(6), 0, dp(6), 0);
+        b.setBackground(rounded(primary ? 0xFF5B7FA3 : 0xFFE9EEF3, 13));
         return b;
     }
 
-    private TextView label(String text) {
-        TextView t = new TextView(this);
-        t.setText(text);
-        t.setTextSize(16);
-        t.setTextColor(0xFF666666);
-        t.setPadding(dp(5), dp(7), 0, 0);
-        return t;
+    private SeekBar compactSlider(LinearLayout parent, String name, int progressValue) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(5), 0, dp(5), 0);
+
+        TextView label = new TextView(this);
+        label.setText(name);
+        label.setTextSize(13);
+        label.setTextColor(0xFF374151);
+        label.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(label, new LinearLayout.LayoutParams(dp(92), -1));
+
+        SeekBar seek = new SeekBar(this);
+        seek.setMax(100);
+        seek.setProgress(progressValue);
+        row.addView(seek, new LinearLayout.LayoutParams(0, -1, 1f));
+
+        parent.addView(row, weightedControlRow(0.82f));
+        return seek;
+    }
+
+    private GradientDrawable rounded(int color, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radiusDp));
+        return d;
     }
 
     private int dp(int px) {
@@ -281,8 +336,48 @@ public class MainActivity extends Activity {
     }
 
     private void setBusy(boolean busy, String text) {
-        progress.setVisibility(busy ? View.VISIBLE : View.GONE);
         status.setText(text);
+        if (busy) startProcessingAnimation();
+        else stopProcessingAnimation();
+    }
+
+    private void startProcessingAnimation() {
+        if (processingLogo == null || processingShade == null) return;
+        processingShade.setVisibility(View.VISIBLE);
+        processingLogo.setVisibility(View.VISIBLE);
+
+        if (processingAnimator != null && processingAnimator.isRunning()) return;
+
+        ObjectAnimator rotation = ObjectAnimator.ofFloat(processingLogo, View.ROTATION, 0f, 360f);
+        rotation.setDuration(1500);
+        rotation.setRepeatCount(ObjectAnimator.INFINITE);
+        rotation.setInterpolator(new AccelerateDecelerateInterpolator());
+
+        ObjectAnimator scaleX = ObjectAnimator.ofFloat(processingLogo, View.SCALE_X, 0.88f, 1.10f, 0.88f);
+        scaleX.setDuration(1100);
+        scaleX.setRepeatCount(ObjectAnimator.INFINITE);
+
+        ObjectAnimator scaleY = ObjectAnimator.ofFloat(processingLogo, View.SCALE_Y, 0.88f, 1.10f, 0.88f);
+        scaleY.setDuration(1100);
+        scaleY.setRepeatCount(ObjectAnimator.INFINITE);
+
+        processingAnimator = new AnimatorSet();
+        processingAnimator.playTogether(rotation, scaleX, scaleY);
+        processingAnimator.start();
+    }
+
+    private void stopProcessingAnimation() {
+        if (processingAnimator != null) {
+            processingAnimator.cancel();
+            processingAnimator = null;
+        }
+        if (processingLogo != null) {
+            processingLogo.setRotation(0f);
+            processingLogo.setScaleX(1f);
+            processingLogo.setScaleY(1f);
+            processingLogo.setVisibility(View.GONE);
+        }
+        if (processingShade != null) processingShade.setVisibility(View.GONE);
     }
 
     private void openGallery() {
@@ -557,7 +652,9 @@ public class MainActivity extends Activity {
                         float confidence = smoothMask[Math.min(smoothMask.length - 1, my * mw + mx)];
                         float a = smoothStep(low, high, confidence);
                         if (smoothAmount > 0f && a > 0f && a < 1f) {
-                            a = (float)Math.pow(a, 1.0f + 1.6f * smoothAmount);
+                            a = (float)Math.pow(a, 1.0f + 2.1f * smoothAmount);
+                            float edgeCut = 0.22f * smoothAmount;
+                            a = Math.max(0f, Math.min(1f, (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                         }
 
                         int c = src[idx];
@@ -714,24 +811,11 @@ public class MainActivity extends Activity {
 
             Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
             paint.setColor(Color.WHITE);
-            Canvas maskCanvas = new Canvas(eraseMask);
-            maskCanvas.drawCircle(x, y, radius, paint);
+            new Canvas(eraseMask).drawCircle(x, y, radius, paint);
             strokeChanged = true;
-
-            // Result is created mutable in renderResult(). If Android ever supplies
-            // an immutable bitmap unexpectedly, skip preview drawing instead of crashing.
-            if (resultBitmap.isMutable()) {
-                Paint blue = new Paint(Paint.ANTI_ALIAS_FLAG);
-                blue.setColor(BLUE);
-                Canvas previewCanvas = new Canvas(resultBitmap);
-                previewCanvas.drawCircle(x, y, radius, blue);
-                imageView.setImageBitmap(resultBitmap);
-                imageView.invalidate();
-            }
-        } catch (Throwable t) {
-            // Touch must never close the app. The erase mask is the source of truth;
-            // final rendering still happens safely on ACTION_UP.
-            strokeChanged = true;
+            status.setText("Object Remove • छोड़ते ही apply होगा");
+        } catch (Throwable ignored) {
+            // Touch must never close the app.
         }
     }
 
@@ -798,6 +882,83 @@ public class MainActivity extends Activity {
 
     private void clearDeque(ArrayDeque<Bitmap> q) {
         q.clear();
+    }
+
+    private void sharePhoto() {
+        if (resultBitmap == null) {
+            toast("पहले फोटो तैयार करें");
+            return;
+        }
+
+        final Bitmap copy = resultBitmap.copy(Bitmap.Config.ARGB_8888, false);
+        setBusy(true, "Share तैयार हो रहा है…");
+
+        try {
+            worker.execute(() -> {
+                Uri uri = null;
+                try {
+                    String name = "Sanchit_Passport_Share_" + System.currentTimeMillis() + ".jpg";
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+                    values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Sanchit Passport Photo New/Shared");
+                        values.put(MediaStore.Images.Media.IS_PENDING, 1);
+                    } else {
+                        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                                "Sanchit Passport Photo New/Shared");
+                        if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("folder");
+                        File file = new File(dir, name);
+                        values.put(MediaStore.Images.Media.DATA, file.getAbsolutePath());
+                    }
+
+                    uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+                    if (uri == null) throw new IllegalStateException("insert");
+
+                    try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+                        if (out == null || !copy.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
+                            throw new IllegalStateException("write");
+                        }
+                    }
+
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        ContentValues ready = new ContentValues();
+                        ready.put(MediaStore.Images.Media.IS_PENDING, 0);
+                        getContentResolver().update(uri, ready, null, null);
+                    }
+
+                    final Uri shareUri = uri;
+                    runOnUiThread(() -> {
+                        if (destroyed) return;
+                        stopProcessingAnimation();
+                        status.setText("Ready • Share");
+                        Intent send = new Intent(Intent.ACTION_SEND);
+                        send.setType("image/jpeg");
+                        send.putExtra(Intent.EXTRA_STREAM, shareUri);
+                        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        try {
+                            startActivity(Intent.createChooser(send, "Photo share करें"));
+                        } catch (Exception e) {
+                            toast("Share नहीं खुला");
+                        }
+                    });
+                } catch (Exception e) {
+                    final Uri failedUri = uri;
+                    if (failedUri != null) {
+                        try { getContentResolver().delete(failedUri, null, null); } catch (Exception ignored) {}
+                    }
+                    runOnUiThread(() -> {
+                        if (!destroyed) {
+                            setBusy(false, "Share failed");
+                            toast("Share तैयार नहीं हुआ");
+                        }
+                    });
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            setBusy(false, "Share failed");
+        }
     }
 
     private void savePhoto() {
@@ -885,6 +1046,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         destroyed = true;
+        stopProcessingAnimation();
         renderToken++;
         if (segmenter != null) {
             try { segmenter.close(); } catch (Exception ignored) {}
