@@ -216,7 +216,11 @@ public class MainActivity extends Activity {
         saveButton.setOnClickListener(v -> savePhoto());
 
         SeekBar.OnSeekBarChangeListener redraw = new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {}
+            @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
+                if (fromUser && seekBar == smoothSeek && status != null) {
+                    status.setText("Smooth BG " + p + "%");
+                }
+            }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {
                 if (personMask != null && originalBitmap != null) renderResult();
@@ -523,12 +527,14 @@ public class MainActivity extends Activity {
                 }
 
                 float smoothAmount = smooth / 100f;
-                int blurRadius = Math.round(smoothAmount * 6f);
+                int blurRadius = Math.round(smoothAmount * 8f);
                 float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
 
-                // Higher Smooth = wider feather + slight inward cleanup to remove rough/dirty edges.
-                float threshold = 0.46f + (0.08f * smoothAmount);
-                float feather = 0.12f + (0.28f * smoothAmount);
+                // Smooth is dedicated to BG edge cleanup:
+                // blur removes jagged edges, higher threshold cuts background fringe inward,
+                // and de-fringe below lets blue dominate semi-transparent edge pixels.
+                float threshold = 0.42f + (0.18f * smoothAmount);
+                float feather = 0.18f - (0.06f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
@@ -550,6 +556,9 @@ public class MainActivity extends Activity {
                         int mx = Math.min(mw - 1, Math.max(0, Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
                         float confidence = smoothMask[Math.min(smoothMask.length - 1, my * mw + mx)];
                         float a = smoothStep(low, high, confidence);
+                        if (smoothAmount > 0f && a > 0f && a < 1f) {
+                            a = (float)Math.pow(a, 1.0f + 1.6f * smoothAmount);
+                        }
 
                         int c = src[idx];
                         int r = Color.red(c);
@@ -569,7 +578,8 @@ public class MainActivity extends Activity {
                     }
                 }
 
-                out = Bitmap.createBitmap(dst, w, h, Bitmap.Config.ARGB_8888);
+                out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                out.setPixels(dst, 0, w, 0, 0, w, h);
                 final Bitmap ready = out;
                 runOnUiThread(() -> {
                     if (destroyed || isFinishing() || (Build.VERSION.SDK_INT >= 17 && isDestroyed()) || token != renderToken) {
@@ -684,34 +694,44 @@ public class MainActivity extends Activity {
     }
 
     private void drawErase(MotionEvent e) {
-        if (eraseMask == null) createEmptyEraseMask();
-        if (eraseMask == null) return;
+        try {
+            if (eraseMask == null) createEmptyEraseMask();
+            if (eraseMask == null || resultBitmap == null) return;
 
-        Matrix inv = new Matrix();
-        if (!imageView.getImageMatrix().invert(inv)) return;
+            Matrix inv = new Matrix();
+            if (!imageView.getImageMatrix().invert(inv)) return;
 
-        float[] p = new float[]{e.getX(), e.getY()};
-        inv.mapPoints(p);
-        float x = p[0];
-        float y = p[1];
+            float[] p = new float[]{e.getX(), e.getY()};
+            inv.mapPoints(p);
+            float x = p[0];
+            float y = p[1];
 
-        if (x < 0 || y < 0 || x >= eraseMask.getWidth() || y >= eraseMask.getHeight()) return;
+            if (x < 0 || y < 0 || x >= eraseMask.getWidth() || y >= eraseMask.getHeight()) return;
 
-        float radius = Math.max(8f,
-                (brushSeek.getProgress() / 100f) *
-                Math.min(eraseMask.getWidth(), eraseMask.getHeight()) * 0.085f);
+            float radius = Math.max(8f,
+                    (brushSeek.getProgress() / 100f) *
+                    Math.min(eraseMask.getWidth(), eraseMask.getHeight()) * 0.085f);
 
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(Color.WHITE);
-        new Canvas(eraseMask).drawCircle(x, y, radius, paint);
-        strokeChanged = true;
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setColor(Color.WHITE);
+            Canvas maskCanvas = new Canvas(eraseMask);
+            maskCanvas.drawCircle(x, y, radius, paint);
+            strokeChanged = true;
 
-        if (resultBitmap != null) {
-            Paint blue = new Paint(Paint.ANTI_ALIAS_FLAG);
-            blue.setColor(BLUE);
-            new Canvas(resultBitmap).drawCircle(x, y, radius, blue);
-            imageView.setImageBitmap(resultBitmap);
-            imageView.invalidate();
+            // Result is created mutable in renderResult(). If Android ever supplies
+            // an immutable bitmap unexpectedly, skip preview drawing instead of crashing.
+            if (resultBitmap.isMutable()) {
+                Paint blue = new Paint(Paint.ANTI_ALIAS_FLAG);
+                blue.setColor(BLUE);
+                Canvas previewCanvas = new Canvas(resultBitmap);
+                previewCanvas.drawCircle(x, y, radius, blue);
+                imageView.setImageBitmap(resultBitmap);
+                imageView.invalidate();
+            }
+        } catch (Throwable t) {
+            // Touch must never close the app. The erase mask is the source of truth;
+            // final rendering still happens safely on ACTION_UP.
+            strokeChanged = true;
         }
     }
 
