@@ -73,10 +73,11 @@ public class MainActivity extends Activity {
             Color.WHITE,            // White
             Color.rgb(226, 230, 234), // Light grey
             Color.rgb(196, 64, 64),   // Passport/photo red
-            Color.rgb(245, 235, 213)  // Cream
+            Color.rgb(245, 235, 213), // Cream
+            Color.rgb(64, 160, 87)    // Green
     };
     private static final String[] PHOTO_BG_NAMES = new String[]{
-            "Blue", "Sky Blue", "White", "Light Grey", "Red", "Cream"
+            "Blue", "Sky Blue", "White", "Light Grey", "Red", "Cream", "Green"
     };
     private static final int MAX_SIDE = 1440;
     private static final int MAX_HISTORY = 8;
@@ -587,7 +588,7 @@ public class MainActivity extends Activity {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return "1.0.16";
+            return "1.0.17";
         }
     }
 
@@ -868,27 +869,33 @@ public class MainActivity extends Activity {
                     localErase.getPixels(erase, 0, w, 0, 0, w, h);
                 }
 
-                float smoothAmount = smooth / 100f;
-                int blurRadius = Math.round(2f + smoothAmount * 18f);
+                float smoothAmount = Math.max(0f, Math.min(1f, smooth / 100f));
+                float smoothStrength = smoothAmount * (0.78f + 0.52f * smoothAmount);
+                int blurRadius = smooth == 0 ? 0 : Math.round(2f + smoothStrength * 20f);
                 float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
-                if (smoothAmount > 0.12f) {
+                if (smoothAmount > 0.10f) {
                     smoothMask = blurMask(smoothMask, mw, mh,
-                            Math.max(1, Math.round(1f + smoothAmount * 8f)));
+                            Math.max(1, Math.round(1f + smoothStrength * 9f)));
+                }
+                if (smoothAmount > 0.72f) {
+                    smoothMask = blurMask(smoothMask, mw, mh,
+                            Math.max(1, Math.round((smoothAmount - 0.70f) * 12f)));
                 }
 
                 // Hair-safe refinement:
                 // use a small max/dilation support mask to close tiny holes inside hair,
                 // but only inside the detected upper/head region.
-                int hairRadius = 2 + Math.round(smoothAmount * 2f);
+                int hairRadius = 2 + Math.round(smoothStrength * 2f);
                 float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                 // Normal body edge cleanup.
-                float threshold = 0.50f + (0.10f * smoothAmount);
-                float feather = 0.17f + (0.15f * smoothAmount);
+                float threshold = 0.50f + (0.115f * smoothStrength);
+                float feather = 0.17f + (0.17f * smoothStrength);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
-                float brighten = (brightness / 100f) * 0.32f;
+                float brightnessAmount = Math.max(0f, Math.min(1f, brightness / 100f));
+                float brighten = brightnessAmount * (0.52f + 0.23f * brightnessAmount);
 
                 int br = Color.red(backgroundColor);
                 int bg = Color.green(backgroundColor);
@@ -925,8 +932,8 @@ public class MainActivity extends Activity {
                         float a;
                         if (hairCandidate) {
                             confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
-                            float hairThreshold = 0.31f + 0.04f * smoothAmount;
-                            float hairFeather = 0.30f + 0.06f * smoothAmount;
+                            float hairThreshold = 0.31f + 0.035f * smoothStrength;
+                            float hairFeather = 0.30f + 0.055f * smoothStrength;
                             a = smoothStep(hairThreshold - hairFeather * 0.5f,
                                     hairThreshold + hairFeather * 0.5f,
                                     confidence);
@@ -938,9 +945,9 @@ public class MainActivity extends Activity {
                             a = smoothStep(low, high, confidence);
                             if (smoothAmount > 0f && a > 0f && a < 1f) {
                                 float softened = smoothStep(0f, 1f, a);
-                                float softMix = 0.42f + 0.52f * smoothAmount;
+                                float softMix = Math.min(0.98f, 0.40f + 0.46f * smoothStrength);
                                 a = a * (1f - softMix) + softened * softMix;
-                                float edgeCut = 0.12f * smoothAmount;
+                                float edgeCut = Math.min(0.20f, 0.145f * smoothStrength);
                                 a = Math.max(0f, Math.min(1f,
                                         (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                             }
@@ -952,7 +959,7 @@ public class MainActivity extends Activity {
                         boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
                         if (skinEdge) {
                             float skinA = smoothStep(0.44f, 0.62f, confidence);
-                            float keep = 0.30f + 0.35f * (1f - smoothAmount);
+                            float keep = 0.24f + 0.35f * (1f - Math.min(1f, smoothStrength));
                             a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
                         }
 
@@ -973,7 +980,7 @@ public class MainActivity extends Activity {
                                 int ib = Color.blue(inner);
 
                                 float edgeBand = 1f - Math.abs(a * 2f - 1f);
-                                float matchStrength = 0.24f + (0.34f + 0.18f * smoothAmount) * edgeBand;
+                                float matchStrength = 0.24f + (0.34f + 0.24f * smoothStrength) * edgeBand;
 
                                 if (outer != -1) {
                                     int or = Color.red(outer);
@@ -999,12 +1006,12 @@ public class MainActivity extends Activity {
 
                                     boolean outerContaminated = dOuter + 120f < dInner;
                                     if (outerContaminated) {
-                                        matchStrength = Math.max(matchStrength, 0.78f + 0.16f * smoothAmount);
+                                        matchStrength = Math.max(matchStrength, Math.min(0.98f, 0.78f + 0.18f * smoothStrength));
                                         if (!hairCandidate) {
                                             // Stronger Smooth BG removes old matte/halo while hair stays protected.
                                             float trim = skinEdge
-                                                    ? (0.80f - 0.16f * smoothAmount)
-                                                    : (0.86f - 0.14f * smoothAmount);
+                                                    ? (0.80f - 0.20f * smoothStrength)
+                                                    : (0.86f - 0.18f * smoothStrength);
                                             a *= Math.max(0.60f, trim);
                                         }
                                     }
@@ -1029,14 +1036,17 @@ public class MainActivity extends Activity {
                             a *= (1f - Math.max(0f, Math.min(1f, manualErase)));
                         }
 
-                        // Natural face fairness: only skin-like pixels in the detected head zone.
-                        // Lift luminance while preserving RGB ratios so eyes/hair/clothes stay unchanged.
-                        if (fairness > 0 && skinLike && headZone && a > 0.55f) {
-                            float interior = smoothStep(0.55f, 0.96f, a);
-                            float fair = (fairness / 100f) * 0.22f * interior;
+                        // Fairness covers face + jaw + visible neck skin with a soft spatial fade.
+                        // This removes the old hard horizontal cutoff below the chin.
+                        float fairnessRegion = fairnessRegionWeight(mx, my, personBounds, mw, mh);
+                        if (fairness > 0 && skinLike && fairnessRegion > 0.001f && a > 0.52f) {
+                            float interior = smoothStep(0.52f, 0.96f, a);
+                            float fairAmount = Math.max(0f, Math.min(1f, fairness / 100f));
+                            float fair = fairAmount * (0.32f + 0.18f * fairAmount)
+                                    * interior * fairnessRegion;
                             float y0 = Math.max(1f, 0.299f * r + 0.587f * g + 0.114f * b);
-                            float targetY = y0 + (238f - y0) * fair;
-                            float scale = Math.min(1.28f, targetY / y0);
+                            float targetY = y0 + (244f - y0) * fair;
+                            float scale = Math.min(1.45f, targetY / y0);
                             r = clamp255(Math.round(r * scale));
                             g = clamp255(Math.round(g * scale));
                             b = clamp255(Math.round(b * scale));
@@ -1084,6 +1094,34 @@ public class MainActivity extends Activity {
         } catch (RejectedExecutionException ignored) {
             // Activity/worker already closed; ignore late render requests safely.
         }
+    }
+
+    private float fairnessRegionWeight(int mx, int my, int[] bounds, int mw, int mh) {
+        if (bounds == null || bounds.length < 4) return 1f;
+
+        float left = bounds[0];
+        float top = bounds[1];
+        float right = bounds[2];
+        float bottom = bounds[3];
+        float bw = Math.max(1f, right - left);
+        float bh = Math.max(1f, bottom - top);
+        float relY = (my - top) / bh;
+
+        // Full face and jaw coverage, then a gradual neck fade.
+        float vertical;
+        if (relY <= 0.54f) vertical = 1f;
+        else if (relY >= 0.82f) vertical = 0f;
+        else vertical = 1f - smoothStep(0.54f, 0.82f, relY);
+
+        // Below the jaw, prefer the central neck area so exposed arms/hands are not brightened.
+        float horizontal = 1f;
+        if (relY > 0.48f) {
+            float cx = (left + right) * 0.5f;
+            float dx = Math.abs(mx - cx) / Math.max(1f, bw * 0.5f);
+            horizontal = 1f - smoothStep(0.56f, 0.92f, dx);
+        }
+
+        return Math.max(0f, Math.min(1f, vertical * horizontal));
     }
 
     private boolean isSkinLikeColor(int r, int g, int b) {
@@ -1523,7 +1561,8 @@ public class MainActivity extends Activity {
 
     private float currentBrushScreenRadius() {
         float density = getResources().getDisplayMetrics().density;
-        return density * (6f + 22f * (brushSizeValue / 100f));
+        float t = Math.max(0f, Math.min(1f, brushSizeValue / 100f));
+        return density * (4f + 58f * t);
     }
 
     private float currentImageScale() {
@@ -1682,8 +1721,9 @@ public class MainActivity extends Activity {
             pushUndo();
             clearDeque(redoMasks);
 
-            int localRadius = Math.min(120, Math.max(36,
-                    Math.round(Math.min(w, h) * 0.055f)));
+            float toleranceProgress = Math.max(0f, Math.min(1f, brushSeek.getProgress() / 100f));
+            int localRadius = Math.min(220, Math.max(30,
+                    Math.round(Math.min(w, h) * (0.040f + 0.090f * toleranceProgress))));
             int minX = Math.max(0, sx - localRadius);
             int maxX = Math.min(w - 1, sx + localRadius);
             int minY = Math.max(0, sy - localRadius);
@@ -1695,7 +1735,7 @@ public class MainActivity extends Activity {
             ArrayDeque<Integer> queue = new ArrayDeque<>();
             queue.add((sy - minY) * boxW + (sx - minX));
 
-            float tolerance = 6f + brushSeek.getProgress() * 0.28f;
+            float tolerance = 4f + 76f * toleranceProgress;
             float toleranceSq = tolerance * tolerance;
             float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
             boolean targetSkin = isSkinLikeColor(tr, tg, tb);
@@ -1705,7 +1745,7 @@ public class MainActivity extends Activity {
             eraseMask.getPixels(maskPixels, 0, w, 0, 0, w, h);
 
             int changed = 0;
-            final int maxChanged = 35000;
+            final int maxChanged = 90000;
 
             while (!queue.isEmpty() && changed < maxChanged) {
                 int q = queue.removeFirst();
@@ -2111,14 +2151,15 @@ public class MainActivity extends Activity {
             manualMask.getPixels(manual, 0, manualW, 0, 0, manualW, manualH);
         }
 
-        float smoothAmount = smooth / 100f;
-        int blurRadius = Math.round(2f + smoothAmount * 18f);
+        float smoothAmount = Math.max(0f, Math.min(1f, smooth / 100f));
+                float smoothStrength = smoothAmount * (0.78f + 0.52f * smoothAmount);
+        int blurRadius = smooth == 0 ? 0 : Math.round(2f + smoothStrength * 20f);
         float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
         if (smoothAmount > 0.12f) {
             smoothMask = blurMask(smoothMask, mw, mh,
                     Math.max(1, Math.round(1f + smoothAmount * 8f)));
         }
-        int hairRadius = 2 + Math.round(smoothAmount * 2f);
+        int hairRadius = 2 + Math.round(smoothStrength * 2f);
         float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
@@ -2126,7 +2167,8 @@ public class MainActivity extends Activity {
         float feather = 0.17f + (0.15f * smoothAmount);
         float low = threshold - feather * 0.5f;
         float high = threshold + feather * 0.5f;
-        float brighten = (brightness / 100f) * 0.32f;
+        float brightnessAmount = Math.max(0f, Math.min(1f, brightness / 100f));
+                float brighten = brightnessAmount * (0.52f + 0.23f * brightnessAmount);
 
         int br = Color.red(backgroundColor);
         int bg = Color.green(backgroundColor);
@@ -2168,8 +2210,8 @@ public class MainActivity extends Activity {
                 float a;
                 if (hairCandidate) {
                     confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
-                    float hairThreshold = 0.31f + 0.04f * smoothAmount;
-                    float hairFeather = 0.30f + 0.06f * smoothAmount;
+                    float hairThreshold = 0.31f + 0.035f * smoothStrength;
+                    float hairFeather = 0.30f + 0.055f * smoothStrength;
                     a = smoothStep(hairThreshold - hairFeather * 0.5f,
                             hairThreshold + hairFeather * 0.5f, confidence);
                     if (hairSupport > 0.62f && a < 0.58f) a = 0.58f;
@@ -2177,9 +2219,9 @@ public class MainActivity extends Activity {
                     a = smoothStep(low, high, confidence);
                     if (smoothAmount > 0f && a > 0f && a < 1f) {
                         float softened = smoothStep(0f, 1f, a);
-                        float softMix = 0.42f + 0.52f * smoothAmount;
+                        float softMix = Math.min(0.98f, 0.40f + 0.46f * smoothStrength);
                         a = a * (1f - softMix) + softened * softMix;
-                        float edgeCut = 0.12f * smoothAmount;
+                        float edgeCut = Math.min(0.20f, 0.145f * smoothStrength);
                         a = Math.max(0f, Math.min(1f,
                                 (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                     }
@@ -2188,7 +2230,7 @@ public class MainActivity extends Activity {
                 boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
                 if (skinEdge) {
                     float skinA = smoothStep(0.44f, 0.62f, confidence);
-                    float keep = 0.30f + 0.35f * (1f - smoothAmount);
+                    float keep = 0.24f + 0.35f * (1f - Math.min(1f, smoothStrength));
                     a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
                 }
 
@@ -2203,7 +2245,7 @@ public class MainActivity extends Activity {
                         int ig = Color.green(inner);
                         int ib = Color.blue(inner);
                         float edgeBand = 1f - Math.abs(a * 2f - 1f);
-                        float matchStrength = 0.24f + (0.34f + 0.18f * smoothAmount) * edgeBand;
+                        float matchStrength = 0.24f + (0.34f + 0.24f * smoothStrength) * edgeBand;
 
                         if (outer != -1) {
                             int or = Color.red(outer);
@@ -2224,11 +2266,11 @@ public class MainActivity extends Activity {
 
                             boolean outerContaminated = dOuter + 120f < dInner;
                             if (outerContaminated) {
-                                matchStrength = Math.max(matchStrength, 0.78f + 0.16f * smoothAmount);
+                                matchStrength = Math.max(matchStrength, Math.min(0.98f, 0.78f + 0.18f * smoothStrength));
                                 if (!hairCandidate) {
                                     float trim = skinEdge
-                                            ? (0.80f - 0.16f * smoothAmount)
-                                            : (0.86f - 0.14f * smoothAmount);
+                                            ? (0.80f - 0.20f * smoothStrength)
+                                            : (0.86f - 0.18f * smoothStrength);
                                     a *= Math.max(0.60f, trim);
                                 }
                             }
@@ -2255,12 +2297,15 @@ public class MainActivity extends Activity {
                     a *= (1f - eraseA);
                 }
 
-                if (fairness > 0 && skinLike && headZone && a > 0.55f) {
-                    float interior = smoothStep(0.55f, 0.96f, a);
-                    float fair = (fairness / 100f) * 0.22f * interior;
+                float fairnessRegion = fairnessRegionWeight(mx, my, personBounds, mw, mh);
+                if (fairness > 0 && skinLike && fairnessRegion > 0.001f && a > 0.52f) {
+                    float interior = smoothStep(0.52f, 0.96f, a);
+                    float fairAmount = Math.max(0f, Math.min(1f, fairness / 100f));
+                    float fair = fairAmount * (0.32f + 0.18f * fairAmount)
+                            * interior * fairnessRegion;
                     float y0 = Math.max(1f, 0.299f * r + 0.587f * g + 0.114f * b);
-                    float targetY = y0 + (238f - y0) * fair;
-                    float scale = Math.min(1.28f, targetY / y0);
+                    float targetY = y0 + (244f - y0) * fair;
+                    float scale = Math.min(1.45f, targetY / y0);
                     r = clamp255(Math.round(r * scale));
                     g = clamp255(Math.round(g * scale));
                     b = clamp255(Math.round(b * scale));
