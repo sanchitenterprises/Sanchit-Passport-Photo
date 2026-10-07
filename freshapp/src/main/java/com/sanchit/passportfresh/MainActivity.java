@@ -157,7 +157,7 @@ public class MainActivity extends Activity {
         headerText.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Created by Sanchit Kumar • v" + BuildConfig.VERSION_NAME);
+        subtitle.setText("Created by Sanchit Kumar • v" + getAppVersion());
         subtitle.setTextColor(0xFF6B7280);
         subtitle.setTextSize(10);
         subtitle.setSingleLine(true);
@@ -484,6 +484,14 @@ public class MainActivity extends Activity {
         if (processingShade != null) processingShade.setVisibility(View.GONE);
     }
 
+    private String getAppVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "1.0.15";
+        }
+    }
+
     private void showTopMenu(View anchor) {
         PopupMenu popup = new PopupMenu(this, anchor);
         popup.getMenu().add("Share");
@@ -511,7 +519,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("STS Photo Background Remover")
-                .setMessage("Created by Sanchit Kumar\nVersion " + BuildConfig.VERSION_NAME)
+                .setMessage("Created by Sanchit Kumar\nVersion " + getAppVersion())
                 .setPositiveButton("OK", null)
                 .show();
     }
