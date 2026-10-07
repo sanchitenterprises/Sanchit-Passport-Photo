@@ -1,14 +1,32 @@
-plugins { id 'com.android.application' }
+plugins {
+    id 'com.android.application'
+}
 
 android {
     namespace 'com.sanchit.passportphoto'
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.sanchit.passportphoto'
+        applicationId 'com.sanchit.passportfoto1'
         minSdk 24
         targetSdk 35
-        versionCode 8
-        versionName '1.0.7'
+        versionCode 20
+        versionName '1.2.0'
     }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
 }
