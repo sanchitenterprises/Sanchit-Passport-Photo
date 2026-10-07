@@ -694,10 +694,49 @@ public class MainActivity extends Activity {
                             }
                         }
 
+                        // Color-aware edge de-fringe:
+                        // on semi-transparent boundary pixels, follow the mask gradient inward,
+                        // sample the real foreground color and pull white/grey halo pixels toward it.
+                        if (a > 0.04f && a < 0.985f) {
+                            int inner = sampleInnerForegroundColor(src, w, h, x, y,
+                                    smoothMask, mw, mh, mx, my, confidence);
+
+                            if (inner != -1) {
+                                int ir = Color.red(inner);
+                                int ig = Color.green(inner);
+                                int ib = Color.blue(inner);
+
+                                float edgeLum = 0.299f * r + 0.587f * g + 0.114f * b;
+                                float innerLum = 0.299f * ir + 0.587f * ig + 0.114f * ib;
+                                int edgeMax = Math.max(r, Math.max(g, b));
+                                int edgeMin = Math.min(r, Math.min(g, b));
+                                int edgeChroma = edgeMax - edgeMin;
+
+                                boolean lightHalo = edgeLum > 150f
+                                        && edgeChroma < 72
+                                        && innerLum + 18f < edgeLum;
+
+                                float edgeBand = 1f - Math.abs(a * 2f - 1f); // strongest around 50% alpha
+                                float matchStrength = (0.18f + 0.46f * smoothAmount) * edgeBand;
+
+                                if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
+                                if (lightHalo) matchStrength = Math.max(matchStrength, 0.82f * edgeBand);
+
+                                matchStrength = Math.max(0f, Math.min(0.90f, matchStrength));
+                                r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
+                                g = clamp255(Math.round(g * (1f - matchStrength) + ig * matchStrength));
+                                b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
+                            }
+                        }
+
+                        // Do not brighten the semi-transparent edge itself; that was creating
+                        // a visible white outline. Brightness fades in only toward solid foreground.
                         if (a > 0.03f && brighten > 0f) {
-                            r = clamp255(Math.round(r + (255 - r) * brighten));
-                            g = clamp255(Math.round(g + (255 - g) * brighten));
-                            b = clamp255(Math.round(b + (255 - b) * brighten));
+                            float interior = smoothStep(0.48f, 0.93f, a);
+                            float localBrighten = brighten * interior;
+                            r = clamp255(Math.round(r + (255 - r) * localBrighten));
+                            g = clamp255(Math.round(g + (255 - g) * localBrighten));
+                            b = clamp255(Math.round(b + (255 - b) * localBrighten));
                         }
 
                         int rr = clamp255(Math.round(r * a + br * (1f - a)));
@@ -732,6 +771,69 @@ public class MainActivity extends Activity {
         } catch (RejectedExecutionException ignored) {
             // Activity/worker already closed; ignore late render requests safely.
         }
+    }
+
+    private int sampleInnerForegroundColor(int[] src, int w, int h, int x, int y,
+            float[] mask, int mw, int mh, int mx, int my, float currentConfidence) {
+        if (src == null || mask == null || mw < 2 || mh < 2) return -1;
+
+        int left = Math.max(0, mx - 1);
+        int right = Math.min(mw - 1, mx + 1);
+        int top = Math.max(0, my - 1);
+        int bottom = Math.min(mh - 1, my + 1);
+
+        float gx = mask[my * mw + right] - mask[my * mw + left];
+        float gy = mask[bottom * mw + mx] - mask[top * mw + mx];
+        float len = (float)Math.sqrt(gx * gx + gy * gy);
+
+        // If the gradient is weak, search the compact neighbourhood for the strongest
+        // foreground confidence and use that direction.
+        if (len < 0.015f) {
+            float best = currentConfidence;
+            int bestX = mx;
+            int bestY = my;
+            for (int yy = Math.max(0, my - 2); yy <= Math.min(mh - 1, my + 2); yy++) {
+                for (int xx = Math.max(0, mx - 2); xx <= Math.min(mw - 1, mx + 2); xx++) {
+                    float v = mask[yy * mw + xx];
+                    if (v > best) {
+                        best = v;
+                        bestX = xx;
+                        bestY = yy;
+                    }
+                }
+            }
+            gx = bestX - mx;
+            gy = bestY - my;
+            len = (float)Math.sqrt(gx * gx + gy * gy);
+        }
+
+        if (len < 0.001f) return -1;
+        gx /= len;
+        gy /= len;
+
+        int bestColor = -1;
+        float bestConfidence = currentConfidence;
+
+        // Walk inward on the person mask. Sampling 1..6 mask pixels is cheap and
+        // preserves the local hair/skin/clothing color instead of smearing unrelated areas.
+        for (int step = 1; step <= 6; step++) {
+            int smx = Math.max(0, Math.min(mw - 1, Math.round(mx + gx * step)));
+            int smy = Math.max(0, Math.min(mh - 1, Math.round(my + gy * step)));
+            float conf = mask[smy * mw + smx];
+
+            if (conf >= bestConfidence + 0.035f || (bestColor == -1 && conf > 0.58f)) {
+                int sx = Math.max(0, Math.min(w - 1,
+                        Math.round(smx * (w - 1f) / Math.max(1f, mw - 1f))));
+                int sy = Math.max(0, Math.min(h - 1,
+                        Math.round(smy * (h - 1f) / Math.max(1f, mh - 1f))));
+                bestColor = src[sy * w + sx];
+                bestConfidence = conf;
+            }
+
+            if (bestConfidence > 0.88f) break;
+        }
+
+        return bestColor;
     }
 
     private int[] findMaskBounds(float[] mask, int w, int h, float threshold) {
