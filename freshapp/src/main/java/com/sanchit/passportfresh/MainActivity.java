@@ -78,6 +78,7 @@ public class MainActivity extends Activity {
     private SeekBar smoothSeek;
     private SeekBar brushSeek;
     private Button compareButton;
+    private Button brushButton;
     private Button objectButton;
     private Button undoButton;
     private Button redoButton;
@@ -93,8 +94,17 @@ public class MainActivity extends Activity {
     private int maskWidth;
     private int maskHeight;
     private Uri cameraUri;
+    private Uri sourceUri;
     private boolean compareOriginal;
+    private boolean brushModeOn = false;
     private boolean colorCleanOn = false;
+    private boolean brushStrokeStarted = false;
+    private boolean brushStrokeChanged = false;
+    private float lastBrushViewX;
+    private float lastBrushViewY;
+    private TextView toolSeekLabel;
+    private int colorToleranceValue = 22;
+    private int brushSizeValue = 30;
     private volatile boolean destroyed;
 
     private final Matrix photoMatrix = new Matrix();
@@ -210,9 +220,13 @@ public class MainActivity extends Activity {
 
         LinearLayout row2 = buttonRow();
         compareButton = button("COMPARE", false);
+        brushButton = button("BRUSH", false);
         objectButton = button("LOCAL COLOR CLEAN", false);
-        objectButton.setTextSize(13);
+        compareButton.setTextSize(11);
+        brushButton.setTextSize(11);
+        objectButton.setTextSize(10);
         row2.addView(compareButton, weightedButton());
+        row2.addView(brushButton, weightedButton());
         row2.addView(objectButton, weightedButton());
         controls.addView(row2, weightedControlRow(1.0f));
 
@@ -243,6 +257,7 @@ public class MainActivity extends Activity {
         camera.setOnClickListener(v -> openCamera());
         gallery.setOnClickListener(v -> openGallery());
         compareButton.setOnClickListener(v -> toggleCompare());
+        brushButton.setOnClickListener(v -> toggleBrushMode());
         objectButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
@@ -265,7 +280,13 @@ public class MainActivity extends Activity {
         smoothSeek.setOnSeekBarChangeListener(redraw);
         brushSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
-                if (fromUser && status != null) status.setText("Color Tolerance " + p + "%");
+                if (brushModeOn) {
+                    brushSizeValue = p;
+                    if (fromUser && status != null) status.setText("Brush Size " + p + "%");
+                } else {
+                    colorToleranceValue = p;
+                    if (fromUser && status != null) status.setText("Color Tolerance " + p + "%");
+                }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -337,6 +358,7 @@ public class MainActivity extends Activity {
         label.setTextSize(13);
         label.setTextColor(0xFF374151);
         label.setGravity(Gravity.CENTER_VERTICAL);
+        if ("Color Tolerance".equals(name)) toolSeekLabel = label;
         row.addView(label, new LinearLayout.LayoutParams(dp(92), -1));
 
         SeekBar seek = new SeekBar(this);
@@ -364,6 +386,7 @@ public class MainActivity extends Activity {
         smoothSeek.setEnabled(enabled);
         brushSeek.setEnabled(enabled);
         compareButton.setEnabled(enabled);
+        brushButton.setEnabled(enabled);
         objectButton.setEnabled(enabled);
         processButton.setEnabled(enabled);
         resetButton.setEnabled(enabled);
@@ -516,6 +539,7 @@ public class MainActivity extends Activity {
                 if (b == null) throw new IllegalStateException("decode failed");
                 runOnUiThread(() -> {
                     releasePhoto();
+                    sourceUri = uri;
                     originalBitmap = b;
                     imageView.setImageBitmap(originalBitmap);
                     compareOriginal = false;
@@ -1130,9 +1154,33 @@ public class MainActivity extends Activity {
         compareButton.setText(compareOriginal ? "SHOW RESULT" : "COMPARE");
     }
 
+    private void toggleBrushMode() {
+        if (resultBitmap == null) return;
+        brushModeOn = !brushModeOn;
+        if (brushModeOn) {
+            colorCleanOn = false;
+            objectButton.setText("LOCAL COLOR CLEAN");
+            brushButton.setText("BRUSH ✓");
+            if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
+            brushSeek.setProgress(brushSizeValue);
+            status.setText("Brush ON • zoom करके edge/छूटा colour manually साफ करें");
+        } else {
+            brushButton.setText("BRUSH");
+            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+            brushSeek.setProgress(colorToleranceValue);
+            status.setText("Brush OFF");
+        }
+    }
+
     private void toggleColorClean() {
         if (resultBitmap == null) return;
         colorCleanOn = !colorCleanOn;
+        if (colorCleanOn) {
+            brushModeOn = false;
+            brushButton.setText("BRUSH");
+            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+            brushSeek.setProgress(colorToleranceValue);
+        }
         if (compareOriginal && colorCleanOn) {
             compareOriginal = false;
             imageView.setImageBitmap(resultBitmap);
@@ -1431,9 +1479,14 @@ public class MainActivity extends Activity {
         if (originalBitmap == null) return;
         brightnessSeek.setProgress(22);
         smoothSeek.setProgress(35);
-        brushSeek.setProgress(22);
+        colorToleranceValue = 22;
+        brushSizeValue = 30;
+        brushModeOn = false;
         colorCleanOn = false;
+        brushButton.setText("BRUSH");
         objectButton.setText("LOCAL COLOR CLEAN");
+        if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+        brushSeek.setProgress(colorToleranceValue);
         imageView.post(this::resetZoom);
         createEmptyEraseMask();
         clearHistory();
