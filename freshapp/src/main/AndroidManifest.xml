@@ -18,7 +18,7 @@
         android:supportsRtl="true">
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.sanchit.passportfresh.MainActivity"
             android:screenOrientation="portrait"
             android:exported="true"
             android:hardwareAccelerated="true">
