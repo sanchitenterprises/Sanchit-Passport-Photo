@@ -1,0 +1,68 @@
+name: Build Fresh Passport Photo
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'freshapp/**'
+      - 'settings.gradle'
+      - '.github/workflows/build-fresh-passport.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build fresh release APK
+        run: gradle :freshapp:assembleRelease --no-daemon --stacktrace
+
+      - name: Align and validate APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          IN="freshapp/build/outputs/apk/release/freshapp-release-unsigned.apk"
+          OUT="freshapp/build/outputs/apk/release/Sanchit-Passport-Photo-New-v1.0.0-aligned-unsigned.apk"
+          "$BT/zipalign" -p -f 4 "$IN" "$OUT"
+          "$BT/zipalign" -c -P 16 -v 4 "$OUT" | tee freshapp/build/outputs/apk/release/ZIPALIGN-VERIFY.txt
+          "$BT/aapt" dump badging "$OUT" | tee freshapp/build/outputs/apk/release/AAPT-BADGING.txt
+          "$BT/aapt" dump permissions "$OUT" | tee freshapp/build/outputs/apk/release/PERMISSIONS.txt
+          unzip -t "$OUT" | tee freshapp/build/outputs/apk/release/ZIP-TEST.txt
+          grep -q "package: name='com.sanchit.passportfresh'" freshapp/build/outputs/apk/release/AAPT-BADGING.txt
+          if grep -q "android.permission.INTERNET" freshapp/build/outputs/apk/release/PERMISSIONS.txt; then
+            echo "ERROR: INTERNET permission unexpectedly present"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sanchit-Passport-Photo-New-v1.0.0
+          path: |
+            freshapp/build/outputs/apk/release/Sanchit-Passport-Photo-New-v1.0.0-aligned-unsigned.apk
+            freshapp/build/outputs/apk/release/ZIPALIGN-VERIFY.txt
+            freshapp/build/outputs/apk/release/AAPT-BADGING.txt
+            freshapp/build/outputs/apk/release/PERMISSIONS.txt
+            freshapp/build/outputs/apk/release/ZIP-TEST.txt
+          if-no-files-found: error
