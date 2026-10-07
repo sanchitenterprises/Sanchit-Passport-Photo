@@ -16,6 +16,7 @@ import android.graphics.Color;
 import android.graphics.ImageDecoder;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -24,6 +25,7 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.Button;
@@ -92,9 +94,16 @@ public class MainActivity extends Activity {
     private int maskHeight;
     private Uri cameraUri;
     private boolean compareOriginal;
-    private boolean objectRemoveOn = false;
-    private boolean strokeChanged;
+    private boolean colorCleanOn = false;
     private volatile boolean destroyed;
+
+    private final Matrix photoMatrix = new Matrix();
+    private ScaleGestureDetector scaleGestureDetector;
+    private float zoomFactor = 1f;
+    private float lastPanX;
+    private float lastPanY;
+    private boolean panMoved;
+    private boolean gestureWasScaling;
     private int renderToken;
 
     @Override
@@ -150,7 +159,7 @@ public class MainActivity extends Activity {
         preview.setBackground(rounded(0xFFE7EBEF, 18));
 
         imageView = new ImageView(this);
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        imageView.setScaleType(ImageView.ScaleType.MATRIX);
         imageView.setBackgroundColor(0xFFE7EBEF);
         preview.addView(imageView, new FrameLayout.LayoutParams(-1, -1));
 
@@ -201,7 +210,7 @@ public class MainActivity extends Activity {
 
         LinearLayout row2 = buttonRow();
         compareButton = button("COMPARE", false);
-        objectButton = button("OBJECT REMOVE", false);
+        objectButton = button("LOCAL COLOR CLEAN", false);
         objectButton.setTextSize(13);
         row2.addView(compareButton, weightedButton());
         row2.addView(objectButton, weightedButton());
@@ -214,7 +223,7 @@ public class MainActivity extends Activity {
         row3.addView(redoButton, weightedButton());
         controls.addView(row3, weightedControlRow(1.0f));
 
-        brushSeek = compactSlider(controls, "Brush Size", 42);
+        brushSeek = compactSlider(controls, "Color Tolerance", 32);
 
         LinearLayout row4 = buttonRow();
         processButton = button("SHARE", true);
@@ -234,7 +243,7 @@ public class MainActivity extends Activity {
         camera.setOnClickListener(v -> openCamera());
         gallery.setOnClickListener(v -> openGallery());
         compareButton.setOnClickListener(v -> toggleCompare());
-        objectButton.setOnClickListener(v -> toggleObjectRemove());
+        objectButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
         processButton.setOnClickListener(v -> sharePhoto());
@@ -254,8 +263,35 @@ public class MainActivity extends Activity {
         };
         brightnessSeek.setOnSeekBarChangeListener(redraw);
         smoothSeek.setOnSeekBarChangeListener(redraw);
+        brushSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
+                if (fromUser && status != null) status.setText("Color Tolerance " + p + "%");
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
 
-        imageView.setOnTouchListener(this::handleEraseTouch);
+                scaleGestureDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override public boolean onScaleBegin(ScaleGestureDetector detector) {
+                gestureWasScaling = true;
+                return resultBitmap != null || originalBitmap != null;
+            }
+
+            @Override public boolean onScale(ScaleGestureDetector detector) {
+                if (imageView.getDrawable() == null) return false;
+                float wanted = zoomFactor * detector.getScaleFactor();
+                float limited = Math.max(1f, Math.min(20f, wanted));
+                float factor = limited / Math.max(0.0001f, zoomFactor);
+                photoMatrix.postScale(factor, factor, detector.getFocusX(), detector.getFocusY());
+                zoomFactor = limited;
+                constrainPhotoMatrix();
+                imageView.setImageMatrix(photoMatrix);
+                if (status != null) status.setText("Zoom " + Math.round(zoomFactor * 100f) + "%");
+                return true;
+            }
+        });
+
+        imageView.setOnTouchListener(this::handlePhotoTouch);
         setEditingEnabled(false);
         updateHistoryButtons();
     }
@@ -483,6 +519,7 @@ public class MainActivity extends Activity {
                     originalBitmap = b;
                     imageView.setImageBitmap(originalBitmap);
                     compareOriginal = false;
+                    imageView.post(this::resetZoom);
                     createEmptyEraseMask();
                     clearHistory();
                     setEditingEnabled(true);
@@ -1093,62 +1130,252 @@ public class MainActivity extends Activity {
         compareButton.setText(compareOriginal ? "SHOW RESULT" : "COMPARE");
     }
 
-    private void toggleObjectRemove() {
-        objectRemoveOn = !objectRemoveOn;
-        objectButton.setText(objectRemoveOn ? "OBJECT REMOVE ✓" : "OBJECT REMOVE");
+    private void toggleColorClean() {
+        if (resultBitmap == null) return;
+        colorCleanOn = !colorCleanOn;
+        if (compareOriginal && colorCleanOn) {
+            compareOriginal = false;
+            imageView.setImageBitmap(resultBitmap);
+            compareButton.setText("COMPARE");
+        }
+        objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
+        status.setText(colorCleanOn
+                ? "Zoom करें और हटाने वाले colour पर एक बार tap करें"
+                : "Local Color Clean OFF");
     }
 
-    private boolean handleEraseTouch(View v, MotionEvent e) {
-        if (!objectRemoveOn || resultBitmap == null || originalBitmap == null || compareOriginal) return false;
+    private boolean handlePhotoTouch(View v, MotionEvent e) {
+        if (scaleGestureDetector != null) scaleGestureDetector.onTouchEvent(e);
 
-        if (e.getAction() == MotionEvent.ACTION_DOWN) {
-            pushUndo();
-            clearDeque(redoMasks);
-            strokeChanged = false;
-            drawErase(e);
-            updateHistoryButtons();
+        int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_POINTER_DOWN) {
+            gestureWasScaling = true;
+            return true;
+        }
+        if (action == MotionEvent.ACTION_POINTER_UP) {
             return true;
         }
 
-        if (e.getAction() == MotionEvent.ACTION_MOVE) {
-            drawErase(e);
+        if (action == MotionEvent.ACTION_DOWN) {
+            lastPanX = e.getX();
+            lastPanY = e.getY();
+            panMoved = false;
+            gestureWasScaling = false;
             return true;
         }
 
-        if (e.getAction() == MotionEvent.ACTION_UP || e.getAction() == MotionEvent.ACTION_CANCEL) {
-            if (strokeChanged) renderResult();
+        if (action == MotionEvent.ACTION_MOVE) {
+            if (e.getPointerCount() > 1 || (scaleGestureDetector != null && scaleGestureDetector.isInProgress())) {
+                gestureWasScaling = true;
+                return true;
+            }
+
+            float dx = e.getX() - lastPanX;
+            float dy = e.getY() - lastPanY;
+            if (zoomFactor > 1.001f) {
+                if (Math.abs(dx) > dp(1) || Math.abs(dy) > dp(1)) panMoved = true;
+                photoMatrix.postTranslate(dx, dy);
+                constrainPhotoMatrix();
+                imageView.setImageMatrix(photoMatrix);
+            }
+            lastPanX = e.getX();
+            lastPanY = e.getY();
             return true;
         }
-        return false;
+
+        if (action == MotionEvent.ACTION_UP) {
+            if (colorCleanOn && !compareOriginal && resultBitmap != null
+                    && !panMoved && !gestureWasScaling
+                    && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
+                applyLocalColorCleanAt(e.getX(), e.getY());
+            }
+            gestureWasScaling = false;
+            return true;
+        }
+
+        if (action == MotionEvent.ACTION_CANCEL) {
+            gestureWasScaling = false;
+            return true;
+        }
+
+        return true;
     }
 
-    private void drawErase(MotionEvent e) {
+    private void applyLocalColorCleanAt(float viewX, float viewY) {
         try {
+            if (resultBitmap == null || originalBitmap == null) return;
             if (eraseMask == null) createEmptyEraseMask();
-            if (eraseMask == null || resultBitmap == null) return;
+            if (eraseMask == null) return;
 
             Matrix inv = new Matrix();
-            if (!imageView.getImageMatrix().invert(inv)) return;
+            if (!photoMatrix.invert(inv)) return;
+            float[] point = new float[]{viewX, viewY};
+            inv.mapPoints(point);
+            int sx = Math.round(point[0]);
+            int sy = Math.round(point[1]);
 
-            float[] p = new float[]{e.getX(), e.getY()};
-            inv.mapPoints(p);
-            float x = p[0];
-            float y = p[1];
+            int w = resultBitmap.getWidth();
+            int h = resultBitmap.getHeight();
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
-            if (x < 0 || y < 0 || x >= eraseMask.getWidth() || y >= eraseMask.getHeight()) return;
+            int target = resultBitmap.getPixel(sx, sy);
+            int tr = Color.red(target);
+            int tg = Color.green(target);
+            int tb = Color.blue(target);
 
-            float radius = Math.max(8f,
-                    (brushSeek.getProgress() / 100f) *
-                    Math.min(eraseMask.getWidth(), eraseMask.getHeight()) * 0.085f);
+            int br = Color.red(BLUE);
+            int bg = Color.green(BLUE);
+            int bb = Color.blue(BLUE);
+            if (colorDistanceSq(tr, tg, tb, br, bg, bb) < 900f) {
+                status.setText("यह पहले से background है • बचा हुआ colour select करें");
+                return;
+            }
 
-            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            paint.setColor(Color.WHITE);
-            new Canvas(eraseMask).drawCircle(x, y, radius, paint);
-            strokeChanged = true;
-            status.setText("Object Remove • छोड़ते ही apply होगा");
+            if (!isNearSubjectBoundary(sx, sy, w, h)) {
+                status.setText("Body/edge के पास बचा हुआ colour select करें");
+                return;
+            }
+
+            pushUndo();
+            clearDeque(redoMasks);
+
+            int localRadius = Math.min(180, Math.max(48,
+                    Math.round(Math.min(w, h) * 0.085f)));
+            int minX = Math.max(0, sx - localRadius);
+            int maxX = Math.min(w - 1, sx + localRadius);
+            int minY = Math.max(0, sy - localRadius);
+            int maxY = Math.min(h - 1, sy + localRadius);
+            int boxW = maxX - minX + 1;
+            int boxH = maxY - minY + 1;
+
+            boolean[] visited = new boolean[boxW * boxH];
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            queue.add((sy - minY) * boxW + (sx - minX));
+
+            float tolerance = 16f + brushSeek.getProgress() * 0.62f;
+            float toleranceSq = tolerance * tolerance * 3f;
+            int[] resultPixels = new int[w * h];
+            int[] maskPixels = new int[w * h];
+            resultBitmap.getPixels(resultPixels, 0, w, 0, 0, w, h);
+            eraseMask.getPixels(maskPixels, 0, w, 0, 0, w, h);
+
+            int changed = 0;
+            final int maxChanged = 35000;
+
+            while (!queue.isEmpty() && changed < maxChanged) {
+                int q = queue.removeFirst();
+                if (q < 0 || q >= visited.length || visited[q]) continue;
+                visited[q] = true;
+
+                int lx = q % boxW;
+                int ly = q / boxW;
+                int x = minX + lx;
+                int y = minY + ly;
+
+                int dx = x - sx;
+                int dy = y - sy;
+                if (dx * dx + dy * dy > localRadius * localRadius) continue;
+                if (!isNearSubjectBoundary(x, y, w, h)) continue;
+
+                int c = resultPixels[y * w + x];
+                int r = Color.red(c);
+                int g = Color.green(c);
+                int b = Color.blue(c);
+                if (colorDistanceSq(r, g, b, tr, tg, tb) > toleranceSq) continue;
+
+                maskPixels[y * w + x] = Color.argb(255, 255, 255, 255);
+                changed++;
+
+                if (lx > 0) queue.add(q - 1);
+                if (lx + 1 < boxW) queue.add(q + 1);
+                if (ly > 0) queue.add(q - boxW);
+                if (ly + 1 < boxH) queue.add(q + boxW);
+
+                // Diagonals keep thin ear/hair fringe connected without jumping to
+                // another same-colour object elsewhere in the photo.
+                if (lx > 0 && ly > 0) queue.add(q - boxW - 1);
+                if (lx + 1 < boxW && ly > 0) queue.add(q - boxW + 1);
+                if (lx > 0 && ly + 1 < boxH) queue.add(q + boxW - 1);
+                if (lx + 1 < boxW && ly + 1 < boxH) queue.add(q + boxW + 1);
+            }
+
+            if (changed == 0) {
+                if (!undoMasks.isEmpty()) undoMasks.pop();
+                updateHistoryButtons();
+                status.setText("इस target पर matching edge colour नहीं मिला");
+                return;
+            }
+
+            eraseMask.setPixels(maskPixels, 0, w, 0, 0, w, h);
+            updateHistoryButtons();
+            status.setText("Local clean • " + changed + " pixels • सिर्फ target area");
+            renderResult();
         } catch (Throwable ignored) {
-            // Touch must never close the app.
+            status.setText("Color clean apply नहीं हुआ");
         }
+    }
+
+    private boolean isNearSubjectBoundary(int x, int y, int imageW, int imageH) {
+        if (personMask == null || maskWidth <= 0 || maskHeight <= 0) return true;
+
+        int mx = Math.max(0, Math.min(maskWidth - 1,
+                Math.round(x * (maskWidth - 1f) / Math.max(1f, imageW - 1f))));
+        int my = Math.max(0, Math.min(maskHeight - 1,
+                Math.round(y * (maskHeight - 1f) / Math.max(1f, imageH - 1f))));
+
+        float min = 1f;
+        float max = 0f;
+        int radius = 3;
+        for (int yy = Math.max(0, my - radius); yy <= Math.min(maskHeight - 1, my + radius); yy++) {
+            for (int xx = Math.max(0, mx - radius); xx <= Math.min(maskWidth - 1, mx + radius); xx++) {
+                float v = personMask[yy * maskWidth + xx];
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        }
+        return max > 0.06f && min < 0.985f;
+    }
+
+    private void resetZoom() {
+        Bitmap shown = compareOriginal ? originalBitmap : (resultBitmap != null ? resultBitmap : originalBitmap);
+        if (shown == null || imageView.getWidth() <= 0 || imageView.getHeight() <= 0) return;
+
+        float vw = imageView.getWidth();
+        float vh = imageView.getHeight();
+        float bw = shown.getWidth();
+        float bh = shown.getHeight();
+        float fit = Math.min(vw / bw, vh / bh);
+        float dx = (vw - bw * fit) * 0.5f;
+        float dy = (vh - bh * fit) * 0.5f;
+
+        photoMatrix.reset();
+        photoMatrix.postScale(fit, fit);
+        photoMatrix.postTranslate(dx, dy);
+        zoomFactor = 1f;
+        imageView.setImageMatrix(photoMatrix);
+    }
+
+    private void constrainPhotoMatrix() {
+        Bitmap shown = compareOriginal ? originalBitmap : (resultBitmap != null ? resultBitmap : originalBitmap);
+        if (shown == null || imageView.getWidth() <= 0 || imageView.getHeight() <= 0) return;
+
+        RectF rect = new RectF(0, 0, shown.getWidth(), shown.getHeight());
+        photoMatrix.mapRect(rect);
+
+        float vw = imageView.getWidth();
+        float vh = imageView.getHeight();
+        float dx = 0f;
+        float dy = 0f;
+
+        if (rect.width() <= vw) dx = vw * 0.5f - rect.centerX();
+        else if (rect.left > 0f) dx = -rect.left;
+        else if (rect.right < vw) dx = vw - rect.right;
+
+        if (rect.height() <= vh) dy = vh * 0.5f - rect.centerY();
+        else if (rect.top > 0f) dy = -rect.top;
+        else if (rect.bottom < vh) dy = vh - rect.bottom;
+
+        photoMatrix.postTranslate(dx, dy);
     }
 
     private void createEmptyEraseMask() {
@@ -1197,9 +1424,10 @@ public class MainActivity extends Activity {
         if (originalBitmap == null) return;
         brightnessSeek.setProgress(22);
         smoothSeek.setProgress(35);
-        brushSeek.setProgress(42);
-        objectRemoveOn = false;
-        objectButton.setText("OBJECT REMOVE");
+        brushSeek.setProgress(32);
+        colorCleanOn = false;
+        objectButton.setText("LOCAL COLOR CLEAN");
+        imageView.post(this::resetZoom);
         createEmptyEraseMask();
         clearHistory();
         if (personMask != null) renderResult();
