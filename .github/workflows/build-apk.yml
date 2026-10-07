@@ -21,7 +21,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Use preinstalled Android SDK
+      - name: Use Android SDK
         shell: bash
         run: |
           echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
@@ -37,9 +37,20 @@ jobs:
       - name: Build unsigned release APK
         run: gradle :app:assembleRelease --no-daemon --stacktrace
 
-      - name: Upload unsigned release APK
+      - name: ZIPALIGN release APK
+        shell: bash
+        run: |
+          BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
+          "$BT/zipalign" -p -f -v 4             app/build/outputs/apk/release/app-release-unsigned.apk             app/build/outputs/apk/release/Sanchit-Passport-Photo-v1.2.1-aligned-unsigned.apk
+          "$BT/zipalign" -c -P 16 -v 4             app/build/outputs/apk/release/Sanchit-Passport-Photo-v1.2.1-aligned-unsigned.apk             | tee app/build/outputs/apk/release/ZIPALIGN-VERIFY.txt
+          "$BT/aapt" dump badging             app/build/outputs/apk/release/Sanchit-Passport-Photo-v1.2.1-aligned-unsigned.apk             > app/build/outputs/apk/release/AAPT-BADGING.txt
+
+      - name: Upload aligned APK and validation
         uses: actions/upload-artifact@v4
         with:
-          name: Sanchit-Passport-Photo-v1.2.0-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: Sanchit-Passport-Photo-v1.2.1-aligned-unsigned
+          path: |
+            app/build/outputs/apk/release/Sanchit-Passport-Photo-v1.2.1-aligned-unsigned.apk
+            app/build/outputs/apk/release/ZIPALIGN-VERIFY.txt
+            app/build/outputs/apk/release/AAPT-BADGING.txt
           if-no-files-found: error
