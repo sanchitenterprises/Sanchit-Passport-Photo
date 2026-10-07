@@ -50,7 +50,8 @@ jobs:
           "$BT/aapt" dump badging "$OUT" | tee freshapp/build/outputs/apk/release/AAPT-BADGING.txt
           "$BT/aapt" dump permissions "$OUT" | tee freshapp/build/outputs/apk/release/PERMISSIONS.txt
           unzip -t "$OUT" | tee freshapp/build/outputs/apk/release/ZIP-TEST.txt
-          grep -q "package: name='com.sanchit.passportfresh'" freshapp/build/outputs/apk/release/AAPT-BADGING.txt
+          cp "$BT/lib/apksigner.jar" freshapp/build/outputs/apk/release/apksigner.jar
+          grep -q "package: name='com.sanchit.stspassportsizephoto'" freshapp/build/outputs/apk/release/AAPT-BADGING.txt
           if grep -q "android.permission.INTERNET" freshapp/build/outputs/apk/release/PERMISSIONS.txt; then
             echo "ERROR: INTERNET permission unexpectedly present"
             exit 1
@@ -65,4 +66,5 @@ jobs:
             freshapp/build/outputs/apk/release/AAPT-BADGING.txt
             freshapp/build/outputs/apk/release/PERMISSIONS.txt
             freshapp/build/outputs/apk/release/ZIP-TEST.txt
+            freshapp/build/outputs/apk/release/apksigner.jar
           if-no-files-found: error
