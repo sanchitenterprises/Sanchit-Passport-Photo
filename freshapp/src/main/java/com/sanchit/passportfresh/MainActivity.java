@@ -67,6 +67,17 @@ public class MainActivity extends Activity {
     private static final int REQ_SAVE_PERMISSION = 204;
 
     private static final int BLUE = Color.rgb(74, 144, 194);
+    private static final int[] PHOTO_BG_COLORS = new int[]{
+            BLUE,                   // Standard blue
+            Color.rgb(176, 218, 242), // Sky blue
+            Color.WHITE,            // White
+            Color.rgb(226, 230, 234), // Light grey
+            Color.rgb(196, 64, 64),   // Passport/photo red
+            Color.rgb(245, 235, 213)  // Cream
+    };
+    private static final String[] PHOTO_BG_NAMES = new String[]{
+            "Blue", "Sky Blue", "White", "Light Grey", "Red", "Cream"
+    };
     private static final int MAX_SIDE = 1440;
     private static final int MAX_HISTORY = 8;
 
@@ -82,6 +93,7 @@ public class MainActivity extends Activity {
     private LensView magnifierLens;
     private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
+    private SeekBar fairnessSeek;
     private SeekBar smoothSeek;
     private SeekBar brushSeek;
     private Button compareButton;
@@ -109,6 +121,8 @@ public class MainActivity extends Activity {
     private TextView toolSeekLabel;
     private int colorToleranceValue = 22;
     private int brushSizeValue = 30;
+    private int selectedBackgroundColor = BLUE;
+    private LinearLayout backgroundColorRow;
     private volatile boolean destroyed;
 
     private final Matrix photoMatrix = new Matrix();
@@ -231,6 +245,21 @@ public class MainActivity extends Activity {
         controls.setBackground(rounded(0xFFF8FBFA, 18));
         root.addView(controls, new LinearLayout.LayoutParams(-1, 0, 0.42f));
 
+        backgroundColorRow = new LinearLayout(this);
+        backgroundColorRow.setOrientation(LinearLayout.HORIZONTAL);
+        backgroundColorRow.setGravity(Gravity.CENTER);
+        backgroundColorRow.setPadding(dp(6), dp(2), dp(6), dp(2));
+        for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
+            final int color = PHOTO_BG_COLORS[i];
+            final String colorName = PHOTO_BG_NAMES[i];
+            View circle = createBackgroundColorCircle(color, colorName);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -1, 1f);
+            cp.setMargins(dp(5), dp(2), dp(5), dp(2));
+            backgroundColorRow.addView(circle, cp);
+        }
+        controls.addView(backgroundColorRow, weightedControlRow(0.82f));
+        updateBackgroundColorSelection();
+
         LinearLayout row1 = buttonRow();
         undoButton = button("UNDO", false);
         redoButton = button("REDO", false);
@@ -239,6 +268,7 @@ public class MainActivity extends Activity {
         controls.addView(row1, weightedControlRow(1.0f));
 
         brightnessSeek = compactSlider(controls, "Brightness", 22);
+        fairnessSeek = compactSlider(controls, "Fairness", 28);
         smoothSeek = compactSlider(controls, "Smooth BG", 35);
         brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
@@ -276,6 +306,8 @@ public class MainActivity extends Activity {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
                 if (fromUser && seekBar == smoothSeek && status != null) {
                     status.setText("Smooth BG " + p + "%");
+                } else if (fromUser && seekBar == fairnessSeek && status != null) {
+                    status.setText("Fairness " + p + "%");
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -284,6 +316,7 @@ public class MainActivity extends Activity {
             }
         };
         brightnessSeek.setOnSeekBarChangeListener(redraw);
+        fairnessSeek.setOnSeekBarChangeListener(redraw);
         smoothSeek.setOnSeekBarChangeListener(redraw);
         brushSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
@@ -390,7 +423,8 @@ public class MainActivity extends Activity {
         seek.setProgress(progressValue);
         if (Build.VERSION.SDK_INT >= 21) {
             int accent = "Brightness".equals(name) ? 0xFFB39B7A
-                    : ("Smooth BG".equals(name) ? 0xFF4F8F8B : 0xFF7C7399);
+                    : ("Fairness".equals(name) ? 0xFF7E9B76
+                    : ("Smooth BG".equals(name) ? 0xFF4F8F8B : 0xFF7C7399));
             seek.setProgressTintList(ColorStateList.valueOf(accent));
             seek.setThumbTintList(ColorStateList.valueOf(accent));
         }
@@ -398,6 +432,47 @@ public class MainActivity extends Activity {
 
         parent.addView(row, weightedControlRow(0.82f));
         return seek;
+    }
+
+    private View createBackgroundColorCircle(int color, String name) {
+        TextView circle = new TextView(this);
+        circle.setGravity(Gravity.CENTER);
+        circle.setContentDescription("Background " + name);
+        circle.setTag(color);
+        circle.setClickable(true);
+        circle.setFocusable(true);
+        attachTouchAnimation(circle);
+        circle.setOnClickListener(v -> {
+            Object tag = v.getTag();
+            if (!(tag instanceof Integer)) return;
+            selectedBackgroundColor = (Integer)tag;
+            updateBackgroundColorSelection();
+            if (originalBitmap != null && personMask != null) {
+                status.setText(name + " background");
+                renderResult();
+            } else {
+                status.setText(name + " background selected");
+            }
+        });
+        return circle;
+    }
+
+    private void updateBackgroundColorSelection() {
+        if (backgroundColorRow == null) return;
+        for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
+            View child = backgroundColorRow.getChildAt(i);
+            Object tag = child.getTag();
+            if (!(tag instanceof Integer)) continue;
+            int color = (Integer)tag;
+            boolean selected = color == selectedBackgroundColor;
+            GradientDrawable bg = new GradientDrawable();
+            bg.setShape(GradientDrawable.OVAL);
+            bg.setColor(color);
+            int strokeColor = selected ? 0xFF111827 : 0xFFB7C0C8;
+            bg.setStroke(dp(selected ? 4 : 1), strokeColor);
+            child.setBackground(bg);
+            child.setElevation(selected ? dp(3) : dp(1));
+        }
     }
 
     private RippleDrawable rippleRounded(int color, int radiusDp, int rippleColor) {
@@ -431,11 +506,17 @@ public class MainActivity extends Activity {
 
     private void setEditingEnabled(boolean enabled) {
         brightnessSeek.setEnabled(enabled);
+        fairnessSeek.setEnabled(enabled);
         smoothSeek.setEnabled(enabled);
         brushSeek.setEnabled(enabled);
         compareButton.setEnabled(enabled);
         brushButton.setEnabled(enabled);
         objectButton.setEnabled(enabled);
+        if (backgroundColorRow != null) {
+            for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
+                backgroundColorRow.getChildAt(i).setEnabled(enabled);
+            }
+        }
         updateHistoryButtons();
     }
 
@@ -488,7 +569,7 @@ public class MainActivity extends Activity {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return "1.0.15";
+            return "1.0.16";
         }
     }
 
@@ -745,11 +826,13 @@ public class MainActivity extends Activity {
         final int mw = maskWidth;
         final int mh = maskHeight;
         final int brightness = brightnessSeek.getProgress();
+        final int fairness = fairnessSeek.getProgress();
         final int smooth = smoothSeek.getProgress();
+        final int backgroundColor = selectedBackgroundColor;
         final Bitmap localErase = eraseMask == null ? null : eraseMask.copy(Bitmap.Config.ALPHA_8, false);
         final int token = ++renderToken;
 
-        setBusy(true, "Blue background तैयार हो रहा है…");
+        setBusy(true, "Background तैयार हो रहा है…");
 
         try {
             worker.execute(() -> {
@@ -768,11 +851,11 @@ public class MainActivity extends Activity {
                 }
 
                 float smoothAmount = smooth / 100f;
-                int blurRadius = Math.round(smoothAmount * 14f);
+                int blurRadius = Math.round(2f + smoothAmount * 18f);
                 float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
-                if (smoothAmount > 0.20f) {
+                if (smoothAmount > 0.12f) {
                     smoothMask = blurMask(smoothMask, mw, mh,
-                            Math.max(1, Math.round(smoothAmount * 5f)));
+                            Math.max(1, Math.round(1f + smoothAmount * 8f)));
                 }
 
                 // Hair-safe refinement:
@@ -783,15 +866,15 @@ public class MainActivity extends Activity {
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                 // Normal body edge cleanup.
-                float threshold = 0.50f + (0.06f * smoothAmount);
-                float feather = 0.16f + (0.12f * smoothAmount);
+                float threshold = 0.50f + (0.10f * smoothAmount);
+                float feather = 0.17f + (0.15f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
 
-                int br = Color.red(BLUE);
-                int bg = Color.green(BLUE);
-                int bb = Color.blue(BLUE);
+                int br = Color.red(backgroundColor);
+                int bg = Color.green(backgroundColor);
+                int bb = Color.blue(backgroundColor);
 
                 for (int y = 0; y < h; y++) {
                     int my = Math.min(mh - 1, Math.max(0, Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
@@ -837,9 +920,9 @@ public class MainActivity extends Activity {
                             a = smoothStep(low, high, confidence);
                             if (smoothAmount > 0f && a > 0f && a < 1f) {
                                 float softened = smoothStep(0f, 1f, a);
-                                float softMix = 0.35f + 0.50f * smoothAmount;
+                                float softMix = 0.42f + 0.52f * smoothAmount;
                                 a = a * (1f - softMix) + softened * softMix;
-                                float edgeCut = 0.06f * smoothAmount;
+                                float edgeCut = 0.12f * smoothAmount;
                                 a = Math.max(0f, Math.min(1f,
                                         (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                             }
@@ -872,7 +955,7 @@ public class MainActivity extends Activity {
                                 int ib = Color.blue(inner);
 
                                 float edgeBand = 1f - Math.abs(a * 2f - 1f);
-                                float matchStrength = 0.20f + 0.35f * edgeBand;
+                                float matchStrength = 0.24f + (0.34f + 0.18f * smoothAmount) * edgeBand;
 
                                 if (outer != -1) {
                                     int or = Color.red(outer);
@@ -898,11 +981,13 @@ public class MainActivity extends Activity {
 
                                     boolean outerContaminated = dOuter + 120f < dInner;
                                     if (outerContaminated) {
-                                        matchStrength = Math.max(matchStrength, 0.78f);
+                                        matchStrength = Math.max(matchStrength, 0.78f + 0.16f * smoothAmount);
                                         if (!hairCandidate) {
-                                            // Trim a little farther inward on skin/clothes so
-                                            // the old white matte cannot remain as a visible rim.
-                                            a *= skinEdge ? 0.78f : 0.84f;
+                                            // Stronger Smooth BG removes old matte/halo while hair stays protected.
+                                            float trim = skinEdge
+                                                    ? (0.80f - 0.16f * smoothAmount)
+                                                    : (0.86f - 0.14f * smoothAmount);
+                                            a *= Math.max(0.60f, trim);
                                         }
                                     }
 
@@ -924,6 +1009,19 @@ public class MainActivity extends Activity {
                         // producing a smooth natural edge instead of a hard cut.
                         if (manualErase > 0f) {
                             a *= (1f - Math.max(0f, Math.min(1f, manualErase)));
+                        }
+
+                        // Natural face fairness: only skin-like pixels in the detected head zone.
+                        // Lift luminance while preserving RGB ratios so eyes/hair/clothes stay unchanged.
+                        if (fairness > 0 && skinLike && headZone && a > 0.55f) {
+                            float interior = smoothStep(0.55f, 0.96f, a);
+                            float fair = (fairness / 100f) * 0.22f * interior;
+                            float y0 = Math.max(1f, 0.299f * r + 0.587f * g + 0.114f * b);
+                            float targetY = y0 + (238f - y0) * fair;
+                            float scale = Math.min(1.28f, targetY / y0);
+                            r = clamp255(Math.round(r * scale));
+                            g = clamp255(Math.round(g * scale));
+                            b = clamp255(Math.round(b * scale));
                         }
 
                         // Do not brighten the semi-transparent edge itself; that was creating
@@ -954,7 +1052,7 @@ public class MainActivity extends Activity {
                     compareOriginal = false;
                     imageView.setImageBitmap(resultBitmap);
                     compareButton.setText("COMPARE");
-                    setBusy(false, "Ready • Blue BG applied");
+                    setBusy(false, "Ready • Background applied");
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
@@ -1555,9 +1653,9 @@ public class MainActivity extends Activity {
             int tg = Color.green(target);
             int tb = Color.blue(target);
 
-            int br = Color.red(BLUE);
-            int bg = Color.green(BLUE);
-            int bb = Color.blue(BLUE);
+            int br = Color.red(selectedBackgroundColor);
+            int bg = Color.green(selectedBackgroundColor);
+            int bb = Color.blue(selectedBackgroundColor);
             if (colorDistanceSq(tr, tg, tb, br, bg, bb) < 900f) {
                 status.setText("यह पहले से background है • बचा हुआ colour select करें");
                 return;
@@ -1865,7 +1963,9 @@ public class MainActivity extends Activity {
         final int saveMaskW = maskWidth;
         final int saveMaskH = maskHeight;
         final int saveBrightness = brightnessSeek.getProgress();
+        final int saveFairness = fairnessSeek.getProgress();
         final int saveSmooth = smoothSeek.getProgress();
+        final int saveBackgroundColor = selectedBackgroundColor;
 
         setBusy(true, "Original size में फोटो सेव हो रही है…");
 
@@ -1879,7 +1979,7 @@ public class MainActivity extends Activity {
                 if (full == null) throw new IllegalStateException("full decode failed");
 
                 renderFullResolutionForSave(full, previewSource, saveMask, saveMaskW, saveMaskH,
-                        saveErase, saveBrightness, saveSmooth);
+                        saveErase, saveBrightness, saveFairness, saveSmooth, saveBackgroundColor);
 
                 String name = "STS_Photo_Background_Remover_" + System.currentTimeMillis() + ".jpg";
                 ContentValues values = new ContentValues();
@@ -1973,7 +2073,7 @@ public class MainActivity extends Activity {
 
     private void renderFullResolutionForSave(Bitmap full, Bitmap previewSource,
             float[] mask, int mw, int mh, Bitmap manualMask,
-            int brightness, int smooth) {
+            int brightness, int fairness, int smooth, int backgroundColor) {
 
         int w = full.getWidth();
         int h = full.getHeight();
@@ -1994,25 +2094,25 @@ public class MainActivity extends Activity {
         }
 
         float smoothAmount = smooth / 100f;
-        int blurRadius = Math.round(smoothAmount * 14f);
+        int blurRadius = Math.round(2f + smoothAmount * 18f);
         float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
-        if (smoothAmount > 0.20f) {
+        if (smoothAmount > 0.12f) {
             smoothMask = blurMask(smoothMask, mw, mh,
-                    Math.max(1, Math.round(smoothAmount * 5f)));
+                    Math.max(1, Math.round(1f + smoothAmount * 8f)));
         }
         int hairRadius = 2 + Math.round(smoothAmount * 2f);
         float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
-        float threshold = 0.50f + (0.06f * smoothAmount);
-        float feather = 0.16f + (0.12f * smoothAmount);
+        float threshold = 0.50f + (0.10f * smoothAmount);
+        float feather = 0.17f + (0.15f * smoothAmount);
         float low = threshold - feather * 0.5f;
         float high = threshold + feather * 0.5f;
         float brighten = (brightness / 100f) * 0.32f;
 
-        int br = Color.red(BLUE);
-        int bg = Color.green(BLUE);
-        int bb = Color.blue(BLUE);
+        int br = Color.red(backgroundColor);
+        int bg = Color.green(backgroundColor);
+        int bb = Color.blue(backgroundColor);
 
         int[] row = new int[w];
 
@@ -2059,9 +2159,9 @@ public class MainActivity extends Activity {
                     a = smoothStep(low, high, confidence);
                     if (smoothAmount > 0f && a > 0f && a < 1f) {
                         float softened = smoothStep(0f, 1f, a);
-                        float softMix = 0.35f + 0.50f * smoothAmount;
+                        float softMix = 0.42f + 0.52f * smoothAmount;
                         a = a * (1f - softMix) + softened * softMix;
-                        float edgeCut = 0.06f * smoothAmount;
+                        float edgeCut = 0.12f * smoothAmount;
                         a = Math.max(0f, Math.min(1f,
                                 (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                     }
@@ -2085,7 +2185,7 @@ public class MainActivity extends Activity {
                         int ig = Color.green(inner);
                         int ib = Color.blue(inner);
                         float edgeBand = 1f - Math.abs(a * 2f - 1f);
-                        float matchStrength = 0.20f + 0.35f * edgeBand;
+                        float matchStrength = 0.24f + (0.34f + 0.18f * smoothAmount) * edgeBand;
 
                         if (outer != -1) {
                             int or = Color.red(outer);
@@ -2106,8 +2206,13 @@ public class MainActivity extends Activity {
 
                             boolean outerContaminated = dOuter + 120f < dInner;
                             if (outerContaminated) {
-                                matchStrength = Math.max(matchStrength, 0.78f);
-                                if (!hairCandidate) a *= skinEdge ? 0.78f : 0.84f;
+                                matchStrength = Math.max(matchStrength, 0.78f + 0.16f * smoothAmount);
+                                if (!hairCandidate) {
+                                    float trim = skinEdge
+                                            ? (0.80f - 0.16f * smoothAmount)
+                                            : (0.86f - 0.14f * smoothAmount);
+                                    a *= Math.max(0.60f, trim);
+                                }
                             }
 
                             r = clamp255(Math.round(r * (1f - matchStrength) + fr * matchStrength));
@@ -2130,6 +2235,17 @@ public class MainActivity extends Activity {
                             Math.round(y * (manualH - 1f) / Math.max(1f, h - 1f))));
                     float eraseA = Color.alpha(manual[ey * manualW + ex]) / 255f;
                     a *= (1f - eraseA);
+                }
+
+                if (fairness > 0 && skinLike && headZone && a > 0.55f) {
+                    float interior = smoothStep(0.55f, 0.96f, a);
+                    float fair = (fairness / 100f) * 0.22f * interior;
+                    float y0 = Math.max(1f, 0.299f * r + 0.587f * g + 0.114f * b);
+                    float targetY = y0 + (238f - y0) * fair;
+                    float scale = Math.min(1.28f, targetY / y0);
+                    r = clamp255(Math.round(r * scale));
+                    g = clamp255(Math.round(g * scale));
+                    b = clamp255(Math.round(b * scale));
                 }
 
                 if (a > 0.03f && brighten > 0f) {
