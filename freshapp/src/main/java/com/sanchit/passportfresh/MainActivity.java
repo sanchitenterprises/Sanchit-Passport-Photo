@@ -127,7 +127,7 @@ public class MainActivity extends Activity {
         headerText.setPadding(dp(8), 0, 0, 0);
 
         TextView title = new TextView(this);
-        title.setText("Sanchit Passport Photo");
+        title.setText("STS Passport Size Photo");
         title.setTextColor(0xFF1F2933);
         title.setTextSize(20);
         title.setSingleLine(true);
@@ -415,7 +415,7 @@ public class MainActivity extends Activity {
             values.put(MediaStore.Images.Media.DISPLAY_NAME, "Passport_" + System.currentTimeMillis() + ".jpg");
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
             if (Build.VERSION.SDK_INT >= 29) {
-                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Sanchit Passport Photo New/Camera");
+                values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo/Camera");
             }
 
             cameraUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
@@ -622,14 +622,19 @@ public class MainActivity extends Activity {
                 }
 
                 float smoothAmount = smooth / 100f;
-                int blurRadius = Math.round(smoothAmount * 8f);
+                int blurRadius = Math.round(smoothAmount * 7f);
                 float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
 
-                // Smooth is dedicated to BG edge cleanup:
-                // blur removes jagged edges, higher threshold cuts background fringe inward,
-                // and de-fringe below lets blue dominate semi-transparent edge pixels.
-                float threshold = 0.42f + (0.18f * smoothAmount);
-                float feather = 0.18f - (0.06f * smoothAmount);
+                // Hair-safe refinement:
+                // use a small max/dilation support mask to close tiny holes inside hair,
+                // but only inside the detected upper/head region.
+                int hairRadius = 2 + Math.round(smoothAmount * 2f);
+                float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
+                int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
+
+                // Normal body edge cleanup.
+                float threshold = 0.42f + (0.16f * smoothAmount);
+                float feather = 0.18f - (0.05f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brighten = (brightness / 100f) * 0.32f;
@@ -649,18 +654,45 @@ public class MainActivity extends Activity {
                         }
 
                         int mx = Math.min(mw - 1, Math.max(0, Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
-                        float confidence = smoothMask[Math.min(smoothMask.length - 1, my * mw + mx)];
-                        float a = smoothStep(low, high, confidence);
-                        if (smoothAmount > 0f && a > 0f && a < 1f) {
-                            a = (float)Math.pow(a, 1.0f + 2.1f * smoothAmount);
-                            float edgeCut = 0.22f * smoothAmount;
-                            a = Math.max(0f, Math.min(1f, (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
-                        }
 
                         int c = src[idx];
                         int r = Color.red(c);
                         int g = Color.green(c);
                         int b = Color.blue(c);
+                        float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
+
+                        int maskIndex = Math.min(smoothMask.length - 1, my * mw + mx);
+                        float confidence = smoothMask[maskIndex];
+                        float hairSupport = hairSupportMask[maskIndex];
+
+                        boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
+                        // Dark/medium pixels near a strong person mask are likely hair.
+                        // This protects hair strands and fills small blue holes inside the hair mass.
+                        boolean hairCandidate = headZone
+                                && luminance < 185f
+                                && hairSupport > 0.30f;
+
+                        float a;
+                        if (hairCandidate) {
+                            confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
+                            float hairThreshold = 0.31f + 0.04f * smoothAmount;
+                            float hairFeather = 0.30f + 0.06f * smoothAmount;
+                            a = smoothStep(hairThreshold - hairFeather * 0.5f,
+                                    hairThreshold + hairFeather * 0.5f,
+                                    confidence);
+
+                            // If the surrounding head mask is very strong, never punch a hard
+                            // blue hole through a dark hair cluster.
+                            if (hairSupport > 0.62f && a < 0.58f) a = 0.58f;
+                        } else {
+                            a = smoothStep(low, high, confidence);
+                            if (smoothAmount > 0f && a > 0f && a < 1f) {
+                                a = (float)Math.pow(a, 1.0f + 1.8f * smoothAmount);
+                                float edgeCut = 0.18f * smoothAmount;
+                                a = Math.max(0f, Math.min(1f,
+                                        (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
+                            }
+                        }
 
                         if (a > 0.03f && brighten > 0f) {
                             r = clamp255(Math.round(r + (255 - r) * brighten));
@@ -700,6 +732,76 @@ public class MainActivity extends Activity {
         } catch (RejectedExecutionException ignored) {
             // Activity/worker already closed; ignore late render requests safely.
         }
+    }
+
+    private int[] findMaskBounds(float[] mask, int w, int h, float threshold) {
+        if (mask == null || mask.length < w * h) return null;
+        int minX = w, minY = h, maxX = -1, maxY = -1;
+
+        for (int y = 0; y < h; y++) {
+            int row = y * w;
+            for (int x = 0; x < w; x++) {
+                if (mask[row + x] >= threshold) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        return maxX >= minX && maxY >= minY
+                ? new int[]{minX, minY, maxX, maxY}
+                : null;
+    }
+
+    private boolean isInsideHeadZone(int x, int y, int[] bounds, int w, int h) {
+        if (bounds == null) return y < Math.round(h * 0.46f);
+
+        int bw = Math.max(1, bounds[2] - bounds[0] + 1);
+        int bh = Math.max(1, bounds[3] - bounds[1] + 1);
+        int left = Math.max(0, bounds[0] - Math.round(bw * 0.12f));
+        int right = Math.min(w - 1, bounds[2] + Math.round(bw * 0.12f));
+        int top = Math.max(0, bounds[1] - Math.round(bh * 0.04f));
+        int bottom = Math.min(h - 1, bounds[1] + Math.round(bh * 0.38f));
+
+        return x >= left && x <= right && y >= top && y <= bottom;
+    }
+
+    private float[] maxFilterMask(float[] src, int w, int h, int radius) {
+        if (src == null || radius <= 0 || w <= 1 || h <= 1) return src;
+
+        float[] tmp = new float[src.length];
+        float[] out = new float[src.length];
+
+        // Horizontal max filter.
+        for (int y = 0; y < h; y++) {
+            int row = y * w;
+            for (int x = 0; x < w; x++) {
+                float m = 0f;
+                int from = Math.max(0, x - radius);
+                int to = Math.min(w - 1, x + radius);
+                for (int xx = from; xx <= to; xx++) {
+                    float v = src[row + xx];
+                    if (v > m) m = v;
+                }
+                tmp[row + x] = m;
+            }
+        }
+
+        // Vertical max filter.
+        for (int y = 0; y < h; y++) {
+            int from = Math.max(0, y - radius);
+            int to = Math.min(h - 1, y + radius);
+            for (int x = 0; x < w; x++) {
+                float m = 0f;
+                for (int yy = from; yy <= to; yy++) {
+                    float v = tmp[yy * w + x];
+                    if (v > m) m = v;
+                }
+                out[y * w + x] = m;
+            }
+        }
+        return out;
     }
 
     private float[] blurMask(float[] src, int w, int h, int radius) {
@@ -897,17 +999,17 @@ public class MainActivity extends Activity {
             worker.execute(() -> {
                 Uri uri = null;
                 try {
-                    String name = "Sanchit_Passport_Share_" + System.currentTimeMillis() + ".jpg";
+                    String name = "STS_Passport_Size_Photo_Share_" + System.currentTimeMillis() + ".jpg";
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                     values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
 
                     if (Build.VERSION.SDK_INT >= 29) {
-                        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Sanchit Passport Photo New/Shared");
+                        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo/Shared");
                         values.put(MediaStore.Images.Media.IS_PENDING, 1);
                     } else {
                         File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                                "Sanchit Passport Photo New/Shared");
+                                "STS Passport Size Photo/Shared");
                         if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("folder");
                         File file = new File(dir, name);
                         values.put(MediaStore.Images.Media.DATA, file.getAbsolutePath());
@@ -979,17 +1081,17 @@ public class MainActivity extends Activity {
         worker.execute(() -> {
             Uri uri = null;
             try {
-                String name = "Sanchit_Passport_" + System.currentTimeMillis() + ".jpg";
+                String name = "STS_Passport_Size_Photo_" + System.currentTimeMillis() + ".jpg";
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                 values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
 
                 if (Build.VERSION.SDK_INT >= 29) {
-                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Sanchit Passport Photo New");
+                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Passport Size Photo");
                     values.put(MediaStore.Images.Media.IS_PENDING, 1);
                 } else {
                     File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                            "Sanchit Passport Photo New");
+                            "STS Passport Size Photo");
                     if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("folder");
                     File file = new File(dir, name);
                     values.put(MediaStore.Images.Media.DATA, file.getAbsolutePath());
