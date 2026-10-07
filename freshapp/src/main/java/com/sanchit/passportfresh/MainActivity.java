@@ -1874,14 +1874,18 @@ public class MainActivity extends Activity {
         }
 
         float smoothAmount = smooth / 100f;
-        int blurRadius = Math.round(smoothAmount * 7f);
+        int blurRadius = Math.round(smoothAmount * 10f);
         float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
+        if (smoothAmount > 0.35f) {
+            smoothMask = blurMask(smoothMask, mw, mh,
+                    Math.max(1, Math.round(smoothAmount * 3f)));
+        }
         int hairRadius = 2 + Math.round(smoothAmount * 2f);
         float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
-        float threshold = 0.50f + (0.10f * smoothAmount);
-        float feather = 0.12f - (0.025f * smoothAmount);
+        float threshold = 0.51f + (0.07f * smoothAmount);
+        float feather = 0.14f + (0.08f * smoothAmount);
         float low = threshold - feather * 0.5f;
         float high = threshold + feather * 0.5f;
         float brighten = (brightness / 100f) * 0.32f;
@@ -1934,8 +1938,10 @@ public class MainActivity extends Activity {
                 } else {
                     a = smoothStep(low, high, confidence);
                     if (smoothAmount > 0f && a > 0f && a < 1f) {
-                        a = (float)Math.pow(a, 1.0f + 1.8f * smoothAmount);
-                        float edgeCut = 0.18f * smoothAmount;
+                        float softened = smoothStep(0f, 1f, a);
+                        float softMix = 0.25f + 0.45f * smoothAmount;
+                        a = a * (1f - softMix) + softened * softMix;
+                        float edgeCut = 0.06f * smoothAmount;
                         a = Math.max(0f, Math.min(1f,
                                 (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
                     }
