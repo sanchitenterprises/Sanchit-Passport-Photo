@@ -252,10 +252,17 @@ public class MainActivity extends Activity {
         for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
             final int color = PHOTO_BG_COLORS[i];
             final String colorName = PHOTO_BG_NAMES[i];
+
+            FrameLayout slot = new FrameLayout(this);
+            slot.setTag(color);
+
             View circle = createBackgroundColorCircle(color, colorName);
-            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(0, -1, 1f);
-            cp.setMargins(dp(5), dp(2), dp(5), dp(2));
-            backgroundColorRow.addView(circle, cp);
+            FrameLayout.LayoutParams circleLp = new FrameLayout.LayoutParams(dp(34), dp(34));
+            circleLp.gravity = Gravity.CENTER;
+            slot.addView(circle, circleLp);
+
+            LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
+            backgroundColorRow.addView(slot, slotLp);
         }
         controls.addView(backgroundColorRow, weightedControlRow(0.82f));
         updateBackgroundColorSelection();
@@ -460,18 +467,25 @@ public class MainActivity extends Activity {
     private void updateBackgroundColorSelection() {
         if (backgroundColorRow == null) return;
         for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
-            View child = backgroundColorRow.getChildAt(i);
-            Object tag = child.getTag();
-            if (!(tag instanceof Integer)) continue;
+            View slotView = backgroundColorRow.getChildAt(i);
+            if (!(slotView instanceof FrameLayout)) continue;
+            FrameLayout slot = (FrameLayout)slotView;
+            Object tag = slot.getTag();
+            if (!(tag instanceof Integer) || slot.getChildCount() == 0) continue;
+
             int color = (Integer)tag;
             boolean selected = color == selectedBackgroundColor;
+            View circle = slot.getChildAt(0);
+
             GradientDrawable bg = new GradientDrawable();
             bg.setShape(GradientDrawable.OVAL);
             bg.setColor(color);
             int strokeColor = selected ? 0xFF111827 : 0xFFB7C0C8;
             bg.setStroke(dp(selected ? 4 : 1), strokeColor);
-            child.setBackground(bg);
-            child.setElevation(selected ? dp(3) : dp(1));
+            circle.setBackground(bg);
+            circle.setElevation(selected ? dp(3) : dp(1));
+            circle.setScaleX(selected ? 1.08f : 1f);
+            circle.setScaleY(selected ? 1.08f : 1f);
         }
     }
 
@@ -514,7 +528,11 @@ public class MainActivity extends Activity {
         objectButton.setEnabled(enabled);
         if (backgroundColorRow != null) {
             for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
-                backgroundColorRow.getChildAt(i).setEnabled(enabled);
+                View slot = backgroundColorRow.getChildAt(i);
+                slot.setEnabled(enabled);
+                if (slot instanceof FrameLayout && ((FrameLayout)slot).getChildCount() > 0) {
+                    ((FrameLayout)slot).getChildAt(0).setEnabled(enabled);
+                }
             }
         }
         updateHistoryButtons();
