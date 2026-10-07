@@ -223,7 +223,7 @@ public class MainActivity extends Activity {
         row3.addView(redoButton, weightedButton());
         controls.addView(row3, weightedControlRow(1.0f));
 
-        brushSeek = compactSlider(controls, "Color Tolerance", 32);
+        brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row4 = buttonRow();
         processButton = button("SHARE", true);
@@ -1231,16 +1231,11 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (!isNearSubjectBoundary(sx, sy, w, h)) {
-                status.setText("Body/edge के पास बचा हुआ colour select करें");
-                return;
-            }
-
             pushUndo();
             clearDeque(redoMasks);
 
-            int localRadius = Math.min(180, Math.max(48,
-                    Math.round(Math.min(w, h) * 0.085f)));
+            int localRadius = Math.min(120, Math.max(36,
+                    Math.round(Math.min(w, h) * 0.055f)));
             int minX = Math.max(0, sx - localRadius);
             int maxX = Math.min(w - 1, sx + localRadius);
             int minY = Math.max(0, sy - localRadius);
@@ -1252,8 +1247,10 @@ public class MainActivity extends Activity {
             ArrayDeque<Integer> queue = new ArrayDeque<>();
             queue.add((sy - minY) * boxW + (sx - minX));
 
-            float tolerance = 16f + brushSeek.getProgress() * 0.62f;
-            float toleranceSq = tolerance * tolerance * 3f;
+            float tolerance = 6f + brushSeek.getProgress() * 0.28f;
+            float toleranceSq = tolerance * tolerance;
+            float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
+            boolean targetSkin = isSkinLikeColor(tr, tg, tb);
             int[] resultPixels = new int[w * h];
             int[] maskPixels = new int[w * h];
             resultBitmap.getPixels(resultPixels, 0, w, 0, 0, w, h);
@@ -1275,13 +1272,23 @@ public class MainActivity extends Activity {
                 int dx = x - sx;
                 int dy = y - sy;
                 if (dx * dx + dy * dy > localRadius * localRadius) continue;
-                if (!isNearSubjectBoundary(x, y, w, h)) continue;
 
                 int c = resultPixels[y * w + x];
                 int r = Color.red(c);
                 int g = Color.green(c);
                 int b = Color.blue(c);
                 if (colorDistanceSq(r, g, b, tr, tg, tb) > toleranceSq) continue;
+
+                float channelLimit = tolerance * 0.92f + 2f;
+                if (Math.abs(r - tr) > channelLimit
+                        || Math.abs(g - tg) > channelLimit
+                        || Math.abs(b - tb) > channelLimit) continue;
+
+                float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+                if (Math.abs(lum - targetLum) > tolerance * 0.90f + 2f) continue;
+
+                boolean pixelSkin = isSkinLikeColor(r, g, b);
+                if (!targetSkin && pixelSkin) continue;
 
                 maskPixels[y * w + x] = Color.argb(255, 255, 255, 255);
                 changed++;
@@ -1424,7 +1431,7 @@ public class MainActivity extends Activity {
         if (originalBitmap == null) return;
         brightnessSeek.setProgress(22);
         smoothSeek.setProgress(35);
-        brushSeek.setProgress(32);
+        brushSeek.setProgress(22);
         colorCleanOn = false;
         objectButton.setText("LOCAL COLOR CLEAN");
         imageView.post(this::resetZoom);
