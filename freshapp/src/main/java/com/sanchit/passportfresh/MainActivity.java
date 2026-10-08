@@ -28,6 +28,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -82,6 +83,19 @@ public class MainActivity extends Activity {
     private static final int MAX_SIDE = 1440;
     private static final int MAX_HISTORY = 8;
 
+    private static final String[] BRUSH_SHAPE_NAMES = new String[]{
+            "Circle", "Square", "Soft Round", "Hard Round", "Oval", "Edge Brush", "Point Brush"
+    };
+    private static final String[] BRUSH_SHAPE_PNG = new String[]{
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAeUlEQVR42u1WOQ7AIAwDv6Zz5z6/M3N/076glIRYQaq9Eh8EoaQUQfg7qoe07cf9dna1s9IC9Iy9QcAwt9SDYW7hgWU+ygfTfEQH2d8Q7Nt/6a3bAQVQgPQA1qnmHU5rP0FUF3o6mCFH7AWIEJnhIVLMU5++EwpCOh5fTTQosKMoYQAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAP0lEQVR42mNgGAWjYBQMMGDEJ6lhZPOfWhbdOHcEq11MAx0Cow4YdcCoA0YdMOqAUQeMOmDUAQPugFEwCkYBAGsRBCYHMMdUAAAAAElFTkSuQmCC",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA8UlEQVR42u1XsRLDIAhVrx/jkiVzZz/auTOLC5/TlaNgQJuruYa7LKK+B5gnhnDbv1scWZT35675EF5wGoEe8CiROAice9geItEJnh0JQwuJOAEulQO8JOIAuOUcgJXEw3IEFPAizK1kHpD1qG2eDqL3gPPxjwxKf1EyHigNfCPfEQlbBpTo+eYclI8VrZQ8C8kRfXEKZrFkIQW/bZP+aQJftUsSaJN+NwFgImO1qshznwCRS+xs2oRI6VjVLicux9YSgECCgjbFD0MlULKgkQgGcJy5jJCoIhBhqd7b8Fr9wBId0RI94RJd8Znvgtt+bm8VCmjmUBdvxQAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAuElEQVR42u1WMQ6AMAhsiY/RVVd9va666m90MjERWqBtmibcWLB3PQngnMFQGV7zUT/ONxW7js0XExAi1gqBEuSSfJ+bWOpGp7303Nff2TAteYsQez1GzBFCueC15BhJLI6JAI3llNXfc45TpIBQ4cX+cyiO3QuS13OL7M3juACuMkxAGwIkRSUtWpD27piIUDypEXGaDKdZtTMLYl1RMg2LjGPN6E1ayTSLCWctg5yXafKrb8UGwwOtaGTDPkEzHQAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAbUlEQVR42mNgGAWjYBSMggEGjKRq0DCy+U9IzY1zRxip6gBiLCXXMYy0sphYhzDRw3J85jHRw3J85jINdC5gopfvcZk/+EJgwB1ASiFCjew4OKOAVqGAzVwmapTnlJSEg7suoEdtOApGwSgYBQCsIiwaTOJ2VwAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR42u2WMQ6AIAxFvw2HwRVXvL2zs7epk4mDEIzKN2n/AdrXVxIKeDzkDE8LqKoCwDjNAIBtXW7VlLcniilrTFlpAGcQKkCrDWE/wi4ANQvdDJQgbKygZsGWAQdwADrA1Vdtx0DpUBFm81+sILAm/9xA63EaWI09niM7SEYiXODpBQ0AAAAASUVORK5CYII=",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAWElEQVR42mNgGAWjYBSMglEw0gEjJZo1jGz+w9g3zh1hpJsDkC1GB6Q6hGmgo4CJUt9fP3uY6NChegjALEd3BN0coGlsi0KPJsIhWQ6MglEwCkbBKBhwAACdYRugg22qtgAAAABJRU5ErkJggg=="
+    };
+
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ArrayDeque<Bitmap> undoMasks = new ArrayDeque<>();
     private final ArrayDeque<Bitmap> redoMasks = new ArrayDeque<>();
@@ -122,6 +136,7 @@ public class MainActivity extends Activity {
     private TextView toolSeekLabel;
     private int colorToleranceValue = 22;
     private int brushSizeValue = 30;
+    private int brushShapeIndex = 0;
     private int selectedBackgroundColor = BLUE;
     private LinearLayout backgroundColorRow;
     private volatile boolean destroyed;
@@ -250,23 +265,8 @@ public class MainActivity extends Activity {
         backgroundColorRow.setOrientation(LinearLayout.HORIZONTAL);
         backgroundColorRow.setGravity(Gravity.CENTER);
         backgroundColorRow.setPadding(dp(6), dp(2), dp(6), dp(2));
-        for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
-            final int color = PHOTO_BG_COLORS[i];
-            final String colorName = PHOTO_BG_NAMES[i];
-
-            FrameLayout slot = new FrameLayout(this);
-            slot.setTag(color);
-
-            View circle = createBackgroundColorCircle(color, colorName);
-            FrameLayout.LayoutParams circleLp = new FrameLayout.LayoutParams(dp(34), dp(34));
-            circleLp.gravity = Gravity.CENTER;
-            slot.addView(circle, circleLp);
-
-            LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
-            backgroundColorRow.addView(slot, slotLp);
-        }
         controls.addView(backgroundColorRow, weightedControlRow(0.82f));
-        updateBackgroundColorSelection();
+        renderToolChoiceRow();
 
         LinearLayout row1 = buttonRow();
         undoButton = button("UNDO", false);
@@ -442,6 +442,70 @@ public class MainActivity extends Activity {
         return seek;
     }
 
+    private void renderToolChoiceRow() {
+        if (backgroundColorRow == null) return;
+        backgroundColorRow.removeAllViews();
+
+        if (brushModeOn) {
+            for (int i = 0; i < BRUSH_SHAPE_NAMES.length; i++) {
+                final int shapeIndex = i;
+                FrameLayout slot = new FrameLayout(this);
+                slot.setTag(shapeIndex);
+                boolean selected = shapeIndex == brushShapeIndex;
+                slot.setBackground(rounded(selected ? 0xFFD7EAE8 : 0xFFF8FBFA, 12));
+                slot.setElevation(selected ? dp(3) : dp(1));
+
+                ImageView icon = createBrushShapePngIcon(shapeIndex);
+                FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(34), dp(34));
+                iconLp.gravity = Gravity.CENTER;
+                slot.addView(icon, iconLp);
+
+                slot.setOnClickListener(v -> {
+                    brushShapeIndex = shapeIndex;
+                    renderToolChoiceRow();
+                    status.setText("Brush shape • " + BRUSH_SHAPE_NAMES[shapeIndex]);
+                });
+                attachTouchAnimation(slot);
+
+                LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
+                slotLp.setMargins(dp(2), dp(1), dp(2), dp(1));
+                backgroundColorRow.addView(slot, slotLp);
+            }
+        } else {
+            for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
+                final int color = PHOTO_BG_COLORS[i];
+                final String colorName = PHOTO_BG_NAMES[i];
+
+                FrameLayout slot = new FrameLayout(this);
+                slot.setTag(color);
+
+                View circle = createBackgroundColorCircle(color, colorName);
+                FrameLayout.LayoutParams circleLp = new FrameLayout.LayoutParams(dp(34), dp(34));
+                circleLp.gravity = Gravity.CENTER;
+                slot.addView(circle, circleLp);
+
+                LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
+                backgroundColorRow.addView(slot, slotLp);
+            }
+            updateBackgroundColorSelection();
+        }
+    }
+
+    private ImageView createBrushShapePngIcon(int index) {
+        ImageView icon = new ImageView(this);
+        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        icon.setPadding(dp(3), dp(3), dp(3), dp(3));
+        icon.setContentDescription(BRUSH_SHAPE_NAMES[index]);
+        try {
+            byte[] bytes = Base64.decode(BRUSH_SHAPE_PNG[index], Base64.DEFAULT);
+            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            icon.setImageBitmap(bitmap);
+        } catch (Throwable ignored) {
+            icon.setImageResource(com.sanchit.passportfresh.R.drawable.ic_passport_logo);
+        }
+        return icon;
+    }
+
     private View createBackgroundColorCircle(int color, String name) {
         TextView circle = new TextView(this);
         circle.setGravity(Gravity.CENTER);
@@ -466,7 +530,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateBackgroundColorSelection() {
-        if (backgroundColorRow == null) return;
+        if (backgroundColorRow == null || brushModeOn) return;
         for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
             View slotView = backgroundColorRow.getChildAt(i);
             if (!(slotView instanceof FrameLayout)) continue;
@@ -588,7 +652,7 @@ public class MainActivity extends Activity {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return "1.0.17";
+            return "1.0.18";
         }
     }
 
@@ -1412,13 +1476,14 @@ public class MainActivity extends Activity {
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • finger रखें, lens में exact edge देखकर साफ करें");
+            status.setText("Brush ON • shape चुनें • जहाँ finger छोड़ेंगे वहीं remove होगा");
         } else {
             brushButton.setText("BRUSH");
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
             status.setText("Brush OFF");
         }
+        renderToolChoiceRow();
         hideLens();
     }
 
@@ -1437,6 +1502,7 @@ public class MainActivity extends Activity {
             compareButton.setText("COMPARE");
         }
         objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
+        renderToolChoiceRow();
         status.setText(colorCleanOn
                 ? "Finger रखें • lens में exact colour देखकर clean करें"
                 : "Local Color Clean OFF");
@@ -1481,19 +1547,10 @@ public class MainActivity extends Activity {
             }
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
+                // Preview/lens only while dragging. Never erase along the travel path.
                 showLens(e.getX(), e.getY());
-                float dx = e.getX() - lastBrushViewX;
-                float dy = e.getY() - lastBrushViewY;
-                if (Math.abs(dx) > dp(1) || Math.abs(dy) > dp(1)) {
-                    if (!brushStrokeStarted) {
-                        pushUndo();
-                        clearDeque(redoMasks);
-                        brushStrokeStarted = true;
-                    }
-                    drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
-                    lastBrushViewX = e.getX();
-                    lastBrushViewY = e.getY();
-                }
+                lastBrushViewX = e.getX();
+                lastBrushViewY = e.getY();
                 return true;
             }
 
@@ -1518,15 +1575,12 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_UP) {
             if (brushModeOn && !compareOriginal && resultBitmap != null && !gestureWasScaling) {
                 showLens(e.getX(), e.getY());
-                if (!brushStrokeStarted) {
-                    pushUndo();
-                    clearDeque(redoMasks);
-                    brushStrokeStarted = true;
-                    drawBrushSegment(e.getX(), e.getY(), e.getX(), e.getY());
-                }
-                if (brushStrokeChanged) {
+                pushUndo();
+                clearDeque(redoMasks);
+                boolean changed = applyBrushStampAt(e.getX(), e.getY());
+                if (changed) {
                     updateHistoryButtons();
-                    status.setText("Brush apply • edge smooth / leftover clean");
+                    status.setText(BRUSH_SHAPE_NAMES[brushShapeIndex] + " brush • final point applied");
                     renderResult();
                 } else if (!undoMasks.isEmpty()) {
                     undoMasks.pop();
@@ -1618,6 +1672,97 @@ public class MainActivity extends Activity {
 
     private void hideLens() {
         if (magnifierLens != null) magnifierLens.setVisibility(View.GONE);
+    }
+
+    private boolean applyBrushStampAt(float viewX, float viewY) {
+        try {
+            if (eraseMask == null) createEmptyEraseMask();
+            if (eraseMask == null) return false;
+
+            Matrix inv = new Matrix();
+            if (!photoMatrix.invert(inv)) return false;
+            float[] pt = new float[]{viewX, viewY};
+            inv.mapPoints(pt);
+
+            float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
+            return paintEraseShape(pt[0], pt[1], radius, brushShapeIndex);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean paintEraseShape(float cx, float cy, float radius, int shape) {
+        int w = eraseMask.getWidth();
+        int h = eraseMask.getHeight();
+        float rx = radius;
+        float ry = radius;
+        if (shape == 4) ry = radius * 0.62f;      // Oval
+        if (shape == 6) { rx = radius * 0.34f; ry = rx; } // Point brush
+
+        int left = Math.max(0, (int)Math.floor(cx - rx - 2));
+        int top = Math.max(0, (int)Math.floor(cy - ry - 2));
+        int right = Math.min(w - 1, (int)Math.ceil(cx + rx + 2));
+        int bottom = Math.min(h - 1, (int)Math.ceil(cy + ry + 2));
+        if (right < left || bottom < top) return false;
+
+        int rw = right - left + 1;
+        int rh = bottom - top + 1;
+        int[] pixels = new int[rw * rh];
+        eraseMask.getPixels(pixels, 0, rw, left, top, rw, rh);
+
+        boolean changed = false;
+        for (int yy = 0; yy < rh; yy++) {
+            float py = top + yy + 0.5f;
+            for (int xx = 0; xx < rw; xx++) {
+                float px = left + xx + 0.5f;
+                float dx = px - cx;
+                float dy = py - cy;
+                float strength = brushShapeStrength(dx, dy, radius, shape);
+                if (strength <= 0f) continue;
+
+                int index = yy * rw + xx;
+                int oldA = Color.alpha(pixels[index]);
+                int newA = Math.max(oldA, Math.round(255f * strength));
+                if (newA != oldA) changed = true;
+                pixels[index] = Color.argb(newA, 255, 255, 255);
+            }
+        }
+        if (changed) eraseMask.setPixels(pixels, 0, rw, left, top, rw, rh);
+        return changed;
+    }
+
+    private float brushShapeStrength(float dx, float dy, float radius, int shape) {
+        if (radius <= 0f) return 0f;
+
+        if (shape == 1) { // Square
+            float d = Math.max(Math.abs(dx), Math.abs(dy)) / radius;
+            if (d >= 1f) return 0f;
+            return d <= 0.82f ? 1f : smoothStep(1f, 0.82f, d);
+        }
+
+        float rx = radius;
+        float ry = radius;
+        if (shape == 4) ry = radius * 0.62f; // Oval
+        if (shape == 6) { rx = radius * 0.34f; ry = rx; } // Point
+        float norm = (float)Math.sqrt((dx * dx) / Math.max(1f, rx * rx)
+                + (dy * dy) / Math.max(1f, ry * ry));
+        if (norm >= 1f) return 0f;
+
+        if (shape == 5) { // Edge Brush: half-round stamp for boundary cleanup
+            if (dx < -radius * 0.08f) return 0f;
+            return norm <= 0.78f ? 1f : smoothStep(1f, 0.78f, norm);
+        }
+        if (shape == 3) return 1f; // Hard Round
+        if (shape == 2) { // Soft Round
+            if (norm <= 0.42f) return 1f;
+            float u = 1f - (norm - 0.42f) / 0.58f;
+            return Math.max(0f, u * u * (3f - 2f * u));
+        }
+
+        // Circle / Oval / Point: medium feather.
+        if (norm <= 0.72f) return 1f;
+        float u = 1f - (norm - 0.72f) / 0.28f;
+        return Math.max(0f, u * u * (3f - 2f * u));
     }
 
     private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
