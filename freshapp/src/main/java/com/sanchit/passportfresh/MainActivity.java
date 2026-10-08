@@ -653,7 +653,7 @@ public class MainActivity extends Activity {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return "1.0.19";
+            return "1.0.20";
         }
     }
 
@@ -1647,7 +1647,7 @@ public class MainActivity extends Activity {
 
         magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
                 brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
-                brushRing);
+                brushRing, brushShapeIndex);
 
         int lensSize = dp(132);
         int margin = dp(8);
@@ -2519,6 +2519,7 @@ public class MainActivity extends Activity {
         private float sourceRadius = 20f;
         private int mode = MODE_BRUSH;
         private float brushRingPx;
+        private int brushShape = 0;
 
         LensView(android.content.Context context) {
             super(context);
@@ -2527,13 +2528,15 @@ public class MainActivity extends Activity {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setLens(Bitmap bitmap, float x, float y, float radius, int lensMode, float brushRing) {
+        void setLens(Bitmap bitmap, float x, float y, float radius, int lensMode,
+                     float brushRing, int selectedBrushShape) {
             source = bitmap;
             sourceX = x;
             sourceY = y;
             sourceRadius = Math.max(2f, radius);
             mode = lensMode;
             brushRingPx = brushRing;
+            brushShape = Math.max(0, Math.min(6, selectedBrushShape));
             invalidate();
         }
 
@@ -2579,17 +2582,78 @@ public class MainActivity extends Activity {
 
             if (mode == MODE_BRUSH && brushRingPx > 0f) {
                 float rr = Math.min(radius * 0.72f, brushRingPx);
+
+                // Lens must show the exact selected brush footprint before ACTION_UP applies it.
+                guidePaint.setStyle(Paint.Style.STROKE);
                 guidePaint.setColor(0xEEFFFFFF);
                 guidePaint.setStrokeWidth(5f);
-                canvas.drawCircle(cx, cy, rr, guidePaint);
+                drawBrushShapeOutline(canvas, cx, cy, rr, brushShape, guidePaint);
+
                 guidePaint.setColor(0xEE111111);
-                guidePaint.setStrokeWidth(2f);
-                canvas.drawCircle(cx, cy, rr, guidePaint);
+                guidePaint.setStrokeWidth(2.2f);
+                drawBrushShapeOutline(canvas, cx, cy, rr, brushShape, guidePaint);
             } else {
                 guidePaint.setStyle(Paint.Style.FILL);
                 guidePaint.setColor(accent);
                 canvas.drawCircle(cx, cy, 5f, guidePaint);
             }
+        }
+
+        private void drawBrushShapeOutline(Canvas canvas, float cx, float cy,
+                                           float radius, int shape, Paint paint) {
+            if (radius <= 0f) return;
+
+            if (shape == 0) { // Soft Round: outer feather boundary + inner full-strength area
+                canvas.drawCircle(cx, cy, radius, paint);
+                float oldAlpha = paint.getAlpha();
+                paint.setAlpha(Math.min(190, (int)oldAlpha));
+                canvas.drawCircle(cx, cy, radius * 0.36f, paint);
+                paint.setAlpha((int)oldAlpha);
+                return;
+            }
+
+            if (shape == 1) { // Hard Round
+                canvas.drawCircle(cx, cy, radius, paint);
+                return;
+            }
+
+            if (shape == 2) { // Half-Circle Edge: same right-side half footprint as actual stamp
+                RectF oval = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
+                Path p = new Path();
+                p.moveTo(cx, cy - radius);
+                p.arcTo(oval, -90f, 180f);
+                p.lineTo(cx, cy - radius);
+                p.close();
+                canvas.drawPath(p, paint);
+                return;
+            }
+
+            if (shape == 3) { // Thin Vertical
+                RectF rect = new RectF(cx - radius * 0.30f, cy - radius,
+                        cx + radius * 0.30f, cy + radius);
+                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
+                return;
+            }
+
+            if (shape == 4) { // Thin Horizontal
+                RectF rect = new RectF(cx - radius, cy - radius * 0.30f,
+                        cx + radius, cy + radius * 0.30f);
+                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
+                return;
+            }
+
+            if (shape == 5) { // Corner / Wedge
+                Path p = new Path();
+                p.moveTo(cx - radius, cy - radius);
+                p.lineTo(cx + radius, cy - radius);
+                p.lineTo(cx - radius, cy + radius);
+                p.close();
+                canvas.drawPath(p, paint);
+                return;
+            }
+
+            // Point Brush uses the same 0.30 radius as the real stamp.
+            canvas.drawCircle(cx, cy, radius * 0.30f, paint);
         }
     }
 
