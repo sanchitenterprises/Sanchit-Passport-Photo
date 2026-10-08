@@ -84,8 +84,8 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 8;
 
     private static final String[] BRUSH_SHAPE_NAMES = new String[]{
-            "Soft Round", "Hard Round", "Half-Circle Edge", "Thin Vertical",
-            "Thin Horizontal", "Corner / Wedge", "Point Brush"
+            "Soft Round", "Soft Wide Round", "Soft Half-Circle", "Soft Vertical",
+            "Soft Horizontal", "Soft Wedge", "Soft Point"
     };
     private static final String[] BRUSH_SHAPE_PNG = new String[]{
             "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAFUElEQVR42u2Xy44byRFFz40sFllN9UP9nGnDXnjhBxfe+APmg/0V/gQ/0AsvbFCL6VFLPS2ySbGKVZnXC1KAeqwRJHkMbyaAAhIJRMbNGxU3IuFn+z+bPtdhNpvVL3Me10uPSzMJAEV4y6o77PvtfD7fAuWnBqCLi9m0TMZH4zQcMoomD9QphgpAimLUFYZOpVm1sHj4569X8Kf8XwOYzWb1atWctdX2PBFHFKakfCBS7aHsAFCKqTpTWsQ6rMei9L03+fXLl39dfzGAq6s/TMdHvup6Xcg+jVSO7TSF0tgxUTjtDylGHXJL77VSLC0eyOV1TfpuPv/LAvCHYqSPBa+mcZ2Lr2VfRcRFQefY56BTwYnhGDhEmsplWqzG0gRcA5UjqiFIZ4eX/WJx1346gNmsPhvpOhdfG66IuARfgM8Fp+AT8InEoeCZ0ZTiRtJEMA4igSrJqQwDZVy7+eq0ffvq1fZJhVQ/jH5xMZu2VTqP7FNFnGJOTDlFPDdxjHgGNDK19/6CbNELGu/2EyAiiqFXLl1UvP32Nyz5B68/BkCTyfhooByJ4bgQx7Gj+8jEseCYwjPwxDCWVAHYLkIdppZIGCEXinuCztJbo2XetMffwJs/w/DBFMxms3qTucL5kogL5HPMKYrnmGPBETBFTJEOZO9pV4Vd7WhHkmxUgCzTI3U27Uipvf3q5HFzf7/9IAMvcx6PR6OGrZuSYpJyaQqlkdUADXiCOMBqEDVonwJnoLL1bt0LWvAEoolQE5lGozIZ5WYCPH4QQG2PA+qiVKfsiaEGjS3qfc7HoBpRC9eWdnRDFpKgIPW2O4kxirFNTfE40DiLOjmP9/rj/wBQhklIQ2VHRSLZVIIErgyV3lGNkqUke+dvgSiGJFxpd24yVILKduVwco4ql5TeBxBf3MT8REW1Q/H5ze0JA4qwcAEVcEHKskuxiiDb+71dnvMuJrLI8n5/x0QWKpKzTd6dh1EuitETSX7CQFeWW6Pu3SeX3oWtxHZX5+owPWYrq0f0yL1Mb3lrsTXqhHrDVoUtij6CzpkuwTa7695v108YOMq564aho0qtCq3lDUSLvXlP6fZ/O94JjrRnZIvZIFrkDdAatdhtttuA1kTblWX3owzM5/MuRnoksUZeF8UasUKsba+R15i18AqxEn63XgNrpHWwX5uVxRqVVRJrgpWKVr+YTt9+TAk98WTZbvvHHFpG8dThCVYNO4WTKMCu1Pb++5z3yBvDGrQULMELrGWRliXx6H5Y3tzc9B9tRg8Pt8P0+ekoItWGSqaSlHazl21UBINEj9giWkkb71hYYZbCC4cegAeJV0nxKjJ3E1YvF4vF8NFmBGR1B6+ouyalqIsYUSSCDO4p7vaKODZR7csgQ9kKt1KsDQusB8y9rXsU91XJd/MX8/aT5oHV6rY/O/l62AapMJCMiyILBpkeYmvUCjbaUf4IfiTijeFBju9RucfllSrdDZTbb+d/v/+siWixeNmdHV72xbUtFxVnowGrI9RKbIzfAivEMkJvkN9E5nsH91bcVVR3A+X27l+/fw035YuG0ouL2TM16TKq6tTko1T8DJeDUqU6XPYXUHFmC9ESeZWLHivxUBXuXrz425sfmwc/Yyz/4+j6en3Up3RST0bPcG7yQO3YdUOUS3onXkWrvgzLA9Zv5vN5+xM/TL6pzn77XTPKzSSRx0MflRRWdM6Orte4/Xqy2dzc3Gz/Zy+jH/i+71/42b7A/g2YLx7Og7oNnQAAAABJRU5ErkJggg==",
@@ -138,6 +138,7 @@ public class MainActivity extends Activity {
     private int colorToleranceValue = 22;
     private int brushSizeValue = 30;
     private int brushShapeIndex = 0;
+    private float brushRotationDegrees = 0f;
     private int selectedBackgroundColor = BLUE;
     private LinearLayout backgroundColorRow;
     private volatile boolean destroyed;
@@ -1548,7 +1549,12 @@ public class MainActivity extends Activity {
             }
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
-                // Preview/lens only while dragging. Never erase along the travel path.
+                // One continuous finger gesture: move the stamp and rotate it from drag direction.
+                float bdx = e.getX() - lastBrushViewX;
+                float bdy = e.getY() - lastBrushViewY;
+                if (Math.hypot(bdx, bdy) >= dp(2)) {
+                    brushRotationDegrees = (float)Math.toDegrees(Math.atan2(bdy, bdx));
+                }
                 showLens(e.getX(), e.getY());
                 lastBrushViewX = e.getX();
                 lastBrushViewY = e.getY();
@@ -1581,7 +1587,8 @@ public class MainActivity extends Activity {
                 boolean changed = applyBrushStampAt(e.getX(), e.getY());
                 if (changed) {
                     updateHistoryButtons();
-                    status.setText(BRUSH_SHAPE_NAMES[brushShapeIndex] + " brush • final point applied");
+                    status.setText(BRUSH_SHAPE_NAMES[brushShapeIndex]
+                            + " • " + Math.round(brushRotationDegrees) + "° • applied");
                     renderResult();
                 } else if (!undoMasks.isEmpty()) {
                     undoMasks.pop();
@@ -1647,7 +1654,7 @@ public class MainActivity extends Activity {
 
         magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
                 brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
-                brushRing, brushShapeIndex);
+                brushRing, brushShapeIndex, brushRotationDegrees);
 
         int lensSize = dp(132);
         int margin = dp(8);
@@ -1686,25 +1693,23 @@ public class MainActivity extends Activity {
             inv.mapPoints(pt);
 
             float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
-            return paintEraseShape(pt[0], pt[1], radius, brushShapeIndex);
+            return paintEraseShape(pt[0], pt[1], radius, brushShapeIndex, brushRotationDegrees);
         } catch (Throwable ignored) {
             return false;
         }
     }
 
-    private boolean paintEraseShape(float cx, float cy, float radius, int shape) {
+    private boolean paintEraseShape(float cx, float cy, float radius, int shape,
+                                    float rotationDegrees) {
         int w = eraseMask.getWidth();
         int h = eraseMask.getHeight();
-        float rx = radius;
-        float ry = radius;
-        if (shape == 3) rx = radius * 0.30f;      // Thin Vertical
-        if (shape == 4) ry = radius * 0.30f;      // Thin Horizontal
-        if (shape == 6) { rx = radius * 0.30f; ry = rx; } // Point Brush
 
-        int left = Math.max(0, (int)Math.floor(cx - rx - 2));
-        int top = Math.max(0, (int)Math.floor(cy - ry - 2));
-        int right = Math.min(w - 1, (int)Math.ceil(cx + rx + 2));
-        int bottom = Math.min(h - 1, (int)Math.ceil(cy + ry + 2));
+        // Full-radius bounds prevent clipping when thin/wedge shapes rotate.
+        float boundsRadius = shape == 6 ? radius * 0.36f : radius;
+        int left = Math.max(0, (int)Math.floor(cx - boundsRadius - 3));
+        int top = Math.max(0, (int)Math.floor(cy - boundsRadius - 3));
+        int right = Math.min(w - 1, (int)Math.ceil(cx + boundsRadius + 3));
+        int bottom = Math.min(h - 1, (int)Math.ceil(cy + boundsRadius + 3));
         if (right < left || bottom < top) return false;
 
         int rw = right - left + 1;
@@ -1719,7 +1724,7 @@ public class MainActivity extends Activity {
                 float px = left + xx + 0.5f;
                 float dx = px - cx;
                 float dy = py - cy;
-                float strength = brushShapeStrength(dx, dy, radius, shape);
+                float strength = brushShapeStrength(dx, dy, radius, shape, rotationDegrees);
                 if (strength <= 0f) continue;
 
                 int index = yy * rw + xx;
@@ -1733,66 +1738,72 @@ public class MainActivity extends Activity {
         return changed;
     }
 
-    private float brushShapeStrength(float dx, float dy, float radius, int shape) {
+    private float brushShapeStrength(float dx, float dy, float radius, int shape,
+                                     float rotationDegrees) {
         if (radius <= 0f) return 0f;
+
+        // Rotate the sampled pixel into the brush's local coordinate system.
+        double radians = Math.toRadians(-rotationDegrees);
+        float cos = (float)Math.cos(radians);
+        float sin = (float)Math.sin(radians);
+        float localX = dx * cos - dy * sin;
+        float localY = dx * sin + dy * cos;
+        dx = localX;
+        dy = localY;
 
         float ax = Math.abs(dx);
         float ay = Math.abs(dy);
 
-        if (shape == 3) { // Thin Vertical
+        if (shape == 3) { // Soft Vertical
             float nx = ax / Math.max(1f, radius * 0.30f);
             float ny = ay / radius;
-            float d = Math.max(nx, ny);
-            if (d >= 1f) return 0f;
-            if (d <= 0.78f) return 1f;
-            float u = 1f - (d - 0.78f) / 0.22f;
-            return Math.max(0f, u * u * (3f - 2f * u));
+            return softShapeFalloff(Math.max(nx, ny), 0.50f);
         }
 
-        if (shape == 4) { // Thin Horizontal
+        if (shape == 4) { // Soft Horizontal
             float nx = ax / radius;
             float ny = ay / Math.max(1f, radius * 0.30f);
-            float d = Math.max(nx, ny);
-            if (d >= 1f) return 0f;
-            if (d <= 0.78f) return 1f;
-            float u = 1f - (d - 0.78f) / 0.22f;
-            return Math.max(0f, u * u * (3f - 2f * u));
+            return softShapeFalloff(Math.max(nx, ny), 0.50f);
         }
 
-        if (shape == 5) { // Corner / Wedge
+        if (shape == 5) { // Soft Wedge
             float nx = (dx + radius) / Math.max(1f, radius * 2f);
             float ny = (dy + radius) / Math.max(1f, radius * 2f);
-            if (nx < 0f || ny < 0f || nx > 1f || ny > 1f || nx + ny > 1.06f) return 0f;
-            float diagonalRoom = 1.06f - (nx + ny);
-            return diagonalRoom > 0.16f ? 1f : smoothStep(0f, 0.16f, diagonalRoom);
+            float edgeRoom = Math.min(Math.min(nx, ny), 1f - nx - ny);
+            if (edgeRoom <= -0.10f) return 0f;
+            if (edgeRoom >= 0.14f) return 1f;
+            return smoothStep(-0.10f, 0.14f, edgeRoom);
         }
 
-        float rx = radius;
-        float ry = radius;
-        if (shape == 6) { rx = radius * 0.30f; ry = rx; } // Point Brush
-        float norm = (float)Math.sqrt((dx * dx) / Math.max(1f, rx * rx)
-                + (dy * dy) / Math.max(1f, ry * ry));
-        if (norm >= 1f) return 0f;
+        float useRadius = shape == 6 ? radius * 0.30f : radius;
+        float norm = (float)Math.sqrt((dx * dx + dy * dy)
+                / Math.max(1f, useRadius * useRadius));
 
-        if (shape == 2) { // Half-Circle Edge: straight cut on one side
-            if (dx < -radius * 0.03f) return 0f;
-            if (norm <= 0.78f) return 1f;
-            float u = 1f - (norm - 0.78f) / 0.22f;
-            return Math.max(0f, u * u * (3f - 2f * u));
+        if (shape == 2) { // Soft Half-Circle: curved and straight edges are feathered.
+            float radial = softShapeFalloff(norm, 0.50f);
+            float straight = smoothStep(-radius * 0.18f, radius * 0.18f, dx);
+            return radial * straight;
         }
 
-        if (shape == 1) return 1f; // Hard Round
-
-        if (shape == 0) { // Soft Round
-            if (norm <= 0.36f) return 1f;
-            float u = 1f - (norm - 0.36f) / 0.64f;
-            return Math.max(0f, u * u * (3f - 2f * u));
+        if (shape == 1) { // Soft Wide Round: never hard-cut.
+            return softShapeFalloff(norm, 0.62f);
         }
 
-        // Point Brush: small, precise, gently feathered.
-        if (norm <= 0.70f) return 1f;
-        float u = 1f - (norm - 0.70f) / 0.30f;
-        return Math.max(0f, u * u * (3f - 2f * u));
+        if (shape == 0) { // Soft Round: extra-wide feather.
+            return softShapeFalloff(norm, 0.30f);
+        }
+
+        // Soft Point: precise center with a feathered edge.
+        return softShapeFalloff(norm, 0.42f);
+    }
+
+    private float softShapeFalloff(float normalizedDistance, float fullStrengthUntil) {
+        if (normalizedDistance >= 1f) return 0f;
+        if (normalizedDistance <= fullStrengthUntil) return 1f;
+        float u = 1f - (normalizedDistance - fullStrengthUntil)
+                / Math.max(0.001f, 1f - fullStrengthUntil);
+        u = Math.max(0f, Math.min(1f, u));
+        return u * u * (3f - 2f * u);
     }
 
     private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
@@ -2520,6 +2531,7 @@ public class MainActivity extends Activity {
         private int mode = MODE_BRUSH;
         private float brushRingPx;
         private int brushShape = 0;
+        private float brushRotationDegrees = 0f;
 
         LensView(android.content.Context context) {
             super(context);
@@ -2529,7 +2541,7 @@ public class MainActivity extends Activity {
         }
 
         void setLens(Bitmap bitmap, float x, float y, float radius, int lensMode,
-                     float brushRing, int selectedBrushShape) {
+                     float brushRing, int selectedBrushShape, float selectedBrushRotation) {
             source = bitmap;
             sourceX = x;
             sourceY = y;
@@ -2537,6 +2549,7 @@ public class MainActivity extends Activity {
             mode = lensMode;
             brushRingPx = brushRing;
             brushShape = Math.max(0, Math.min(6, selectedBrushShape));
+            brushRotationDegrees = selectedBrushRotation;
             invalidate();
         }
 
@@ -2583,7 +2596,10 @@ public class MainActivity extends Activity {
             if (mode == MODE_BRUSH && brushRingPx > 0f) {
                 float rr = Math.min(radius * 0.72f, brushRingPx);
 
-                // Lens must show the exact selected brush footprint before ACTION_UP applies it.
+                // Lens shows the selected soft footprint and its live rotation before ACTION_UP.
+                canvas.save();
+                canvas.rotate(brushRotationDegrees, cx, cy);
+
                 guidePaint.setStyle(Paint.Style.STROKE);
                 guidePaint.setColor(0xEEFFFFFF);
                 guidePaint.setStrokeWidth(5f);
@@ -2592,6 +2608,7 @@ public class MainActivity extends Activity {
                 guidePaint.setColor(0xEE111111);
                 guidePaint.setStrokeWidth(2.2f);
                 drawBrushShapeOutline(canvas, cx, cy, rr, brushShape, guidePaint);
+                canvas.restore();
             } else {
                 guidePaint.setStyle(Paint.Style.FILL);
                 guidePaint.setColor(accent);
@@ -2612,12 +2629,12 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (shape == 1) { // Hard Round
+            if (shape == 1) { // Soft Wide Round
                 canvas.drawCircle(cx, cy, radius, paint);
                 return;
             }
 
-            if (shape == 2) { // Half-Circle Edge: same right-side half footprint as actual stamp
+            if (shape == 2) { // Soft Half-Circle
                 RectF oval = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
                 Path p = new Path();
                 p.moveTo(cx, cy - radius);
@@ -2628,21 +2645,21 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (shape == 3) { // Thin Vertical
+            if (shape == 3) { // Soft Vertical
                 RectF rect = new RectF(cx - radius * 0.30f, cy - radius,
                         cx + radius * 0.30f, cy + radius);
                 canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
                 return;
             }
 
-            if (shape == 4) { // Thin Horizontal
+            if (shape == 4) { // Soft Horizontal
                 RectF rect = new RectF(cx - radius, cy - radius * 0.30f,
                         cx + radius, cy + radius * 0.30f);
                 canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
                 return;
             }
 
-            if (shape == 5) { // Corner / Wedge
+            if (shape == 5) { // Soft Wedge
                 Path p = new Path();
                 p.moveTo(cx - radius, cy - radius);
                 p.lineTo(cx + radius, cy - radius);
