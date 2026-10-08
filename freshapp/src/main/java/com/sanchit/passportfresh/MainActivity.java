@@ -28,7 +28,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
-import android.util.Base64;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -83,20 +82,6 @@ public class MainActivity extends Activity {
     private static final int MAX_SIDE = 1440;
     private static final int MAX_HISTORY = 8;
 
-    private static final String[] BRUSH_SHAPE_NAMES = new String[]{
-            "Soft Round", "Soft Wide Round", "Soft Half-Circle", "Soft Vertical",
-            "Soft Horizontal", "Soft Wedge", "Soft Point"
-    };
-    private static final String[] BRUSH_SHAPE_PNG = new String[]{
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAFUElEQVR42u2Xy44byRFFz40sFllN9UP9nGnDXnjhBxfe+APmg/0V/gQ/0AsvbFCL6VFLPS2ySbGKVZnXC1KAeqwRJHkMbyaAAhIJRMbNGxU3IuFn+z+bPtdhNpvVL3Me10uPSzMJAEV4y6o77PvtfD7fAuWnBqCLi9m0TMZH4zQcMoomD9QphgpAimLUFYZOpVm1sHj4569X8Kf8XwOYzWb1atWctdX2PBFHFKakfCBS7aHsAFCKqTpTWsQ6rMei9L03+fXLl39dfzGAq6s/TMdHvup6Xcg+jVSO7TSF0tgxUTjtDylGHXJL77VSLC0eyOV1TfpuPv/LAvCHYqSPBa+mcZ2Lr2VfRcRFQefY56BTwYnhGDhEmsplWqzG0gRcA5UjqiFIZ4eX/WJx1346gNmsPhvpOhdfG66IuARfgM8Fp+AT8InEoeCZ0ZTiRtJEMA4igSrJqQwDZVy7+eq0ffvq1fZJhVQ/jH5xMZu2VTqP7FNFnGJOTDlFPDdxjHgGNDK19/6CbNELGu/2EyAiiqFXLl1UvP32Nyz5B68/BkCTyfhooByJ4bgQx7Gj+8jEseCYwjPwxDCWVAHYLkIdppZIGCEXinuCztJbo2XetMffwJs/w/DBFMxms3qTucL5kogL5HPMKYrnmGPBETBFTJEOZO9pV4Vd7WhHkmxUgCzTI3U27Uipvf3q5HFzf7/9IAMvcx6PR6OGrZuSYpJyaQqlkdUADXiCOMBqEDVonwJnoLL1bt0LWvAEoolQE5lGozIZ5WYCPH4QQG2PA+qiVKfsiaEGjS3qfc7HoBpRC9eWdnRDFpKgIPW2O4kxirFNTfE40DiLOjmP9/rj/wBQhklIQ2VHRSLZVIIErgyV3lGNkqUke+dvgSiGJFxpd24yVILKduVwco4ql5TeBxBf3MT8REW1Q/H5ze0JA4qwcAEVcEHKskuxiiDb+71dnvMuJrLI8n5/x0QWKpKzTd6dh1EuitETSX7CQFeWW6Pu3SeX3oWtxHZX5+owPWYrq0f0yL1Mb3lrsTXqhHrDVoUtij6CzpkuwTa7695v108YOMq564aho0qtCq3lDUSLvXlP6fZ/O94JjrRnZIvZIFrkDdAatdhtttuA1kTblWX3owzM5/MuRnoksUZeF8UasUKsba+R15i18AqxEn63XgNrpHWwX5uVxRqVVRJrgpWKVr+YTt9+TAk98WTZbvvHHFpG8dThCVYNO4WTKMCu1Pb++5z3yBvDGrQULMELrGWRliXx6H5Y3tzc9B9tRg8Pt8P0+ekoItWGSqaSlHazl21UBINEj9giWkkb71hYYZbCC4cegAeJV0nxKjJ3E1YvF4vF8NFmBGR1B6+ouyalqIsYUSSCDO4p7vaKODZR7csgQ9kKt1KsDQusB8y9rXsU91XJd/MX8/aT5oHV6rY/O/l62AapMJCMiyILBpkeYmvUCjbaUf4IfiTijeFBju9RucfllSrdDZTbb+d/v/+siWixeNmdHV72xbUtFxVnowGrI9RKbIzfAivEMkJvkN9E5nsH91bcVVR3A+X27l+/fw035YuG0ouL2TM16TKq6tTko1T8DJeDUqU6XPYXUHFmC9ESeZWLHivxUBXuXrz425sfmwc/Yyz/4+j6en3Up3RST0bPcG7yQO3YdUOUS3onXkWrvgzLA9Zv5vN5+xM/TL6pzn77XTPKzSSRx0MflRRWdM6Orte4/Xqy2dzc3Gz/Zy+jH/i+71/42b7A/g2YLx7Og7oNnQAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAD4ElEQVR42sWXz2tcVRTHP+fcN0lDGytokk4yocnCH6SNIEXJpoyIWnSdKbhyIf4F0qUWoQs3oiBu3LgT2tCFrlyIMasWoiANTmkJsaExwUhM0w6tad49x8V7k06HSciPSX279+67937Pud9zvt8L//MjbZzrTwKwUi4nUAktxkI2hh5EBgQqChPx0adKOH78ZjdAjF3rCwtXHzStK4C1AUAl1DceGBgtWSfjOKeBF4FinvsacF3gShAuL8zNzDTP3SOAbIFnBl/o70g6LwDjqtoN4O64O0i+iAgigsUYReSnNPrHy/MzV+G8wie+FUe2AxCAWBw6cQbVb1RD0WIE9xRBQKRhvoM7jiOSqAbMLEX83NLczBc5L1qC0K0jJxaHRj+QkPwgSNHSNIVsA5CQz62DUJCQjYHFNIIH1eTzY8Mnv842ruhWUbZMe3H45JsSwiU3i+AgEnZMWhEFcItpSAqvHDnaQ+3O5CTlcsL8vG13BAp4z/GRviQkvwG92UHvrrSaekMU0YDbW4t/zPzYTMymhSsCeKL6qYr2YRb3sXkeoCuCmPtXpdJYF0xYY+D6+M8TcXDw5X5g3Nw8T/t+m626WVRNnt8o3H+jmQ+PAJTLASAtpGdVk8N59NKeBuog7gF7P3ufaFEFU1NZibifdpys1NomOeLuYnAqOwY2g9MGMlqpNNblzsmMdyJt1RB3F7Qn1X+Hs0/npZkDDne7gL42KGXLcxCRToP+7LUqrRuRHLSsRt+yEz54EDdA7h2U93D3VC3cbQXAAV1ZuXEPvCoigFs704+I4LZ65FDtRl4J1lyGmsHUXwQBb+dRuImII1yfnZ2tNYhTYxm+ZgBR/aJZTOv9vG1tABH38G1mUsq6nRZYcXj0Z1Etu8WYK99+0++4r8n6oecWF6f/afSQTVGer8P40N0jiO/fbHqqoirw0eLi9Erehn0LOZ5yqITa6uSf3U/13tUkecfNNpBN7d9t7A81KXRYjJeXbs2co1IJVB+3aC3SW81ArE1eOXz02YGQFF51N8tA77g7Ou6pJoUOs3S6EDm7trb8kGrVd2BIAKoAWruz/H33072I6OuiKrjFOqVacMjBDcdFVVVDMLNLYSO+e/v276v5v74bT7hprYtDL51B/DPRcEIAd8t9yqbtFkRERBAEt7jsLheWbl37spHce7Pl5XLC1FQ6MjLSsXo/vO3CewinxBkQ1VB3yJj/jcg11C+ay3d/zV1b3s6M7vZiEnIJBaBUGutKu9aHgtkxgGhpbV0O3Vyd+3Wt1X2ijffIStiaN/VUl5PdVIzsHQySe8i6w7EndUFt6/MfvI+lcL5oCcAAAAAASUVORK5CYII=",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACa0lEQVR42tVXPWtUQRQ95868fBAJWKhJCGw2hZVPC5t020TxD+wvkNT6B3QV7C0kjT9A0NXCUrtgEwgiJBARo5EQIkZkUUNMdt/ca/HekjUaRbM7welmmDdz5p57zrsXOOLBLn5vR/0Yh0rFA5BoESiVSgNmw4OqQzvr6/Pf9p1LAPqnM+Sfbs5fiqYbvpIl7k1ItpZHyumT0XJ6Y3wyTQs6FKi63gDYY32I5HGCEyJyUZyrBcOLscmzT0+W0imgHoCa/C7ShwJAMsDMzNA0DUGzLAPgSLnghM9GJ9OrwE3toKS7AMysONgEoAPpAUBDFgBzIv72SPnM3ZySqnSfgoND4wBAs1bLuWRmtJzWgHpo507vAbSVQHoNWUbK9bFyOo25uWx/Ykrvjc4EBNVsdnx8ahCoa2c+SO/9iWKqQcSfbiXb0/vzQeKYpAE0c9DL+byOyABIM6MC53MaENo0RAIAyTUrJzLZKedLtagAAMBI9iswlk+XowMoRrCYMvwhEcwsE3VfOhd9rPCDJFQbxwa2XxVK0JgyVJIG4uXKyspWca/FA2C5L5u5e3mdUIlqRAYRqoaGNPse5vqfCxEBWCYUIXBtY2PhU2HDFgeAoSkuSTSERxurS7OoVl1eJfVehgazlnjfp5otJIoZAIJ6XXtZDxhgAWaBJMX5REN44Jrh0traUuOg3uFQPkDSANO2zklxBGEaNlX11vt3i3c6HvrLEv1QABTo8+IEqgK1j0Ysmuh9JR9/WF3c7NC7drsxIQA7VTo34b0vB9v9uov+1423zz/vbfk54eL8dlHxXeg5/yYSVVeEmvgfx3ebIfH/k2UM3AAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABP0lEQVR42u2XP0sDQRDF35u5ixxKCiMWKVNoo5VgJxZ+hnyAtH4jIdhY5gvY2Asi+Afs5EyVw8qANno7Y5EgFgrJkYsI+5rdYvfNj7dTzCoqq6vYyxK024rRlgBDwxIlizJixTu+2dk9UscBALjzsXi6O/vm53UBCABrd3Z6oJ6SnJQiYaE8GeX3x9NzVgcAAaDV2l5Lm42c5DrMPwAnSFI0McN+kd9cAV0FBmEW02TOBDzLNC0nSRBECpAADO5mwZq1N5OI+i9vLKSEZXUzF9XUgj9WBIgAESACRIAIEAEiwL8F+GkmNLjXP5KR4oSvAAiAh6+VFEq9Q6kD0OHwduxAX0SVoglFVLSRupWX4e39euI5mPljolXyf315Pl9tbhhIwD0384ukDL2ieBjP+zVbtLjEWofJNEGd7isV/wRDX2FgiSiF5gAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABP0lEQVR42u2UvUpDQRCFz8xuROWCaKOE26RWK9E2FvoIeQHzBr6A4rPY5RGsUmiXRu3EmDQaBPGHgCB751gkaZL4U9ybJvvBNrPFnDnMGSASiUTmHflnLU/426ebwdD607QCgGmaLqmuLoooScvFDRElAHw4z9d2632aAAVg5crWEcWdgrbMMaV5WK8iZrTz3sPt8bC3CVBzQCMrV7YPoHoBEmRBm0DCOQ8L2clj5/oMqHrFTlsBgCL7AiGNXxioyP+BwWgZlIcDRU36MY0GUACRAlMnpNio4NFKCAA03sGLG8bECgqgiWiJCPeDQlUc0DUA2n+r3iQrz+vi/J5ACkHVOVp2idJCvf/y9Al0OWH1RmVz16lPQggAfH7Te0Ayy3qdtSugGUaxn/UVnOgj069hrcDeDfvrHEcikch88Q3w4a+Q0hzBOAAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABXklEQVR42uWXPU4DMRBGv2/WWXoaCtLR0XCETc0xQIITUEAT5QjUFLlKcgZSpCTNRhQUSDQh6xmaBBAskF3bgGAky5J/9J4tWx4D/z1Y0yYoCklGHI+rX7oD/b5gMNDdvYMegJ55r0YG7QTNzEiamYoIzMxxsbwsy+ndim3uefRoJABU1Q5dJz9TA0gGL4+2qpnB+8V5We7cA1MBoADg3s0hHrRaVqq+qutvEgYYSSWZm6+O57PJcL3ylwP3dpKZgHQAHMiQkpEUimyZ2mk5mwxRFO41vFYgUhgApUhmXk/mN9dXKApXdwPkJ+EpBBrBYws0hscUaAWPJdAaHkMgCB4qEAwPEYgCbysQDd5GICq8qUB0eBOBJPBNBZLBNxFICv9KIDn8UwEDLTX8o4xIAaiI5Knh9QJkRsnEwx+lhtcnpYbO8nFxcbvO4b77I9Ht7m8nzheTv5JJ/ot/N54AMMk3WZk1w/QAAAAASUVORK5CYII=",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABg0lEQVR42u2VMUsDQRCF38xuYm2KgCJCsBMDNgpWJ6JoZedfMPiDRP+CiK1ieYUgpLAQbZUgKgoRU1iY23kWd0FBJAletLkPFhZuZ+ftm905oKCgoOCfkV/EOkRRGh9XCRwaAP63cBm1A731nJyZWzKTFRXxMF7c31aOgTgBoABsFAIkGzZRq++LuoZ8+cIQzrQbNu/urtvZOuYtQAFwolbfU+cbFroB/EyizntjaJYSrLdal6+ZAA6y6QBsOQA2OT2/JOoaFpIEEIWI7w0L4V3VL3Q9tgEYosgNeqr+RE+pU95WBTCQ390TOtIM5Fr6MmLLT0Dv5gHl/iVlCUPWtT9xNa2lsfljDGECEcJdpK5FmqMDhwZAy+ycBkvO1XsP4h1gABBAdkVdycxenOguAEG8bKN4hpyamq2EsjtR9YtkmkNEYRbaZNh4vLlqDtML3JCNSDud57ex6viBM22bkSBbhB0pkp2Hm+vLYRtR3v8PxR8hiCKfOajZ/M+SFxQUFOTKB+yymFcEeIr0AAAAAElFTkSuQmCC"
-    };
-
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ArrayDeque<Bitmap> undoMasks = new ArrayDeque<>();
     private final ArrayDeque<Bitmap> redoMasks = new ArrayDeque<>();
@@ -111,9 +96,9 @@ public class MainActivity extends Activity {
     private SeekBar brightnessSeek;
     private SeekBar fairnessSeek;
     private SeekBar smoothSeek;
-    private SeekBar brushSeek;
+    private SeekBar colorToleranceSeek;
     private Button compareButton;
-    private Button brushButton;
+    private Button fadeCleanButton;
     private Button objectButton;
     private Button undoButton;
     private Button redoButton;
@@ -128,20 +113,10 @@ public class MainActivity extends Activity {
     private Uri cameraUri;
     private Uri sourceUri;
     private boolean compareOriginal;
-    private boolean brushModeOn = false;
+    private boolean fadeCleanOn = false;
     private boolean colorCleanOn = false;
-    private boolean brushStrokeStarted = false;
-    private boolean brushStrokeChanged = false;
-    private float lastBrushViewX;
-    private float lastBrushViewY;
-    private boolean dualBrushRotateActive = false;
-    private float dualBrushRotateStartAngle = 0f;
-    private float dualBrushRotateStartDegrees = 0f;
     private TextView toolSeekLabel;
     private int colorToleranceValue = 22;
-    private int brushSizeValue = 30;
-    private int brushShapeIndex = 0;
-    private float brushRotationDegrees = 0f;
     private int selectedBackgroundColor = BLUE;
     private LinearLayout backgroundColorRow;
     private volatile boolean destroyed;
@@ -283,17 +258,17 @@ public class MainActivity extends Activity {
         brightnessSeek = compactSlider(controls, "Brightness", 22);
         fairnessSeek = compactSlider(controls, "Fairness", 28);
         smoothSeek = compactSlider(controls, "Smooth BG", 35);
-        brushSeek = compactSlider(controls, "Color Tolerance", 22);
+        colorToleranceSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row2 = buttonRow();
         compareButton = button("COMPARE", false);
-        brushButton = button("BRUSH", false);
+        fadeCleanButton = button("FADE COLOR CLEAN", false);
         objectButton = button("LOCAL COLOR CLEAN", false);
         compareButton.setTextSize(11);
-        brushButton.setTextSize(11);
+        fadeCleanButton.setTextSize(9);
         objectButton.setTextSize(10);
         row2.addView(compareButton, weightedButton());
-        row2.addView(brushButton, weightedButton());
+        row2.addView(fadeCleanButton, weightedButton());
         row2.addView(objectButton, weightedButton());
         controls.addView(row2, weightedControlRow(1.0f));
 
@@ -309,7 +284,7 @@ public class MainActivity extends Activity {
         camera.setOnClickListener(v -> openCamera());
         gallery.setOnClickListener(v -> openGallery());
         compareButton.setOnClickListener(v -> toggleCompare());
-        brushButton.setOnClickListener(v -> toggleBrushMode());
+        fadeCleanButton.setOnClickListener(v -> toggleFadeColorClean());
         objectButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
@@ -331,15 +306,10 @@ public class MainActivity extends Activity {
         brightnessSeek.setOnSeekBarChangeListener(redraw);
         fairnessSeek.setOnSeekBarChangeListener(redraw);
         smoothSeek.setOnSeekBarChangeListener(redraw);
-        brushSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        colorToleranceSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
-                if (brushModeOn) {
-                    brushSizeValue = p;
-                    if (fromUser && status != null) status.setText("Brush Size " + p + "%");
-                } else {
-                    colorToleranceValue = p;
-                    if (fromUser && status != null) status.setText("Color Tolerance " + p + "%");
-                }
+                colorToleranceValue = p;
+                if (fromUser && status != null) status.setText("Color Tolerance " + p + "%");
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -402,7 +372,7 @@ public class MainActivity extends Activity {
         if (text.contains("UNDO")) bgColor = 0xFF7C7399;
         else if (text.contains("REDO")) bgColor = 0xFF7E9B76;
         else if (text.contains("COMPARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
-        else if (text.contains("BRUSH")) bgColor = 0xFF4F8F8B;
+        else if (text.contains("FADE COLOR")) bgColor = 0xFF4F8F8B;
         else if (text.contains("LOCAL")) bgColor = 0xFF5B7FA3;
         else if (text.contains("कैमरा")) bgColor = 0xFF7C7399;
         else if (text.contains("फोटो")) bgColor = 0xFF5B7FA3;
@@ -451,64 +421,22 @@ public class MainActivity extends Activity {
         if (backgroundColorRow == null) return;
         backgroundColorRow.removeAllViews();
 
-        if (brushModeOn) {
-            for (int i = 0; i < BRUSH_SHAPE_NAMES.length; i++) {
-                final int shapeIndex = i;
-                FrameLayout slot = new FrameLayout(this);
-                slot.setTag(shapeIndex);
-                boolean selected = shapeIndex == brushShapeIndex;
-                slot.setBackground(rounded(selected ? 0xFFD7EAE8 : 0xFFF8FBFA, 12));
-                slot.setElevation(selected ? dp(3) : dp(1));
+        for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
+            final int color = PHOTO_BG_COLORS[i];
+            final String colorName = PHOTO_BG_NAMES[i];
 
-                ImageView icon = createBrushShapePngIcon(shapeIndex);
-                FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(34), dp(34));
-                iconLp.gravity = Gravity.CENTER;
-                slot.addView(icon, iconLp);
+            FrameLayout slot = new FrameLayout(this);
+            slot.setTag(color);
 
-                slot.setOnClickListener(v -> {
-                    brushShapeIndex = shapeIndex;
-                    renderToolChoiceRow();
-                    status.setText("Brush shape • " + BRUSH_SHAPE_NAMES[shapeIndex]);
-                });
-                attachTouchAnimation(slot);
+            View circle = createBackgroundColorCircle(color, colorName);
+            FrameLayout.LayoutParams circleLp = new FrameLayout.LayoutParams(dp(34), dp(34));
+            circleLp.gravity = Gravity.CENTER;
+            slot.addView(circle, circleLp);
 
-                LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
-                slotLp.setMargins(dp(2), dp(1), dp(2), dp(1));
-                backgroundColorRow.addView(slot, slotLp);
-            }
-        } else {
-            for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
-                final int color = PHOTO_BG_COLORS[i];
-                final String colorName = PHOTO_BG_NAMES[i];
-
-                FrameLayout slot = new FrameLayout(this);
-                slot.setTag(color);
-
-                View circle = createBackgroundColorCircle(color, colorName);
-                FrameLayout.LayoutParams circleLp = new FrameLayout.LayoutParams(dp(34), dp(34));
-                circleLp.gravity = Gravity.CENTER;
-                slot.addView(circle, circleLp);
-
-                LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
-                backgroundColorRow.addView(slot, slotLp);
-            }
-            updateBackgroundColorSelection();
+            LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
+            backgroundColorRow.addView(slot, slotLp);
         }
-    }
-
-    private ImageView createBrushShapePngIcon(int index) {
-        ImageView icon = new ImageView(this);
-        icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        icon.setPadding(dp(3), dp(3), dp(3), dp(3));
-        icon.setContentDescription(BRUSH_SHAPE_NAMES[index]);
-        try {
-            byte[] bytes = Base64.decode(BRUSH_SHAPE_PNG[index], Base64.DEFAULT);
-            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-            icon.setImageBitmap(bitmap);
-        } catch (Throwable ignored) {
-            icon.setImageResource(com.sanchit.passportfresh.R.drawable.ic_passport_logo);
-        }
-        return icon;
+        updateBackgroundColorSelection();
     }
 
     private View createBackgroundColorCircle(int color, String name) {
@@ -535,7 +463,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateBackgroundColorSelection() {
-        if (backgroundColorRow == null || brushModeOn) return;
+        if (backgroundColorRow == null) return;
         for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
             View slotView = backgroundColorRow.getChildAt(i);
             if (!(slotView instanceof FrameLayout)) continue;
@@ -592,9 +520,9 @@ public class MainActivity extends Activity {
         brightnessSeek.setEnabled(enabled);
         fairnessSeek.setEnabled(enabled);
         smoothSeek.setEnabled(enabled);
-        brushSeek.setEnabled(enabled);
+        colorToleranceSeek.setEnabled(enabled);
         compareButton.setEnabled(enabled);
-        brushButton.setEnabled(enabled);
+        fadeCleanButton.setEnabled(enabled);
         objectButton.setEnabled(enabled);
         if (backgroundColorRow != null) {
             for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
@@ -1098,9 +1026,9 @@ public class MainActivity extends Activity {
                             }
                         }
 
-                        // Manual BRUSH / Local Color Clean mask. A full-alpha mask removes
-                        // the pixel completely; the soft outer brush ring only reduces alpha,
-                        // producing a smooth natural edge instead of a hard cut.
+                        // Fade Color Clean / Local Color Clean manual mask.
+                        // Partial alpha from Fade Color Clean blends out contamination smoothly
+                        // instead of creating a new hard-cut edge.
                         if (manualErase > 0f) {
                             a *= (1f - Math.max(0f, Math.min(1f, manualErase)));
                         }
@@ -1472,22 +1400,24 @@ public class MainActivity extends Activity {
         compareButton.setText(compareOriginal ? "SHOW RESULT" : "COMPARE");
     }
 
-    private void toggleBrushMode() {
+    private void toggleFadeColorClean() {
         if (resultBitmap == null) return;
-        brushModeOn = !brushModeOn;
-        if (brushModeOn) {
+        fadeCleanOn = !fadeCleanOn;
+        if (fadeCleanOn) {
             colorCleanOn = false;
             objectButton.setText("LOCAL COLOR CLEAN");
-            brushButton.setText("BRUSH ✓");
-            if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
-            brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • shape चुनें • जहाँ finger छोड़ेंगे वहीं remove होगा");
-        } else {
-            brushButton.setText("BRUSH");
-            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
-            brushSeek.setProgress(colorToleranceValue);
-            status.setText("Brush OFF");
+            if (compareOriginal) {
+                compareOriginal = false;
+                imageView.setImageBitmap(resultBitmap);
+                compareButton.setText("COMPARE");
+            }
         }
+        fadeCleanButton.setText(fadeCleanOn ? "FADE COLOR CLEAN ✓" : "FADE COLOR CLEAN");
+        if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+        colorToleranceSeek.setProgress(colorToleranceValue);
+        status.setText(fadeCleanOn
+                ? "Fade colour पर tap करें • faded shades smooth हटेंगे • solid foreground सुरक्षित रहेगा"
+                : "Fade Color Clean OFF");
         renderToolChoiceRow();
         hideLens();
     }
@@ -1496,106 +1426,54 @@ public class MainActivity extends Activity {
         if (resultBitmap == null) return;
         colorCleanOn = !colorCleanOn;
         if (colorCleanOn) {
-            brushModeOn = false;
-            brushButton.setText("BRUSH");
-            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
-            brushSeek.setProgress(colorToleranceValue);
-        }
-        if (compareOriginal && colorCleanOn) {
-            compareOriginal = false;
-            imageView.setImageBitmap(resultBitmap);
-            compareButton.setText("COMPARE");
+            fadeCleanOn = false;
+            fadeCleanButton.setText("FADE COLOR CLEAN");
+            if (compareOriginal) {
+                compareOriginal = false;
+                imageView.setImageBitmap(resultBitmap);
+                compareButton.setText("COMPARE");
+            }
         }
         objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
+        if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+        colorToleranceSeek.setProgress(colorToleranceValue);
         renderToolChoiceRow();
         status.setText(colorCleanOn
-                ? "Finger रखें • lens में exact colour देखकर clean करें"
+                ? "Finger रखें • lens में exact colour देखकर local clean करें"
                 : "Local Color Clean OFF");
         hideLens();
     }
 
     private boolean handlePhotoTouch(View v, MotionEvent e) {
-        // Brush mode owns the two-finger gesture exclusively for rotation.
-        // Local Color Clean has no shape rotation; normal pinch zoom remains available there.
-        if (!brushModeOn && scaleGestureDetector != null) {
-            scaleGestureDetector.onTouchEvent(e);
-        }
+        if (scaleGestureDetector != null) scaleGestureDetector.onTouchEvent(e);
 
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
-            if (brushModeOn && !compareOriginal && resultBitmap != null && e.getPointerCount() >= 2) {
-                dualBrushRotateActive = true;
-                dualBrushRotateStartAngle = twoFingerAngle(e);
-                dualBrushRotateStartDegrees = brushRotationDegrees;
-                gestureWasScaling = true; // prevents accidental stamp when the gesture ends
-                brushStrokeStarted = false;
-                brushStrokeChanged = false;
-                showLens(lastBrushViewX, lastBrushViewY);
-                if (status != null) status.setText("2-finger rotate • " + Math.round(brushRotationDegrees) + "°");
-                return true;
-            }
-
             gestureWasScaling = true;
-            brushStrokeStarted = false;
-            brushStrokeChanged = false;
             hideLens();
             return true;
         }
-        if (action == MotionEvent.ACTION_POINTER_UP) {
-            if (dualBrushRotateActive) {
-                dualBrushRotateActive = false;
-                showLens(lastBrushViewX, lastBrushViewY);
-                if (status != null) status.setText("Rotation set • " + Math.round(brushRotationDegrees) + "°");
-            }
-            return true;
-        }
+        if (action == MotionEvent.ACTION_POINTER_UP) return true;
 
         if (action == MotionEvent.ACTION_DOWN) {
             lastPanX = e.getX();
             lastPanY = e.getY();
-            lastBrushViewX = e.getX();
-            lastBrushViewY = e.getY();
             panMoved = false;
             gestureWasScaling = false;
-            brushStrokeStarted = false;
-            brushStrokeChanged = false;
-            if ((brushModeOn || colorCleanOn) && !compareOriginal && resultBitmap != null) {
+            if ((fadeCleanOn || colorCleanOn) && !compareOriginal && resultBitmap != null) {
                 showLens(e.getX(), e.getY());
             }
             return true;
         }
 
         if (action == MotionEvent.ACTION_MOVE) {
-            if (brushModeOn && dualBrushRotateActive && e.getPointerCount() >= 2
-                    && !compareOriginal && resultBitmap != null) {
-                // Two fingers ONLY rotate the existing brush shape. They never move or zoom it.
-                float nowAngle = twoFingerAngle(e);
-                brushRotationDegrees = normalizeDegrees(
-                        dualBrushRotateStartDegrees + angleDeltaDegrees(dualBrushRotateStartAngle, nowAngle));
+            if (e.getPointerCount() > 1 || (scaleGestureDetector != null && scaleGestureDetector.isInProgress())) {
                 gestureWasScaling = true;
-                showLens(lastBrushViewX, lastBrushViewY);
-                if (status != null) status.setText("2-finger rotate • " + Math.round(brushRotationDegrees) + "°");
-                return true;
-            }
-
-            if (e.getPointerCount() > 1 || (!brushModeOn && scaleGestureDetector != null
-                    && scaleGestureDetector.isInProgress())) {
-                gestureWasScaling = true;
-                brushStrokeStarted = false;
-                brushStrokeChanged = false;
                 hideLens();
                 return true;
             }
 
-            if (brushModeOn && !compareOriginal && resultBitmap != null) {
-                // One finger ONLY moves/positions the brush. Rotation stays unchanged.
-                showLens(e.getX(), e.getY());
-                lastBrushViewX = e.getX();
-                lastBrushViewY = e.getY();
-                return true;
-            }
-
-            if (colorCleanOn && !compareOriginal && resultBitmap != null) {
+            if ((fadeCleanOn || colorCleanOn) && !compareOriginal && resultBitmap != null) {
                 showLens(e.getX(), e.getY());
                 return true;
             }
@@ -1614,22 +1492,11 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_UP) {
-            if (brushModeOn && !compareOriginal && resultBitmap != null && !gestureWasScaling) {
+            if (fadeCleanOn && !compareOriginal && resultBitmap != null
+                    && !panMoved && !gestureWasScaling
+                    && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
                 showLens(e.getX(), e.getY());
-                pushUndo();
-                clearDeque(redoMasks);
-                boolean changed = applyBrushStampAt(e.getX(), e.getY());
-                if (changed) {
-                    updateHistoryButtons();
-                    status.setText(BRUSH_SHAPE_NAMES[brushShapeIndex]
-                            + " • " + Math.round(brushRotationDegrees) + "° • applied");
-                    renderResult();
-                } else if (!undoMasks.isEmpty()) {
-                    undoMasks.pop();
-                    updateHistoryButtons();
-                }
-                brushStrokeStarted = false;
-                brushStrokeChanged = false;
+                applyFadeColorCleanAt(e.getX(), e.getY());
                 hideLens();
             } else if (colorCleanOn && !compareOriginal && resultBitmap != null
                     && !panMoved && !gestureWasScaling
@@ -1645,41 +1512,12 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_CANCEL) {
-            brushStrokeStarted = false;
-            brushStrokeChanged = false;
-            dualBrushRotateActive = false;
             gestureWasScaling = false;
             hideLens();
             return true;
         }
 
         return true;
-    }
-
-    private float twoFingerAngle(MotionEvent e) {
-        if (e == null || e.getPointerCount() < 2) return 0f;
-        float dx = e.getX(1) - e.getX(0);
-        float dy = e.getY(1) - e.getY(0);
-        return (float)Math.toDegrees(Math.atan2(dy, dx));
-    }
-
-    private float angleDeltaDegrees(float from, float to) {
-        float delta = to - from;
-        while (delta > 180f) delta -= 360f;
-        while (delta < -180f) delta += 360f;
-        return delta;
-    }
-
-    private float normalizeDegrees(float degrees) {
-        while (degrees >= 180f) degrees -= 360f;
-        while (degrees < -180f) degrees += 360f;
-        return degrees;
-    }
-
-    private float currentBrushScreenRadius() {
-        float density = getResources().getDisplayMetrics().density;
-        float t = Math.max(0f, Math.min(1f, brushSizeValue / 100f));
-        return density * (4f + 58f * t);
     }
 
     private float currentImageScale() {
@@ -1703,13 +1541,8 @@ public class MainActivity extends Activity {
         float magnification = 3.4f;
         float lensRadiusPx = dp(66);
         float sourceRadius = lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
-        float brushRing = brushModeOn
-                ? Math.min(dp(52), currentBrushScreenRadius() * magnification)
-                : 0f;
 
-        magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
-                brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
-                brushRing, brushShapeIndex, brushRotationDegrees);
+        magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius, fadeCleanOn);
 
         int lensSize = dp(132);
         int margin = dp(8);
@@ -1737,196 +1570,160 @@ public class MainActivity extends Activity {
         if (magnifierLens != null) magnifierLens.setVisibility(View.GONE);
     }
 
-    private boolean applyBrushStampAt(float viewX, float viewY) {
+    private void applyFadeColorCleanAt(float viewX, float viewY) {
         try {
-            if (eraseMask == null) createEmptyEraseMask();
-            if (eraseMask == null) return false;
-
-            Matrix inv = new Matrix();
-            if (!photoMatrix.invert(inv)) return false;
-            float[] pt = new float[]{viewX, viewY};
-            inv.mapPoints(pt);
-
-            float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
-            return paintEraseShape(pt[0], pt[1], radius, brushShapeIndex, brushRotationDegrees);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private boolean paintEraseShape(float cx, float cy, float radius, int shape,
-                                    float rotationDegrees) {
-        int w = eraseMask.getWidth();
-        int h = eraseMask.getHeight();
-
-        // Full-radius bounds prevent clipping when thin/wedge shapes rotate.
-        float boundsRadius = shape == 6 ? radius * 0.36f : radius;
-        int left = Math.max(0, (int)Math.floor(cx - boundsRadius - 3));
-        int top = Math.max(0, (int)Math.floor(cy - boundsRadius - 3));
-        int right = Math.min(w - 1, (int)Math.ceil(cx + boundsRadius + 3));
-        int bottom = Math.min(h - 1, (int)Math.ceil(cy + boundsRadius + 3));
-        if (right < left || bottom < top) return false;
-
-        int rw = right - left + 1;
-        int rh = bottom - top + 1;
-        int[] pixels = new int[rw * rh];
-        eraseMask.getPixels(pixels, 0, rw, left, top, rw, rh);
-
-        boolean changed = false;
-        for (int yy = 0; yy < rh; yy++) {
-            float py = top + yy + 0.5f;
-            for (int xx = 0; xx < rw; xx++) {
-                float px = left + xx + 0.5f;
-                float dx = px - cx;
-                float dy = py - cy;
-                float strength = brushShapeStrength(dx, dy, radius, shape, rotationDegrees);
-                if (strength <= 0f) continue;
-
-                int index = yy * rw + xx;
-                int oldA = Color.alpha(pixels[index]);
-                int newA = Math.max(oldA, Math.round(255f * strength));
-                if (newA != oldA) changed = true;
-                pixels[index] = Color.argb(newA, 255, 255, 255);
-            }
-        }
-        if (changed) eraseMask.setPixels(pixels, 0, rw, left, top, rw, rh);
-        return changed;
-    }
-
-    private float brushShapeStrength(float dx, float dy, float radius, int shape,
-                                     float rotationDegrees) {
-        if (radius <= 0f) return 0f;
-
-        // Rotate the sampled pixel into the brush's local coordinate system.
-        double radians = Math.toRadians(-rotationDegrees);
-        float cos = (float)Math.cos(radians);
-        float sin = (float)Math.sin(radians);
-        float localX = dx * cos - dy * sin;
-        float localY = dx * sin + dy * cos;
-        dx = localX;
-        dy = localY;
-
-        float ax = Math.abs(dx);
-        float ay = Math.abs(dy);
-
-        if (shape == 3) { // Soft Vertical
-            float nx = ax / Math.max(1f, radius * 0.30f);
-            float ny = ay / radius;
-            return softShapeFalloff(Math.max(nx, ny), 0.50f);
-        }
-
-        if (shape == 4) { // Soft Horizontal
-            float nx = ax / radius;
-            float ny = ay / Math.max(1f, radius * 0.30f);
-            return softShapeFalloff(Math.max(nx, ny), 0.50f);
-        }
-
-        if (shape == 5) { // Soft Wedge
-            float nx = (dx + radius) / Math.max(1f, radius * 2f);
-            float ny = (dy + radius) / Math.max(1f, radius * 2f);
-            float edgeRoom = Math.min(Math.min(nx, ny), 1f - nx - ny);
-            if (edgeRoom <= -0.10f) return 0f;
-            if (edgeRoom >= 0.14f) return 1f;
-            return smoothStep(-0.10f, 0.14f, edgeRoom);
-        }
-
-        float useRadius = shape == 6 ? radius * 0.30f : radius;
-        float norm = (float)Math.sqrt((dx * dx + dy * dy)
-                / Math.max(1f, useRadius * useRadius));
-
-        if (shape == 2) { // Soft Half-Circle: curved and straight edges are feathered.
-            float radial = softShapeFalloff(norm, 0.50f);
-            float straight = smoothStep(-radius * 0.18f, radius * 0.18f, dx);
-            return radial * straight;
-        }
-
-        if (shape == 1) { // Soft Wide Round: never hard-cut.
-            return softShapeFalloff(norm, 0.62f);
-        }
-
-        if (shape == 0) { // Soft Round: extra-wide feather.
-            return softShapeFalloff(norm, 0.30f);
-        }
-
-        // Soft Point: precise center with a feathered edge.
-        return softShapeFalloff(norm, 0.42f);
-    }
-
-    private float softShapeFalloff(float normalizedDistance, float fullStrengthUntil) {
-        if (normalizedDistance >= 1f) return 0f;
-        if (normalizedDistance <= fullStrengthUntil) return 1f;
-        float u = 1f - (normalizedDistance - fullStrengthUntil)
-                / Math.max(0.001f, 1f - fullStrengthUntil);
-        u = Math.max(0f, Math.min(1f, u));
-        return u * u * (3f - 2f * u);
-    }
-
-    private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
-        try {
+            if (resultBitmap == null || originalBitmap == null) return;
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return;
 
             Matrix inv = new Matrix();
             if (!photoMatrix.invert(inv)) return;
+            float[] point = new float[]{viewX, viewY};
+            inv.mapPoints(point);
+            int sx = Math.round(point[0]);
+            int sy = Math.round(point[1]);
 
-            float[] pts = new float[]{vx1, vy1, vx2, vy2};
-            inv.mapPoints(pts);
+            int w = resultBitmap.getWidth();
+            int h = resultBitmap.getHeight();
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
-            float x1 = pts[0], y1 = pts[1], x2 = pts[2], y2 = pts[3];
-            float distance = (float)Math.hypot(x2 - x1, y2 - y1);
-            float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
-            int steps = Math.max(1, (int)Math.ceil(distance / Math.max(1f, radius * 0.35f)));
+            int target = resultBitmap.getPixel(sx, sy);
+            int tr = Color.red(target);
+            int tg = Color.green(target);
+            int tb = Color.blue(target);
 
-            for (int i = 0; i <= steps; i++) {
-                float t = steps == 0 ? 0f : i / (float)steps;
-                float x = x1 + (x2 - x1) * t;
-                float y = y1 + (y2 - y1) * t;
-                paintSoftErasePoint(x, y, radius);
+            int br = Color.red(selectedBackgroundColor);
+            int bg = Color.green(selectedBackgroundColor);
+            int bb = Color.blue(selectedBackgroundColor);
+            if (colorDistanceSq(tr, tg, tb, br, bg, bb) < 225f) {
+                status.setText("यह नया background है • बचा हुआ faded colour select करें");
+                return;
             }
-            brushStrokeChanged = true;
-        } catch (Throwable ignored) {
-        }
-    }
 
-    private void paintSoftErasePoint(float cx, float cy, float radius) {
-        int w = eraseMask.getWidth();
-        int h = eraseMask.getHeight();
-        int left = Math.max(0, (int)Math.floor(cx - radius));
-        int top = Math.max(0, (int)Math.floor(cy - radius));
-        int right = Math.min(w - 1, (int)Math.ceil(cx + radius));
-        int bottom = Math.min(h - 1, (int)Math.ceil(cy + radius));
-        if (right < left || bottom < top) return;
+            pushUndo();
+            clearDeque(redoMasks);
 
-        int rw = right - left + 1;
-        int rh = bottom - top + 1;
-        int[] px = new int[rw * rh];
-        eraseMask.getPixels(px, 0, rw, left, top, rw, rh);
+            float toleranceProgress = Math.max(0f,
+                    Math.min(1f, colorToleranceSeek.getProgress() / 100f));
+            float tolerance = 10f + 92f * toleranceProgress;
+            float toleranceSq = tolerance * tolerance;
 
-        float inner = radius * 0.58f;
-        float feather = Math.max(1f, radius - inner);
+            int localRadius = Math.min(280, Math.max(42,
+                    Math.round(Math.min(w, h) * (0.055f + 0.115f * toleranceProgress))));
+            int minX = Math.max(0, sx - localRadius);
+            int maxX = Math.min(w - 1, sx + localRadius);
+            int minY = Math.max(0, sy - localRadius);
+            int maxY = Math.min(h - 1, sy + localRadius);
+            int boxW = maxX - minX + 1;
+            int boxH = maxY - minY + 1;
 
-        for (int yy = 0; yy < rh; yy++) {
-            float py = top + yy + 0.5f;
-            for (int xx = 0; xx < rw; xx++) {
-                float pxX = left + xx + 0.5f;
-                float d = (float)Math.hypot(pxX - cx, py - cy);
-                if (d > radius) continue;
+            int[] resultPixels = new int[w * h];
+            int[] maskPixels = new int[w * h];
+            resultBitmap.getPixels(resultPixels, 0, w, 0, 0, w, h);
+            eraseMask.getPixels(maskPixels, 0, w, 0, 0, w, h);
 
-                float strength;
-                if (d <= inner) strength = 1f;
-                else {
-                    float u = 1f - (d - inner) / feather;
-                    strength = u * u * (3f - 2f * u);
+            boolean targetSkin = isSkinLikeColor(tr, tg, tb);
+            boolean[] visited = new boolean[boxW * boxH];
+            ArrayDeque<Integer> queue = new ArrayDeque<>();
+            queue.add((sy - minY) * boxW + (sx - minX));
+
+            int changed = 0;
+            final int maxChanged = 110000;
+
+            while (!queue.isEmpty() && changed < maxChanged) {
+                int q = queue.removeFirst();
+                if (q < 0 || q >= visited.length || visited[q]) continue;
+                visited[q] = true;
+
+                int lx = q % boxW;
+                int ly = q / boxW;
+                int x = minX + lx;
+                int y = minY + ly;
+
+                float dx = x - sx;
+                float dy = y - sy;
+                float distance = (float)Math.hypot(dx, dy);
+                if (distance > localRadius) continue;
+
+                int c = resultPixels[y * w + x];
+                int r = Color.red(c);
+                int g = Color.green(c);
+                int b = Color.blue(c);
+
+                float dSq = colorDistanceSq(r, g, b, tr, tg, tb);
+                if (dSq > toleranceSq) continue;
+
+                // Protect solid foreground: skin and strongly different pixels never get pulled in.
+                boolean pixelSkin = isSkinLikeColor(r, g, b);
+                if (!targetSkin && pixelSkin) continue;
+
+                float channelLimit = tolerance * 1.05f + 3f;
+                if (Math.abs(r - tr) > channelLimit
+                        || Math.abs(g - tg) > channelLimit
+                        || Math.abs(b - tb) > channelLimit) continue;
+
+                // Similar target shades are removed strongest; farther/faded variants taper smoothly.
+                float similarity = 1f - (float)Math.sqrt(dSq) / Math.max(1f, tolerance);
+                similarity = Math.max(0f, Math.min(1f, similarity));
+                float colorFeather = similarity * similarity * (3f - 2f * similarity);
+
+                // Feather the selected area's outside edge as well, so no new hard ring is created.
+                float spatial = 1f - distance / Math.max(1f, localRadius);
+                spatial = Math.max(0f, Math.min(1f, spatial));
+                float spatialFeather = smoothStep(0f, 0.22f, spatial);
+
+                // Existing strong foreground confidence lowers removal unless colour match is excellent.
+                float subjectProtect = 1f;
+                if (personMask != null && maskWidth > 0 && maskHeight > 0) {
+                    int mx = Math.max(0, Math.min(maskWidth - 1,
+                            Math.round(x * (maskWidth - 1f) / Math.max(1f, w - 1f))));
+                    int my = Math.max(0, Math.min(maskHeight - 1,
+                            Math.round(y * (maskHeight - 1f) / Math.max(1f, h - 1f))));
+                    float fgConfidence = personMask[my * maskWidth + mx];
+                    if (fgConfidence > 0.82f && similarity < 0.72f) {
+                        subjectProtect = 0.12f;
+                    } else if (fgConfidence > 0.68f && similarity < 0.58f) {
+                        subjectProtect = 0.30f;
+                    }
                 }
 
-                int index = yy * rw + xx;
-                int oldA = Color.alpha(px[index]);
-                int newA = Math.max(oldA, Math.round(255f * strength));
-                px[index] = Color.argb(newA, 255, 255, 255);
-            }
-        }
+                float strength = colorFeather * spatialFeather * subjectProtect;
+                if (strength < 0.035f) continue;
 
-        eraseMask.setPixels(px, 0, rw, left, top, rw, rh);
+                int index = y * w + x;
+                int oldA = Color.alpha(maskPixels[index]);
+                int addA = Math.round(255f * Math.min(1f, strength));
+                int newA = Math.max(oldA, addA);
+                if (newA != oldA) {
+                    maskPixels[index] = Color.argb(newA, 255, 255, 255);
+                    changed++;
+                }
+
+                // Connected-area growth: no jumping to a same-colour object elsewhere.
+                if (lx > 0) queue.add(q - 1);
+                if (lx + 1 < boxW) queue.add(q + 1);
+                if (ly > 0) queue.add(q - boxW);
+                if (ly + 1 < boxH) queue.add(q + boxW);
+                if (lx > 0 && ly > 0) queue.add(q - boxW - 1);
+                if (lx + 1 < boxW && ly > 0) queue.add(q - boxW + 1);
+                if (lx > 0 && ly + 1 < boxH) queue.add(q + boxW - 1);
+                if (lx + 1 < boxW && ly + 1 < boxH) queue.add(q + boxW + 1);
+            }
+
+            if (changed == 0) {
+                if (!undoMasks.isEmpty()) undoMasks.pop();
+                updateHistoryButtons();
+                status.setText("इस area में removable faded colour नहीं मिला");
+                return;
+            }
+
+            eraseMask.setPixels(maskPixels, 0, w, 0, 0, w, h);
+            updateHistoryButtons();
+            status.setText("Fade clean • smooth removal • solid foreground protected");
+            renderResult();
+        } catch (Throwable ignored) {
+            status.setText("Fade Color Clean apply नहीं हुआ");
+        }
     }
 
     private void applyLocalColorCleanAt(float viewX, float viewY) {
@@ -1962,7 +1759,7 @@ public class MainActivity extends Activity {
             pushUndo();
             clearDeque(redoMasks);
 
-            float toleranceProgress = Math.max(0f, Math.min(1f, brushSeek.getProgress() / 100f));
+            float toleranceProgress = Math.max(0f, Math.min(1f, colorToleranceSeek.getProgress() / 100f));
             int localRadius = Math.min(220, Math.max(30,
                     Math.round(Math.min(w, h) * (0.040f + 0.090f * toleranceProgress))));
             int minX = Math.max(0, sx - localRadius);
@@ -2571,9 +2368,6 @@ public class MainActivity extends Activity {
     }
 
     private static class LensView extends View {
-        static final int MODE_BRUSH = 1;
-        static final int MODE_COLOR_CLEAN = 2;
-
         private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint guidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -2583,10 +2377,7 @@ public class MainActivity extends Activity {
         private float sourceX;
         private float sourceY;
         private float sourceRadius = 20f;
-        private int mode = MODE_BRUSH;
-        private float brushRingPx;
-        private int brushShape = 0;
-        private float brushRotationDegrees = 0f;
+        private boolean fadeMode;
 
         LensView(android.content.Context context) {
             super(context);
@@ -2595,16 +2386,12 @@ public class MainActivity extends Activity {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setLens(Bitmap bitmap, float x, float y, float radius, int lensMode,
-                     float brushRing, int selectedBrushShape, float selectedBrushRotation) {
+        void setLens(Bitmap bitmap, float x, float y, float radius, boolean isFadeMode) {
             source = bitmap;
             sourceX = x;
             sourceY = y;
             sourceRadius = Math.max(2f, radius);
-            mode = lensMode;
-            brushRingPx = brushRing;
-            brushShape = Math.max(0, Math.min(6, selectedBrushShape));
-            brushRotationDegrees = selectedBrushRotation;
+            fadeMode = isFadeMode;
             invalidate();
         }
 
@@ -2638,7 +2425,7 @@ public class MainActivity extends Activity {
             }
             canvas.restore();
 
-            int accent = mode == MODE_BRUSH ? 0xFF4F8F8B : 0xFF5B7FA3;
+            int accent = fadeMode ? 0xFF4F8F8B : 0xFF5B7FA3;
             borderPaint.setColor(accent);
             canvas.drawCircle(cx, cy, radius, borderPaint);
 
@@ -2648,84 +2435,9 @@ public class MainActivity extends Activity {
             canvas.drawLine(cx - 13f, cy, cx + 13f, cy, guidePaint);
             canvas.drawLine(cx, cy - 13f, cx, cy + 13f, guidePaint);
 
-            if (mode == MODE_BRUSH && brushRingPx > 0f) {
-                float rr = Math.min(radius * 0.72f, brushRingPx);
-
-                // Lens shows the selected soft footprint and its live rotation before ACTION_UP.
-                canvas.save();
-                canvas.rotate(brushRotationDegrees, cx, cy);
-
-                guidePaint.setStyle(Paint.Style.STROKE);
-                guidePaint.setColor(0xEEFFFFFF);
-                guidePaint.setStrokeWidth(5f);
-                drawBrushShapeOutline(canvas, cx, cy, rr, brushShape, guidePaint);
-
-                guidePaint.setColor(0xEE111111);
-                guidePaint.setStrokeWidth(2.2f);
-                drawBrushShapeOutline(canvas, cx, cy, rr, brushShape, guidePaint);
-                canvas.restore();
-            } else {
-                guidePaint.setStyle(Paint.Style.FILL);
-                guidePaint.setColor(accent);
-                canvas.drawCircle(cx, cy, 5f, guidePaint);
-            }
-        }
-
-        private void drawBrushShapeOutline(Canvas canvas, float cx, float cy,
-                                           float radius, int shape, Paint paint) {
-            if (radius <= 0f) return;
-
-            if (shape == 0) { // Soft Round: outer feather boundary + inner full-strength area
-                canvas.drawCircle(cx, cy, radius, paint);
-                float oldAlpha = paint.getAlpha();
-                paint.setAlpha(Math.min(190, (int)oldAlpha));
-                canvas.drawCircle(cx, cy, radius * 0.36f, paint);
-                paint.setAlpha((int)oldAlpha);
-                return;
-            }
-
-            if (shape == 1) { // Soft Wide Round
-                canvas.drawCircle(cx, cy, radius, paint);
-                return;
-            }
-
-            if (shape == 2) { // Soft Half-Circle
-                RectF oval = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
-                Path p = new Path();
-                p.moveTo(cx, cy - radius);
-                p.arcTo(oval, -90f, 180f);
-                p.lineTo(cx, cy - radius);
-                p.close();
-                canvas.drawPath(p, paint);
-                return;
-            }
-
-            if (shape == 3) { // Soft Vertical
-                RectF rect = new RectF(cx - radius * 0.30f, cy - radius,
-                        cx + radius * 0.30f, cy + radius);
-                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
-                return;
-            }
-
-            if (shape == 4) { // Soft Horizontal
-                RectF rect = new RectF(cx - radius, cy - radius * 0.30f,
-                        cx + radius, cy + radius * 0.30f);
-                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
-                return;
-            }
-
-            if (shape == 5) { // Soft Wedge
-                Path p = new Path();
-                p.moveTo(cx - radius, cy - radius);
-                p.lineTo(cx + radius, cy - radius);
-                p.lineTo(cx - radius, cy + radius);
-                p.close();
-                canvas.drawPath(p, paint);
-                return;
-            }
-
-            // Point Brush uses the same 0.30 radius as the real stamp.
-            canvas.drawCircle(cx, cy, radius * 0.30f, paint);
+            guidePaint.setStyle(Paint.Style.FILL);
+            guidePaint.setColor(accent);
+            canvas.drawCircle(cx, cy, fadeMode ? 7f : 5f, guidePaint);
         }
     }
 
