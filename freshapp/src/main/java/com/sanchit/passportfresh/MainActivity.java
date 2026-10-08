@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
     private ImageView processingLogo;
     private View processingShade;
     private LensView magnifierLens;
+    private SelectionOverlay selectionOverlay;
     private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
     private SeekBar fairnessSeek;
@@ -199,6 +200,10 @@ public class MainActivity extends Activity {
         imageView.setScaleType(ImageView.ScaleType.MATRIX);
         imageView.setBackgroundColor(0xFFE4ECEF);
         preview.addView(imageView, new FrameLayout.LayoutParams(-1, -1));
+
+        selectionOverlay = new SelectionOverlay(this);
+        selectionOverlay.setVisibility(View.GONE);
+        preview.addView(selectionOverlay, new FrameLayout.LayoutParams(-1, -1));
 
         magnifierLens = new LensView(this);
         magnifierLens.setVisibility(View.GONE);
@@ -1416,8 +1421,9 @@ public class MainActivity extends Activity {
         if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
         colorToleranceSeek.setProgress(colorToleranceValue);
         status.setText(fadeCleanOn
-                ? "Fade colour पर tap करें • faded shades smooth हटेंगे • solid foreground सुरक्षित रहेगा"
+                ? "Area चुनें • screen/lens में circle दिखेगा • majority keep, minority smooth remove"
                 : "Fade Color Clean OFF");
+        if (!fadeCleanOn && selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
         renderToolChoiceRow();
         hideLens();
     }
@@ -1428,6 +1434,7 @@ public class MainActivity extends Activity {
         if (colorCleanOn) {
             fadeCleanOn = false;
             fadeCleanButton.setText("FADE COLOR CLEAN");
+            if (selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
             if (compareOriginal) {
                 compareOriginal = false;
                 imageView.setImageBitmap(resultBitmap);
@@ -1514,6 +1521,7 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_CANCEL) {
             gestureWasScaling = false;
             hideLens();
+            if (selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
             return true;
         }
 
@@ -1528,6 +1536,16 @@ public class MainActivity extends Activity {
         return Math.max(0.0001f, (float)Math.sqrt(sx * sx + sy * sy));
     }
 
+    private int currentFadeSelectionRadiusPx() {
+        Bitmap shown = resultBitmap != null ? resultBitmap : originalBitmap;
+        if (shown == null) return 48;
+        float toleranceProgress = Math.max(0f,
+                Math.min(1f, colorToleranceSeek.getProgress() / 100f));
+        return Math.min(280, Math.max(42,
+                Math.round(Math.min(shown.getWidth(), shown.getHeight())
+                        * (0.055f + 0.115f * toleranceProgress))));
+    }
+
     private void showLens(float viewX, float viewY) {
         if (magnifierLens == null || imageView == null) return;
         Bitmap shown = compareOriginal ? originalBitmap : (resultBitmap != null ? resultBitmap : originalBitmap);
@@ -1540,9 +1558,22 @@ public class MainActivity extends Activity {
 
         float magnification = 3.4f;
         float lensRadiusPx = dp(66);
-        float sourceRadius = lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
+        int fadeRadius = fadeCleanOn ? currentFadeSelectionRadiusPx() : 0;
+        float sourceRadius = fadeCleanOn
+                ? Math.max(12f, fadeRadius * 1.22f)
+                : lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
 
-        magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius, fadeCleanOn);
+        magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius, fadeCleanOn,
+                fadeCleanOn ? fadeRadius : 0f);
+
+        if (fadeCleanOn && selectionOverlay != null) {
+            float screenRadius = fadeRadius * currentImageScale();
+            selectionOverlay.setSelection(viewX, viewY, screenRadius);
+            selectionOverlay.setVisibility(View.VISIBLE);
+            selectionOverlay.bringToFront();
+        } else if (selectionOverlay != null) {
+            selectionOverlay.setVisibility(View.GONE);
+        }
 
         int lensSize = dp(132);
         int margin = dp(8);
@@ -1587,139 +1618,181 @@ public class MainActivity extends Activity {
             int h = resultBitmap.getHeight();
             if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
-            int target = resultBitmap.getPixel(sx, sy);
-            int tr = Color.red(target);
-            int tg = Color.green(target);
-            int tb = Color.blue(target);
-
-            int br = Color.red(selectedBackgroundColor);
-            int bg = Color.green(selectedBackgroundColor);
-            int bb = Color.blue(selectedBackgroundColor);
-            if (colorDistanceSq(tr, tg, tb, br, bg, bb) < 225f) {
-                status.setText("यह नया background है • बचा हुआ faded colour select करें");
-                return;
-            }
-
-            pushUndo();
-            clearDeque(redoMasks);
-
-            float toleranceProgress = Math.max(0f,
-                    Math.min(1f, colorToleranceSeek.getProgress() / 100f));
-            float tolerance = 10f + 92f * toleranceProgress;
-            float toleranceSq = tolerance * tolerance;
-
-            int localRadius = Math.min(280, Math.max(42,
-                    Math.round(Math.min(w, h) * (0.055f + 0.115f * toleranceProgress))));
+            int localRadius = currentFadeSelectionRadiusPx();
             int minX = Math.max(0, sx - localRadius);
             int maxX = Math.min(w - 1, sx + localRadius);
             int minY = Math.max(0, sy - localRadius);
             int maxY = Math.min(h - 1, sy + localRadius);
-            int boxW = maxX - minX + 1;
-            int boxH = maxY - minY + 1;
 
             int[] resultPixels = new int[w * h];
             int[] maskPixels = new int[w * h];
             resultBitmap.getPixels(resultPixels, 0, w, 0, 0, w, h);
             eraseMask.getPixels(maskPixels, 0, w, 0, 0, w, h);
 
-            boolean targetSkin = isSkinLikeColor(tr, tg, tb);
-            boolean[] visited = new boolean[boxW * boxH];
-            ArrayDeque<Integer> queue = new ArrayDeque<>();
-            queue.add((sy - minY) * boxW + (sx - minX));
+            // Sample the selected circle and split its colours into two natural groups.
+            // The larger group is the dominant colour to KEEP; the smaller group is REMOVE.
+            int step = Math.max(1, localRadius / 42);
+            int maxSamples = Math.max(256,
+                    ((maxX - minX + 1) / step + 2) * ((maxY - minY + 1) / step + 2));
+            int[] samples = new int[maxSamples];
+            int sampleCount = 0;
 
-            int changed = 0;
-            final int maxChanged = 110000;
+            long sumR = 0, sumG = 0, sumB = 0;
+            for (int y = minY; y <= maxY; y += step) {
+                for (int x = minX; x <= maxX; x += step) {
+                    int dx = x - sx;
+                    int dy = y - sy;
+                    if (dx * dx + dy * dy > localRadius * localRadius) continue;
+                    int c = resultPixels[y * w + x];
+                    if (sampleCount < samples.length) samples[sampleCount++] = c;
+                    sumR += Color.red(c);
+                    sumG += Color.green(c);
+                    sumB += Color.blue(c);
+                }
+            }
 
-            while (!queue.isEmpty() && changed < maxChanged) {
-                int q = queue.removeFirst();
-                if (q < 0 || q >= visited.length || visited[q]) continue;
-                visited[q] = true;
+            if (sampleCount < 24) {
+                status.setText("Area बहुत छोटा है");
+                return;
+            }
 
-                int lx = q % boxW;
-                int ly = q / boxW;
-                int x = minX + lx;
-                int y = minY + ly;
+            float avgR = sumR / (float)sampleCount;
+            float avgG = sumG / (float)sampleCount;
+            float avgB = sumB / (float)sampleCount;
 
-                float dx = x - sx;
-                float dy = y - sy;
-                float distance = (float)Math.hypot(dx, dy);
-                if (distance > localRadius) continue;
+            // Seed A = colour farthest from average; Seed B = colour farthest from Seed A.
+            int seedA = samples[0];
+            float farA = -1f;
+            for (int i = 0; i < sampleCount; i++) {
+                int c = samples[i];
+                float d = colorDistanceSq(Color.red(c), Color.green(c), Color.blue(c),
+                        Math.round(avgR), Math.round(avgG), Math.round(avgB));
+                if (d > farA) { farA = d; seedA = c; }
+            }
 
-                int c = resultPixels[y * w + x];
-                int r = Color.red(c);
-                int g = Color.green(c);
-                int b = Color.blue(c);
+            int seedB = samples[0];
+            float farB = -1f;
+            int aR0 = Color.red(seedA), aG0 = Color.green(seedA), aB0 = Color.blue(seedA);
+            for (int i = 0; i < sampleCount; i++) {
+                int c = samples[i];
+                float d = colorDistanceSq(Color.red(c), Color.green(c), Color.blue(c),
+                        aR0, aG0, aB0);
+                if (d > farB) { farB = d; seedB = c; }
+            }
 
-                float dSq = colorDistanceSq(r, g, b, tr, tg, tb);
-                if (dSq > toleranceSq) continue;
+            float c1r = Color.red(seedA), c1g = Color.green(seedA), c1b = Color.blue(seedA);
+            float c2r = Color.red(seedB), c2g = Color.green(seedB), c2b = Color.blue(seedB);
+            int count1 = 0, count2 = 0;
 
-                // Protect solid foreground: skin and strongly different pixels never get pulled in.
-                boolean pixelSkin = isSkinLikeColor(r, g, b);
-                if (!targetSkin && pixelSkin) continue;
+            // Small 2-means clustering, bounded and local to selected area.
+            for (int iter = 0; iter < 6; iter++) {
+                float s1r = 0f, s1g = 0f, s1b = 0f;
+                float s2r = 0f, s2g = 0f, s2b = 0f;
+                count1 = 0;
+                count2 = 0;
 
-                float channelLimit = tolerance * 1.05f + 3f;
-                if (Math.abs(r - tr) > channelLimit
-                        || Math.abs(g - tg) > channelLimit
-                        || Math.abs(b - tb) > channelLimit) continue;
-
-                // Similar target shades are removed strongest; farther/faded variants taper smoothly.
-                float similarity = 1f - (float)Math.sqrt(dSq) / Math.max(1f, tolerance);
-                similarity = Math.max(0f, Math.min(1f, similarity));
-                float colorFeather = similarity * similarity * (3f - 2f * similarity);
-
-                // Feather the selected area's outside edge as well, so no new hard ring is created.
-                float spatial = 1f - distance / Math.max(1f, localRadius);
-                spatial = Math.max(0f, Math.min(1f, spatial));
-                float spatialFeather = smoothStep(0f, 0.22f, spatial);
-
-                // Existing strong foreground confidence lowers removal unless colour match is excellent.
-                float subjectProtect = 1f;
-                if (personMask != null && maskWidth > 0 && maskHeight > 0) {
-                    int mx = Math.max(0, Math.min(maskWidth - 1,
-                            Math.round(x * (maskWidth - 1f) / Math.max(1f, w - 1f))));
-                    int my = Math.max(0, Math.min(maskHeight - 1,
-                            Math.round(y * (maskHeight - 1f) / Math.max(1f, h - 1f))));
-                    float fgConfidence = personMask[my * maskWidth + mx];
-                    if (fgConfidence > 0.82f && similarity < 0.72f) {
-                        subjectProtect = 0.12f;
-                    } else if (fgConfidence > 0.68f && similarity < 0.58f) {
-                        subjectProtect = 0.30f;
+                for (int i = 0; i < sampleCount; i++) {
+                    int c = samples[i];
+                    int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
+                    float d1 = colorDistanceSq(r, g, b,
+                            Math.round(c1r), Math.round(c1g), Math.round(c1b));
+                    float d2 = colorDistanceSq(r, g, b,
+                            Math.round(c2r), Math.round(c2g), Math.round(c2b));
+                    if (d1 <= d2) {
+                        s1r += r; s1g += g; s1b += b; count1++;
+                    } else {
+                        s2r += r; s2g += g; s2b += b; count2++;
                     }
                 }
 
-                float strength = colorFeather * spatialFeather * subjectProtect;
-                if (strength < 0.035f) continue;
-
-                int index = y * w + x;
-                int oldA = Color.alpha(maskPixels[index]);
-                int addA = Math.round(255f * Math.min(1f, strength));
-                int newA = Math.max(oldA, addA);
-                if (newA != oldA) {
-                    maskPixels[index] = Color.argb(newA, 255, 255, 255);
-                    changed++;
+                if (count1 > 0) {
+                    c1r = s1r / count1; c1g = s1g / count1; c1b = s1b / count1;
                 }
+                if (count2 > 0) {
+                    c2r = s2r / count2; c2g = s2g / count2; c2b = s2b / count2;
+                }
+            }
 
-                // Connected-area growth: no jumping to a same-colour object elsewhere.
-                if (lx > 0) queue.add(q - 1);
-                if (lx + 1 < boxW) queue.add(q + 1);
-                if (ly > 0) queue.add(q - boxW);
-                if (ly + 1 < boxH) queue.add(q + boxW);
-                if (lx > 0 && ly > 0) queue.add(q - boxW - 1);
-                if (lx + 1 < boxW && ly > 0) queue.add(q - boxW + 1);
-                if (lx > 0 && ly + 1 < boxH) queue.add(q + boxW - 1);
-                if (lx + 1 < boxW && ly + 1 < boxH) queue.add(q + boxW + 1);
+            if (count1 == 0 || count2 == 0) {
+                status.setText("इस area में अलग minority colour नहीं मिला");
+                return;
+            }
+
+            float centersDistance = (float)Math.sqrt(colorDistanceSq(
+                    Math.round(c1r), Math.round(c1g), Math.round(c1b),
+                    Math.round(c2r), Math.round(c2g), Math.round(c2b)));
+            if (centersDistance < 14f) {
+                status.setText("Area के colours लगभग एक जैसे हैं");
+                return;
+            }
+
+            boolean cluster1Minority = count1 < count2;
+            int minorityCount = Math.min(count1, count2);
+            int dominantCount = Math.max(count1, count2);
+            float minorityPct = 100f * minorityCount / Math.max(1f, sampleCount);
+            float dominantPct = 100f * dominantCount / Math.max(1f, sampleCount);
+
+            float minR = cluster1Minority ? c1r : c2r;
+            float minG = cluster1Minority ? c1g : c2g;
+            float minB = cluster1Minority ? c1b : c2b;
+            float domR = cluster1Minority ? c2r : c1r;
+            float domG = cluster1Minority ? c2g : c1g;
+            float domB = cluster1Minority ? c2b : c1b;
+
+            pushUndo();
+            clearDeque(redoMasks);
+
+            int changed = 0;
+            for (int y = minY; y <= maxY; y++) {
+                for (int x = minX; x <= maxX; x++) {
+                    float dx = x - sx;
+                    float dy = y - sy;
+                    float distance = (float)Math.hypot(dx, dy);
+                    if (distance > localRadius) continue;
+
+                    int idx = y * w + x;
+                    int c = resultPixels[idx];
+                    int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
+
+                    float dMin = (float)Math.sqrt(colorDistanceSq(r, g, b,
+                            Math.round(minR), Math.round(minG), Math.round(minB)));
+                    float dDom = (float)Math.sqrt(colorDistanceSq(r, g, b,
+                            Math.round(domR), Math.round(domG), Math.round(domB)));
+
+                    // Only minority-side pixels are removed.
+                    if (dMin >= dDom) continue;
+
+                    // 0.5 is the cluster boundary; toward 1.0 is a stronger minority match.
+                    float minorityMembership = dDom / Math.max(1f, dMin + dDom);
+                    float colourStrength = smoothStep(0.50f, 0.82f, minorityMembership);
+
+                    // Feather selected circle boundary, so cleanup never leaves a hard ring.
+                    float inside = 1f - distance / Math.max(1f, localRadius);
+                    float areaStrength = smoothStep(0f, 0.16f, inside);
+                    float strength = colourStrength * areaStrength;
+                    if (strength < 0.02f) continue;
+
+                    int oldA = Color.alpha(maskPixels[idx]);
+                    int addA = Math.round(255f * strength);
+                    int newA = Math.max(oldA, addA);
+                    if (newA != oldA) {
+                        maskPixels[idx] = Color.argb(newA, 255, 255, 255);
+                        changed++;
+                    }
+                }
             }
 
             if (changed == 0) {
                 if (!undoMasks.isEmpty()) undoMasks.pop();
                 updateHistoryButtons();
-                status.setText("इस area में removable faded colour नहीं मिला");
+                status.setText("Minority colour मिला, लेकिन removable pixels नहीं मिले");
                 return;
             }
 
             eraseMask.setPixels(maskPixels, 0, w, 0, 0, w, h);
             updateHistoryButtons();
-            status.setText("Fade clean • smooth removal • solid foreground protected");
+            status.setText("Keep " + Math.round(dominantPct) + "% • Remove "
+                    + Math.round(minorityPct) + "% • smooth");
             renderResult();
         } catch (Throwable ignored) {
             status.setText("Fade Color Clean apply नहीं हुआ");
@@ -2367,10 +2440,48 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static class SelectionOverlay extends View {
+        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float cx;
+        private float cy;
+        private float radius;
+
+        SelectionOverlay(android.content.Context context) {
+            super(context);
+            setClickable(false);
+            setFocusable(false);
+            fillPaint.setStyle(Paint.Style.FILL);
+            fillPaint.setColor(0x224F8F8B);
+            strokePaint.setStyle(Paint.Style.STROKE);
+            strokePaint.setStrokeWidth(3f);
+            strokePaint.setColor(0xEE111111);
+        }
+
+        void setSelection(float x, float y, float r) {
+            cx = x;
+            cy = y;
+            radius = Math.max(8f, r);
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (radius <= 0f) return;
+            canvas.drawCircle(cx, cy, radius, fillPaint);
+            canvas.drawCircle(cx, cy, radius, strokePaint);
+
+            float tick = Math.min(14f, radius * 0.18f);
+            canvas.drawLine(cx - tick, cy, cx + tick, cy, strokePaint);
+            canvas.drawLine(cx, cy - tick, cx, cy + tick, strokePaint);
+        }
+    }
+
     private static class LensView extends View {
         private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
         private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint guidePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint selectionFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path clip = new Path();
 
         private Bitmap source;
@@ -2378,20 +2489,25 @@ public class MainActivity extends Activity {
         private float sourceY;
         private float sourceRadius = 20f;
         private boolean fadeMode;
+        private float selectionRadiusSource;
 
         LensView(android.content.Context context) {
             super(context);
             borderPaint.setStyle(Paint.Style.STROKE);
             borderPaint.setStrokeWidth(4f);
+            selectionFillPaint.setStyle(Paint.Style.FILL);
+            selectionFillPaint.setColor(0x224F8F8B);
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setLens(Bitmap bitmap, float x, float y, float radius, boolean isFadeMode) {
+        void setLens(Bitmap bitmap, float x, float y, float radius, boolean isFadeMode,
+                     float selectedAreaRadiusSource) {
             source = bitmap;
             sourceX = x;
             sourceY = y;
             sourceRadius = Math.max(2f, radius);
             fadeMode = isFadeMode;
+            selectionRadiusSource = Math.max(0f, selectedAreaRadiusSource);
             invalidate();
         }
 
@@ -2423,6 +2539,16 @@ public class MainActivity extends Activity {
                 RectF dst = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
                 canvas.drawBitmap(source, src, dst, bitmapPaint);
             }
+
+            if (fadeMode && selectionRadiusSource > 0f) {
+                float rr = Math.min(radius * 0.92f,
+                        radius * selectionRadiusSource / Math.max(1f, sourceRadius));
+                canvas.drawCircle(cx, cy, rr, selectionFillPaint);
+                guidePaint.setStyle(Paint.Style.STROKE);
+                guidePaint.setStrokeWidth(3f);
+                guidePaint.setColor(0xEE111111);
+                canvas.drawCircle(cx, cy, rr, guidePaint);
+            }
             canvas.restore();
 
             int accent = fadeMode ? 0xFF4F8F8B : 0xFF5B7FA3;
@@ -2449,6 +2575,7 @@ public class MainActivity extends Activity {
         resultBitmap = null;
         eraseMask = null;
         personMask = null;
+        if (selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
         clearHistory();
     }
 
