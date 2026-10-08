@@ -134,6 +134,9 @@ public class MainActivity extends Activity {
     private boolean brushStrokeChanged = false;
     private float lastBrushViewX;
     private float lastBrushViewY;
+    private boolean dualBrushRotateActive = false;
+    private float dualBrushRotateStartAngle = 0f;
+    private float dualBrushRotateStartDegrees = 0f;
     private TextView toolSeekLabel;
     private int colorToleranceValue = 22;
     private int brushSizeValue = 30;
@@ -1512,17 +1515,40 @@ public class MainActivity extends Activity {
     }
 
     private boolean handlePhotoTouch(View v, MotionEvent e) {
-        if (scaleGestureDetector != null) scaleGestureDetector.onTouchEvent(e);
+        // Brush mode owns the two-finger gesture exclusively for rotation.
+        // Local Color Clean has no shape rotation; normal pinch zoom remains available there.
+        if (!brushModeOn && scaleGestureDetector != null) {
+            scaleGestureDetector.onTouchEvent(e);
+        }
 
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
+            if (brushModeOn && !compareOriginal && resultBitmap != null && e.getPointerCount() >= 2) {
+                dualBrushRotateActive = true;
+                dualBrushRotateStartAngle = twoFingerAngle(e);
+                dualBrushRotateStartDegrees = brushRotationDegrees;
+                gestureWasScaling = true; // prevents accidental stamp when the gesture ends
+                brushStrokeStarted = false;
+                brushStrokeChanged = false;
+                showLens(lastBrushViewX, lastBrushViewY);
+                if (status != null) status.setText("2-finger rotate • " + Math.round(brushRotationDegrees) + "°");
+                return true;
+            }
+
             gestureWasScaling = true;
             brushStrokeStarted = false;
             brushStrokeChanged = false;
             hideLens();
             return true;
         }
-        if (action == MotionEvent.ACTION_POINTER_UP) return true;
+        if (action == MotionEvent.ACTION_POINTER_UP) {
+            if (dualBrushRotateActive) {
+                dualBrushRotateActive = false;
+                showLens(lastBrushViewX, lastBrushViewY);
+                if (status != null) status.setText("Rotation set • " + Math.round(brushRotationDegrees) + "°");
+            }
+            return true;
+        }
 
         if (action == MotionEvent.ACTION_DOWN) {
             lastPanX = e.getX();
@@ -1540,7 +1566,20 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_MOVE) {
-            if (e.getPointerCount() > 1 || (scaleGestureDetector != null && scaleGestureDetector.isInProgress())) {
+            if (brushModeOn && dualBrushRotateActive && e.getPointerCount() >= 2
+                    && !compareOriginal && resultBitmap != null) {
+                // Two fingers ONLY rotate the existing brush shape. They never move or zoom it.
+                float nowAngle = twoFingerAngle(e);
+                brushRotationDegrees = normalizeDegrees(
+                        dualBrushRotateStartDegrees + angleDeltaDegrees(dualBrushRotateStartAngle, nowAngle));
+                gestureWasScaling = true;
+                showLens(lastBrushViewX, lastBrushViewY);
+                if (status != null) status.setText("2-finger rotate • " + Math.round(brushRotationDegrees) + "°");
+                return true;
+            }
+
+            if (e.getPointerCount() > 1 || (!brushModeOn && scaleGestureDetector != null
+                    && scaleGestureDetector.isInProgress())) {
                 gestureWasScaling = true;
                 brushStrokeStarted = false;
                 brushStrokeChanged = false;
@@ -1549,12 +1588,7 @@ public class MainActivity extends Activity {
             }
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
-                // One continuous finger gesture: move the stamp and rotate it from drag direction.
-                float bdx = e.getX() - lastBrushViewX;
-                float bdy = e.getY() - lastBrushViewY;
-                if (Math.hypot(bdx, bdy) >= dp(2)) {
-                    brushRotationDegrees = (float)Math.toDegrees(Math.atan2(bdy, bdx));
-                }
+                // One finger ONLY moves/positions the brush. Rotation stays unchanged.
                 showLens(e.getX(), e.getY());
                 lastBrushViewX = e.getX();
                 lastBrushViewY = e.getY();
@@ -1613,12 +1647,33 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_CANCEL) {
             brushStrokeStarted = false;
             brushStrokeChanged = false;
+            dualBrushRotateActive = false;
             gestureWasScaling = false;
             hideLens();
             return true;
         }
 
         return true;
+    }
+
+    private float twoFingerAngle(MotionEvent e) {
+        if (e == null || e.getPointerCount() < 2) return 0f;
+        float dx = e.getX(1) - e.getX(0);
+        float dy = e.getY(1) - e.getY(0);
+        return (float)Math.toDegrees(Math.atan2(dy, dx));
+    }
+
+    private float angleDeltaDegrees(float from, float to) {
+        float delta = to - from;
+        while (delta > 180f) delta -= 360f;
+        while (delta < -180f) delta += 360f;
+        return delta;
+    }
+
+    private float normalizeDegrees(float degrees) {
+        while (degrees >= 180f) degrees -= 360f;
+        while (degrees < -180f) degrees += 360f;
+        return degrees;
     }
 
     private float currentBrushScreenRadius() {
