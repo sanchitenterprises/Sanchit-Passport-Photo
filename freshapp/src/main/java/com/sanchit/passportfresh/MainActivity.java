@@ -84,16 +84,17 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 8;
 
     private static final String[] BRUSH_SHAPE_NAMES = new String[]{
-            "Circle", "Square", "Soft Round", "Hard Round", "Oval", "Edge Brush", "Point Brush"
+            "Soft Round", "Hard Round", "Half-Circle Edge", "Thin Vertical",
+            "Thin Horizontal", "Corner / Wedge", "Point Brush"
     };
     private static final String[] BRUSH_SHAPE_PNG = new String[]{
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAeUlEQVR42u1WOQ7AIAwDv6Zz5z6/M3N/076glIRYQaq9Eh8EoaQUQfg7qoe07cf9dna1s9IC9Iy9QcAwt9SDYW7hgWU+ygfTfEQH2d8Q7Nt/6a3bAQVQgPQA1qnmHU5rP0FUF3o6mCFH7AWIEJnhIVLMU5++EwpCOh5fTTQosKMoYQAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAP0lEQVR42mNgGAWjYBQMMGDEJ6lhZPOfWhbdOHcEq11MAx0Cow4YdcCoA0YdMOqAUQeMOmDUAQPugFEwCkYBAGsRBCYHMMdUAAAAAElFTkSuQmCC",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAA8UlEQVR42u1XsRLDIAhVrx/jkiVzZz/auTOLC5/TlaNgQJuruYa7LKK+B5gnhnDbv1scWZT35675EF5wGoEe8CiROAice9geItEJnh0JQwuJOAEulQO8JOIAuOUcgJXEw3IEFPAizK1kHpD1qG2eDqL3gPPxjwxKf1EyHigNfCPfEQlbBpTo+eYclI8VrZQ8C8kRfXEKZrFkIQW/bZP+aQJftUsSaJN+NwFgImO1qshznwCRS+xs2oRI6VjVLicux9YSgECCgjbFD0MlULKgkQgGcJy5jJCoIhBhqd7b8Fr9wBId0RI94RJd8Znvgtt+bm8VCmjmUBdvxQAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAuElEQVR42u1WMQ6AMAhsiY/RVVd9va666m90MjERWqBtmibcWLB3PQngnMFQGV7zUT/ONxW7js0XExAi1gqBEuSSfJ+bWOpGp7303Nff2TAteYsQez1GzBFCueC15BhJLI6JAI3llNXfc45TpIBQ4cX+cyiO3QuS13OL7M3juACuMkxAGwIkRSUtWpD27piIUDypEXGaDKdZtTMLYl1RMg2LjGPN6E1ayTSLCWctg5yXafKrb8UGwwOtaGTDPkEzHQAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAbUlEQVR42mNgGAWjYBSMggEGjKRq0DCy+U9IzY1zRxip6gBiLCXXMYy0sphYhzDRw3J85jHRw3J85jINdC5gopfvcZk/+EJgwB1ASiFCjew4OKOAVqGAzVwmapTnlJSEg7suoEdtOApGwSgYBQCsIiwaTOJ2VwAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAfUlEQVR42u2WMQ6AIAxFvw2HwRVXvL2zs7epk4mDEIzKN2n/AdrXVxIKeDzkDE8LqKoCwDjNAIBtXW7VlLcniilrTFlpAGcQKkCrDWE/wi4ANQvdDJQgbKygZsGWAQdwADrA1Vdtx0DpUBFm81+sILAm/9xA63EaWI09niM7SEYiXODpBQ0AAAAASUVORK5CYII=",
-            "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"
+            "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",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAD4ElEQVR42sWXz2tcVRTHP+fcN0lDGytokk4yocnCH6SNIEXJpoyIWnSdKbhyIf4F0qUWoQs3oiBu3LgT2tCFrlyIMasWoiANTmkJsaExwUhM0w6tad49x8V7k06HSciPSX279+67937Pud9zvt8L//MjbZzrTwKwUi4nUAktxkI2hh5EBgQqChPx0adKOH78ZjdAjF3rCwtXHzStK4C1AUAl1DceGBgtWSfjOKeBF4FinvsacF3gShAuL8zNzDTP3SOAbIFnBl/o70g6LwDjqtoN4O64O0i+iAgigsUYReSnNPrHy/MzV+G8wie+FUe2AxCAWBw6cQbVb1RD0WIE9xRBQKRhvoM7jiOSqAbMLEX83NLczBc5L1qC0K0jJxaHRj+QkPwgSNHSNIVsA5CQz62DUJCQjYHFNIIH1eTzY8Mnv842ruhWUbZMe3H45JsSwiU3i+AgEnZMWhEFcItpSAqvHDnaQ+3O5CTlcsL8vG13BAp4z/GRviQkvwG92UHvrrSaekMU0YDbW4t/zPzYTMymhSsCeKL6qYr2YRb3sXkeoCuCmPtXpdJYF0xYY+D6+M8TcXDw5X5g3Nw8T/t+m626WVRNnt8o3H+jmQ+PAJTLASAtpGdVk8N59NKeBuog7gF7P3ufaFEFU1NZibifdpys1NomOeLuYnAqOwY2g9MGMlqpNNblzsmMdyJt1RB3F7Qn1X+Hs0/npZkDDne7gL42KGXLcxCRToP+7LUqrRuRHLSsRt+yEz54EDdA7h2U93D3VC3cbQXAAV1ZuXEPvCoigFs704+I4LZ65FDtRl4J1lyGmsHUXwQBb+dRuImII1yfnZ2tNYhTYxm+ZgBR/aJZTOv9vG1tABH38G1mUsq6nRZYcXj0Z1Etu8WYK99+0++4r8n6oecWF6f/afSQTVGer8P40N0jiO/fbHqqoirw0eLi9Erehn0LOZ5yqITa6uSf3U/13tUkecfNNpBN7d9t7A81KXRYjJeXbs2co1IJVB+3aC3SW81ArE1eOXz02YGQFF51N8tA77g7Ou6pJoUOs3S6EDm7trb8kGrVd2BIAKoAWruz/H33072I6OuiKrjFOqVacMjBDcdFVVVDMLNLYSO+e/v276v5v74bT7hprYtDL51B/DPRcEIAd8t9yqbtFkRERBAEt7jsLheWbl37spHce7Pl5XLC1FQ6MjLSsXo/vO3CewinxBkQ1VB3yJj/jcg11C+ay3d/zV1b3s6M7vZiEnIJBaBUGutKu9aHgtkxgGhpbV0O3Vyd+3Wt1X2ijffIStiaN/VUl5PdVIzsHQySe8i6w7EndUFt6/MfvI+lcL5oCcAAAAAASUVORK5CYII=",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACa0lEQVR42tVXPWtUQRQ95868fBAJWKhJCGw2hZVPC5t020TxD+wvkNT6B3QV7C0kjT9A0NXCUrtgEwgiJBARo5EQIkZkUUNMdt/ca/HekjUaRbM7welmmDdz5p57zrsXOOLBLn5vR/0Yh0rFA5BoESiVSgNmw4OqQzvr6/Pf9p1LAPqnM+Sfbs5fiqYbvpIl7k1ItpZHyumT0XJ6Y3wyTQs6FKi63gDYY32I5HGCEyJyUZyrBcOLscmzT0+W0imgHoCa/C7ShwJAMsDMzNA0DUGzLAPgSLnghM9GJ9OrwE3toKS7AMysONgEoAPpAUBDFgBzIv72SPnM3ZySqnSfgoND4wBAs1bLuWRmtJzWgHpo507vAbSVQHoNWUbK9bFyOo25uWx/Ykrvjc4EBNVsdnx8ahCoa2c+SO/9iWKqQcSfbiXb0/vzQeKYpAE0c9DL+byOyABIM6MC53MaENo0RAIAyTUrJzLZKedLtagAAMBI9iswlk+XowMoRrCYMvwhEcwsE3VfOhd9rPCDJFQbxwa2XxVK0JgyVJIG4uXKyspWca/FA2C5L5u5e3mdUIlqRAYRqoaGNPse5vqfCxEBWCYUIXBtY2PhU2HDFgeAoSkuSTSERxurS7OoVl1eJfVehgazlnjfp5otJIoZAIJ6XXtZDxhgAWaBJMX5REN44Jrh0traUuOg3uFQPkDSANO2zklxBGEaNlX11vt3i3c6HvrLEv1QABTo8+IEqgK1j0Ysmuh9JR9/WF3c7NC7drsxIQA7VTo34b0vB9v9uov+1423zz/vbfk54eL8dlHxXeg5/yYSVVeEmvgfx3ebIfH/k2UM3AAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABP0lEQVR42u2XP0sDQRDF35u5ixxKCiMWKVNoo5VgJxZ+hnyAtH4jIdhY5gvY2Asi+Afs5EyVw8qANno7Y5EgFgrJkYsI+5rdYvfNj7dTzCoqq6vYyxK024rRlgBDwxIlizJixTu+2dk9UscBALjzsXi6O/vm53UBCABrd3Z6oJ6SnJQiYaE8GeX3x9NzVgcAAaDV2l5Lm42c5DrMPwAnSFI0McN+kd9cAV0FBmEW02TOBDzLNC0nSRBECpAADO5mwZq1N5OI+i9vLKSEZXUzF9XUgj9WBIgAESACRIAIEAEiwL8F+GkmNLjXP5KR4oSvAAiAh6+VFEq9Q6kD0OHwduxAX0SVoglFVLSRupWX4e39euI5mPljolXyf315Pl9tbhhIwD0384ukDL2ieBjP+zVbtLjEWofJNEGd7isV/wRDX2FgiSiF5gAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABP0lEQVR42u2UvUpDQRCFz8xuROWCaKOE26RWK9E2FvoIeQHzBr6A4rPY5RGsUmiXRu3EmDQaBPGHgCB751gkaZL4U9ybJvvBNrPFnDnMGSASiUTmHflnLU/426ebwdD607QCgGmaLqmuLoooScvFDRElAHw4z9d2632aAAVg5crWEcWdgrbMMaV5WK8iZrTz3sPt8bC3CVBzQCMrV7YPoHoBEmRBm0DCOQ8L2clj5/oMqHrFTlsBgCL7AiGNXxioyP+BwWgZlIcDRU36MY0GUACRAlMnpNio4NFKCAA03sGLG8bECgqgiWiJCPeDQlUc0DUA2n+r3iQrz+vi/J5ACkHVOVp2idJCvf/y9Al0OWH1RmVz16lPQggAfH7Te0Ayy3qdtSugGUaxn/UVnOgj069hrcDeDfvrHEcikch88Q3w4a+Q0hzBOAAAAABJRU5ErkJggg==",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABXklEQVR42uWXPU4DMRBGv2/WWXoaCtLR0XCETc0xQIITUEAT5QjUFLlKcgZSpCTNRhQUSDQh6xmaBBAskF3bgGAky5J/9J4tWx4D/z1Y0yYoCklGHI+rX7oD/b5gMNDdvYMegJ55r0YG7QTNzEiamYoIzMxxsbwsy+ndim3uefRoJABU1Q5dJz9TA0gGL4+2qpnB+8V5We7cA1MBoADg3s0hHrRaVqq+qutvEgYYSSWZm6+O57PJcL3ylwP3dpKZgHQAHMiQkpEUimyZ2mk5mwxRFO41vFYgUhgApUhmXk/mN9dXKApXdwPkJ+EpBBrBYws0hscUaAWPJdAaHkMgCB4qEAwPEYgCbysQDd5GICq8qUB0eBOBJPBNBZLBNxFICv9KIDn8UwEDLTX8o4xIAaiI5Knh9QJkRsnEwx+lhtcnpYbO8nFxcbvO4b77I9Ht7m8nzheTv5JJ/ot/N54AMMk3WZk1w/QAAAAASUVORK5CYII=",
+            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABg0lEQVR42u2VMUsDQRCF38xuYm2KgCJCsBMDNgpWJ6JoZedfMPiDRP+CiK1ieYUgpLAQbZUgKgoRU1iY23kWd0FBJAletLkPFhZuZ+ftm905oKCgoOCfkV/EOkRRGh9XCRwaAP63cBm1A731nJyZWzKTFRXxMF7c31aOgTgBoABsFAIkGzZRq++LuoZ8+cIQzrQbNu/urtvZOuYtQAFwolbfU+cbFroB/EyizntjaJYSrLdal6+ZAA6y6QBsOQA2OT2/JOoaFpIEEIWI7w0L4V3VL3Q9tgEYosgNeqr+RE+pU95WBTCQ390TOtIM5Fr6MmLLT0Dv5gHl/iVlCUPWtT9xNa2lsfljDGECEcJdpK5FmqMDhwZAy+ycBkvO1XsP4h1gABBAdkVdycxenOguAEG8bKN4hpyamq2EsjtR9YtkmkNEYRbaZNh4vLlqDtML3JCNSDud57ex6viBM22bkSBbhB0pkp2Hm+vLYRtR3v8PxR8hiCKfOajZ/M+SFxQUFOTKB+yymFcEeIr0AAAAAElFTkSuQmCC"
     };
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -652,7 +653,7 @@ public class MainActivity extends Activity {
         try {
             return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
-            return "1.0.18";
+            return "1.0.19";
         }
     }
 
@@ -1696,8 +1697,9 @@ public class MainActivity extends Activity {
         int h = eraseMask.getHeight();
         float rx = radius;
         float ry = radius;
-        if (shape == 4) ry = radius * 0.62f;      // Oval
-        if (shape == 6) { rx = radius * 0.34f; ry = rx; } // Point brush
+        if (shape == 3) rx = radius * 0.30f;      // Thin Vertical
+        if (shape == 4) ry = radius * 0.30f;      // Thin Horizontal
+        if (shape == 6) { rx = radius * 0.30f; ry = rx; } // Point Brush
 
         int left = Math.max(0, (int)Math.floor(cx - rx - 2));
         int top = Math.max(0, (int)Math.floor(cy - ry - 2));
@@ -1734,34 +1736,62 @@ public class MainActivity extends Activity {
     private float brushShapeStrength(float dx, float dy, float radius, int shape) {
         if (radius <= 0f) return 0f;
 
-        if (shape == 1) { // Square
-            float d = Math.max(Math.abs(dx), Math.abs(dy)) / radius;
+        float ax = Math.abs(dx);
+        float ay = Math.abs(dy);
+
+        if (shape == 3) { // Thin Vertical
+            float nx = ax / Math.max(1f, radius * 0.30f);
+            float ny = ay / radius;
+            float d = Math.max(nx, ny);
             if (d >= 1f) return 0f;
-            return d <= 0.82f ? 1f : smoothStep(1f, 0.82f, d);
+            if (d <= 0.78f) return 1f;
+            float u = 1f - (d - 0.78f) / 0.22f;
+            return Math.max(0f, u * u * (3f - 2f * u));
+        }
+
+        if (shape == 4) { // Thin Horizontal
+            float nx = ax / radius;
+            float ny = ay / Math.max(1f, radius * 0.30f);
+            float d = Math.max(nx, ny);
+            if (d >= 1f) return 0f;
+            if (d <= 0.78f) return 1f;
+            float u = 1f - (d - 0.78f) / 0.22f;
+            return Math.max(0f, u * u * (3f - 2f * u));
+        }
+
+        if (shape == 5) { // Corner / Wedge
+            float nx = (dx + radius) / Math.max(1f, radius * 2f);
+            float ny = (dy + radius) / Math.max(1f, radius * 2f);
+            if (nx < 0f || ny < 0f || nx > 1f || ny > 1f || nx + ny > 1.06f) return 0f;
+            float diagonalRoom = 1.06f - (nx + ny);
+            return diagonalRoom > 0.16f ? 1f : smoothStep(0f, 0.16f, diagonalRoom);
         }
 
         float rx = radius;
         float ry = radius;
-        if (shape == 4) ry = radius * 0.62f; // Oval
-        if (shape == 6) { rx = radius * 0.34f; ry = rx; } // Point
+        if (shape == 6) { rx = radius * 0.30f; ry = rx; } // Point Brush
         float norm = (float)Math.sqrt((dx * dx) / Math.max(1f, rx * rx)
                 + (dy * dy) / Math.max(1f, ry * ry));
         if (norm >= 1f) return 0f;
 
-        if (shape == 5) { // Edge Brush: half-round stamp for boundary cleanup
-            if (dx < -radius * 0.08f) return 0f;
-            return norm <= 0.78f ? 1f : smoothStep(1f, 0.78f, norm);
-        }
-        if (shape == 3) return 1f; // Hard Round
-        if (shape == 2) { // Soft Round
-            if (norm <= 0.42f) return 1f;
-            float u = 1f - (norm - 0.42f) / 0.58f;
+        if (shape == 2) { // Half-Circle Edge: straight cut on one side
+            if (dx < -radius * 0.03f) return 0f;
+            if (norm <= 0.78f) return 1f;
+            float u = 1f - (norm - 0.78f) / 0.22f;
             return Math.max(0f, u * u * (3f - 2f * u));
         }
 
-        // Circle / Oval / Point: medium feather.
-        if (norm <= 0.72f) return 1f;
-        float u = 1f - (norm - 0.72f) / 0.28f;
+        if (shape == 1) return 1f; // Hard Round
+
+        if (shape == 0) { // Soft Round
+            if (norm <= 0.36f) return 1f;
+            float u = 1f - (norm - 0.36f) / 0.64f;
+            return Math.max(0f, u * u * (3f - 2f * u));
+        }
+
+        // Point Brush: small, precise, gently feathered.
+        if (norm <= 0.70f) return 1f;
+        float u = 1f - (norm - 0.70f) / 0.30f;
         return Math.max(0f, u * u * (3f - 2f * u));
     }
 
