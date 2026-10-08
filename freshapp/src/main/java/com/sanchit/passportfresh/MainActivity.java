@@ -92,6 +92,7 @@ public class MainActivity extends Activity {
     private ImageView processingLogo;
     private View processingShade;
     private LensView magnifierLens;
+    private BrushCursorView brushCursor;
     private AnimatorSet processingAnimator;
     private SeekBar brightnessSeek;
     private SeekBar fairnessSeek;
@@ -204,6 +205,10 @@ public class MainActivity extends Activity {
         imageView.setScaleType(ImageView.ScaleType.MATRIX);
         imageView.setBackgroundColor(0xFFE4ECEF);
         preview.addView(imageView, new FrameLayout.LayoutParams(-1, -1));
+
+        brushCursor = new BrushCursorView(this);
+        brushCursor.setVisibility(View.GONE);
+        preview.addView(brushCursor, new FrameLayout.LayoutParams(-1, -1));
 
         magnifierLens = new LensView(this);
         magnifierLens.setVisibility(View.GONE);
@@ -1423,6 +1428,7 @@ public class MainActivity extends Activity {
             status.setText("Brush ON • real stroke • finger जितना चलाएँगे उतना ही remove होगा");
         } else {
             brushButton.setText("BRUSH");
+            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
             status.setText("Brush OFF");
@@ -1437,6 +1443,7 @@ public class MainActivity extends Activity {
         if (colorCleanOn) {
             brushModeOn = false;
             brushButton.setText("BRUSH");
+            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
         }
@@ -1594,6 +1601,7 @@ public class MainActivity extends Activity {
             brushStrokeChanged = false;
             gestureWasScaling = false;
             hideLens();
+            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             return true;
         }
 
@@ -1635,6 +1643,14 @@ public class MainActivity extends Activity {
         magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
                 brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
                 brushRing);
+
+        if (brushModeOn && brushCursor != null) {
+            brushCursor.setBrush(viewX, viewY, currentBrushScreenRadius() * 2f);
+            brushCursor.setVisibility(View.VISIBLE);
+            brushCursor.bringToFront();
+        } else if (brushCursor != null) {
+            brushCursor.setVisibility(View.GONE);
+        }
 
         int lensSize = dp(132);
         int margin = dp(8);
@@ -2391,6 +2407,97 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static class BrushCursorView extends View {
+        private final Paint handlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint metalPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bristlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint outlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path bristlePath = new Path();
+        private float tipX;
+        private float tipY;
+        private float brushWidth = 16f;
+
+        BrushCursorView(android.content.Context context) {
+            super(context);
+            setClickable(false);
+            setFocusable(false);
+            setWillNotDraw(false);
+            handlePaint.setStyle(Paint.Style.STROKE);
+            handlePaint.setStrokeCap(Paint.Cap.ROUND);
+            metalPaint.setStyle(Paint.Style.STROKE);
+            metalPaint.setStrokeCap(Paint.Cap.SQUARE);
+            bristlePaint.setStyle(Paint.Style.FILL);
+            outlinePaint.setStyle(Paint.Style.STROKE);
+            outlinePaint.setStrokeWidth(1.8f);
+            outlinePaint.setColor(0xEE111111);
+        }
+
+        void setBrush(float x, float y, float width) {
+            tipX = x;
+            tipY = y;
+            brushWidth = Math.max(8f, Math.min(52f, width));
+            invalidate();
+        }
+
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            float w = brushWidth;
+            float angle = -48f;
+            double rad = Math.toRadians(angle);
+            float ux = (float)Math.cos(rad);
+            float uy = (float)Math.sin(rad);
+            float nx = -uy;
+            float ny = ux;
+
+            // Bristle tip is the exact erase point. Brush extends away from the finger.
+            float bristleLen = Math.max(16f, w * 1.15f);
+            float ferruleLen = Math.max(13f, w * 0.82f);
+            float handleLen = Math.max(34f, w * 2.0f);
+
+            float b0x = tipX;
+            float b0y = tipY;
+            float b1x = tipX - ux * bristleLen;
+            float b1y = tipY - uy * bristleLen;
+
+            float halfTip = Math.max(2.5f, w * 0.22f);
+            float halfBase = Math.max(4f, w * 0.42f);
+
+            bristlePath.reset();
+            bristlePath.moveTo(b0x + nx * halfTip, b0y + ny * halfTip);
+            bristlePath.lineTo(b0x - nx * halfTip, b0y - ny * halfTip);
+            bristlePath.lineTo(b1x - nx * halfBase, b1y - ny * halfBase);
+            bristlePath.lineTo(b1x + nx * halfBase, b1y + ny * halfBase);
+            bristlePath.close();
+
+            bristlePaint.setColor(0xCC6D4C35);
+            canvas.drawPath(bristlePath, bristlePaint);
+            canvas.drawPath(bristlePath, outlinePaint);
+
+            float f1x = b1x - ux * ferruleLen;
+            float f1y = b1y - uy * ferruleLen;
+            metalPaint.setStrokeWidth(Math.max(6f, w * 0.62f));
+            metalPaint.setColor(0xFFD5D9DE);
+            canvas.drawLine(b1x, b1y, f1x, f1y, metalPaint);
+            outlinePaint.setStrokeWidth(1.5f);
+            canvas.drawLine(b1x + nx * w * 0.34f, b1y + ny * w * 0.34f,
+                    f1x + nx * w * 0.34f, f1y + ny * w * 0.34f, outlinePaint);
+            canvas.drawLine(b1x - nx * w * 0.34f, b1y - ny * w * 0.34f,
+                    f1x - nx * w * 0.34f, f1y - ny * w * 0.34f, outlinePaint);
+
+            float h1x = f1x - ux * handleLen;
+            float h1y = f1y - uy * handleLen;
+            handlePaint.setStrokeWidth(Math.max(7f, w * 0.56f));
+            handlePaint.setColor(0xFF7C4F2D);
+            canvas.drawLine(f1x, f1y, h1x, h1y, handlePaint);
+
+            // Tiny contact mark shows actual stroke width without a round cursor.
+            outlinePaint.setStrokeWidth(1.8f);
+            outlinePaint.setColor(0xEE111111);
+            canvas.drawLine(tipX - nx * w * 0.45f, tipY - ny * w * 0.45f,
+                    tipX + nx * w * 0.45f, tipY + ny * w * 0.45f, outlinePaint);
+        }
+    }
+
     private static class LensView extends View {
         static final int MODE_BRUSH = 1;
         static final int MODE_COLOR_CLEAN = 2;
@@ -2460,25 +2567,52 @@ public class MainActivity extends Activity {
             canvas.drawCircle(cx, cy, radius, borderPaint);
 
             if (mode == MODE_BRUSH && brushWidthPx > 0f) {
-                float half = Math.min(radius * 0.44f, brushWidthPx);
-                float len = Math.min(radius * 0.92f, Math.max(22f, half * 2.8f));
+                float w = Math.min(radius * 0.54f, Math.max(10f, brushWidthPx));
+                float angle = -48f;
+                double rad = Math.toRadians(angle);
+                float ux = (float)Math.cos(rad);
+                float uy = (float)Math.sin(rad);
+                float nx = -uy;
+                float ny = ux;
 
-                // Real brush-nib preview: a short strip, never a round cursor/stamp.
-                RectF nib = new RectF(cx - len * 0.5f, cy - half,
-                        cx + len * 0.5f, cy + half);
+                float tipX = cx;
+                float tipY = cy;
+                float bristleLen = Math.max(16f, w * 1.05f);
+                float b1x = tipX - ux * bristleLen;
+                float b1y = tipY - uy * bristleLen;
+
+                Path bp = new Path();
+                float halfTip = Math.max(2.5f, w * 0.20f);
+                float halfBase = Math.max(4f, w * 0.38f);
+                bp.moveTo(tipX + nx * halfTip, tipY + ny * halfTip);
+                bp.lineTo(tipX - nx * halfTip, tipY - ny * halfTip);
+                bp.lineTo(b1x - nx * halfBase, b1y - ny * halfBase);
+                bp.lineTo(b1x + nx * halfBase, b1y + ny * halfBase);
+                bp.close();
 
                 guidePaint.setStyle(Paint.Style.FILL);
-                guidePaint.setColor(0x224F8F8B);
-                canvas.drawRect(nib, guidePaint);
+                guidePaint.setColor(0xCC6D4C35);
+                canvas.drawPath(bp, guidePaint);
 
                 guidePaint.setStyle(Paint.Style.STROKE);
-                guidePaint.setStrokeWidth(4.5f);
-                guidePaint.setColor(0xEEFFFFFF);
-                canvas.drawRect(nib, guidePaint);
+                guidePaint.setStrokeWidth(Math.max(6f, w * 0.58f));
+                guidePaint.setColor(0xFFD5D9DE);
+                float fx = b1x - ux * Math.max(12f, w * 0.72f);
+                float fy = b1y - uy * Math.max(12f, w * 0.72f);
+                canvas.drawLine(b1x, b1y, fx, fy, guidePaint);
 
-                guidePaint.setStrokeWidth(2.0f);
+                guidePaint.setStrokeCap(Paint.Cap.ROUND);
+                guidePaint.setStrokeWidth(Math.max(7f, w * 0.52f));
+                guidePaint.setColor(0xFF7C4F2D);
+                canvas.drawLine(fx, fy,
+                        fx - ux * Math.max(28f, w * 1.55f),
+                        fy - uy * Math.max(28f, w * 1.55f), guidePaint);
+                guidePaint.setStrokeCap(Paint.Cap.BUTT);
+
+                guidePaint.setStrokeWidth(1.8f);
                 guidePaint.setColor(0xEE111111);
-                canvas.drawRect(nib, guidePaint);
+                canvas.drawLine(tipX - nx * w * 0.42f, tipY - ny * w * 0.42f,
+                        tipX + nx * w * 0.42f, tipY + ny * w * 0.42f, guidePaint);
             } else {
                 guidePaint.setStyle(Paint.Style.STROKE);
                 guidePaint.setStrokeWidth(2.5f);
@@ -2501,6 +2635,7 @@ public class MainActivity extends Activity {
         resultBitmap = null;
         eraseMask = null;
         personMask = null;
+        if (brushCursor != null) brushCursor.setVisibility(View.GONE);
         clearHistory();
     }
 
