@@ -123,7 +123,7 @@ public class MainActivity extends Activity {
     private long lastBrushRenderMs = 0L;
     private TextView toolSeekLabel;
     private int colorToleranceValue = 22;
-    private int brushSizeValue = 30;
+    private int brushSizeValue = 18;
     private int selectedBackgroundColor = BLUE;
     private LinearLayout backgroundColorRow;
     private volatile boolean destroyed;
@@ -1422,7 +1422,7 @@ public class MainActivity extends Activity {
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • finger चलाकर जहाँ चाहें smooth remove करें");
+            status.setText("Brush ON • finger चलाकर thin smooth erase करें • tap से erase नहीं होगा");
         } else {
             brushButton.setText("BRUSH");
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
@@ -1489,11 +1489,9 @@ public class MainActivity extends Activity {
                 pushUndo();
                 clearDeque(redoMasks);
                 brushStrokeStarted = true;
-                drawBrushSegment(e.getX(), e.getY(), e.getX(), e.getY());
                 lastBrushRenderMs = SystemClock.uptimeMillis();
                 showLens(e.getX(), e.getY());
                 status.setText("Brush • finger चलाकर remove करें");
-                renderResult();
                 return true;
             }
 
@@ -1514,13 +1512,18 @@ public class MainActivity extends Activity {
             if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
                 float x = e.getX();
                 float y = e.getY();
-                drawBrushSegment(lastBrushViewX, lastBrushViewY, x, y);
-                lastBrushViewX = x;
-                lastBrushViewY = y;
+                float move = (float)Math.hypot(x - lastBrushViewX, y - lastBrushViewY);
+
+                // A real brush removes only while the finger is moving.
+                if (move >= dp(1)) {
+                    drawBrushSegment(lastBrushViewX, lastBrushViewY, x, y);
+                    lastBrushViewX = x;
+                    lastBrushViewY = y;
+                }
                 showLens(x, y);
 
                 long now = SystemClock.uptimeMillis();
-                if (now - lastBrushRenderMs >= 120L) {
+                if (brushStrokeChanged && now - lastBrushRenderMs >= 90L) {
                     lastBrushRenderMs = now;
                     renderResult();
                 }
@@ -1547,7 +1550,10 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
-                drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
+                float endMove = (float)Math.hypot(e.getX() - lastBrushViewX, e.getY() - lastBrushViewY);
+                if (endMove >= dp(1)) {
+                    drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
+                }
                 brushStrokeStarted = false;
 
                 if (brushStrokeChanged) {
@@ -1594,7 +1600,8 @@ public class MainActivity extends Activity {
     private float currentBrushScreenRadius() {
         float density = getResources().getDisplayMetrics().density;
         float t = Math.max(0f, Math.min(1f, brushSizeValue / 100f));
-        return density * (4f + 58f * t);
+        // Precise brush radius: about 3dp..26dp instead of the old oversized 4dp..62dp.
+        return density * (3f + 23f * t);
     }
 
     private float currentImageScale() {
@@ -1669,7 +1676,7 @@ public class MainActivity extends Activity {
 
             // Dense spacing produces one continuous stroke with no dotted gaps.
             int steps = Math.max(1,
-                    (int)Math.ceil(distance / Math.max(1f, radius * 0.22f)));
+                    (int)Math.ceil(distance / Math.max(1f, radius * 0.14f)));
 
             boolean changed = false;
             for (int i = 0; i <= steps; i++) {
@@ -1698,7 +1705,7 @@ public class MainActivity extends Activity {
         eraseMask.getPixels(px, 0, rw, left, top, rw, rh);
 
         // Normal soft round brush: solid center + feathered outside edge.
-        float inner = radius * 0.62f;
+        float inner = radius * 0.28f;
         float feather = Math.max(1f, radius - inner);
         boolean changed = false;
 
