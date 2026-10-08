@@ -1420,7 +1420,7 @@ public class MainActivity extends Activity {
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • position करें • finger छोड़ते ही सिर्फ उसी जगह remove होगा");
+            status.setText("Brush ON • real stroke • finger जितना चलाएँगे उतना ही remove होगा");
         } else {
             brushButton.setText("BRUSH");
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
@@ -1484,11 +1484,14 @@ public class MainActivity extends Activity {
             brushStrokeChanged = false;
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
+                pushUndo();
+                clearDeque(redoMasks);
                 brushStrokeStarted = true;
+                brushStrokeChanged = false;
                 lastBrushViewX = e.getX();
                 lastBrushViewY = e.getY();
                 showLens(e.getX(), e.getY());
-                status.setText("Brush position करें • finger छोड़ते ही सिर्फ उसी जगह remove होगा");
+                status.setText("Brush • finger चलाकर real stroke erase करें");
                 return true;
             }
 
@@ -1507,10 +1510,19 @@ public class MainActivity extends Activity {
             }
 
             if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
-                // Position-only brush: dragging NEVER erases.
-                lastBrushViewX = e.getX();
-                lastBrushViewY = e.getY();
-                showLens(lastBrushViewX, lastBrushViewY);
+                float x = e.getX();
+                float y = e.getY();
+                float move = (float)Math.hypot(x - lastBrushViewX, y - lastBrushViewY);
+
+                if (move >= dp(1)) {
+                    boolean changed = applyBrushStrokeSegment(
+                            lastBrushViewX, lastBrushViewY, x, y);
+                    if (changed) brushStrokeChanged = true;
+                    lastBrushViewX = x;
+                    lastBrushViewY = y;
+                }
+
+                showLens(x, y);
                 return true;
             }
 
@@ -1534,26 +1546,30 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
+                float x = e.getX();
+                float y = e.getY();
+                float move = (float)Math.hypot(x - lastBrushViewX, y - lastBrushViewY);
+                if (move >= dp(1)) {
+                    boolean changed = applyBrushStrokeSegment(
+                            lastBrushViewX, lastBrushViewY, x, y);
+                    if (changed) brushStrokeChanged = true;
+                }
+
                 brushStrokeStarted = false;
-                lastBrushViewX = e.getX();
-                lastBrushViewY = e.getY();
-                showLens(lastBrushViewX, lastBrushViewY);
+                hideLens();
 
-                pushUndo();
-                clearDeque(redoMasks);
-                boolean changed = applyBrushStampAt(lastBrushViewX, lastBrushViewY);
-
-                if (changed) {
+                if (brushStrokeChanged) {
                     updateHistoryButtons();
-                    status.setText("Brush applied • सिर्फ छोड़ी गई जगह remove हुई");
+                    status.setText("Brush stroke applied");
                     renderResult();
                 } else if (!undoMasks.isEmpty()) {
+                    // A simple tap without movement must not punch a round hole.
                     undoMasks.pop();
                     updateHistoryButtons();
+                    status.setText("Brush • stroke चलाएँ");
                 }
 
                 brushStrokeChanged = false;
-                hideLens();
                 gestureWasScaling = false;
                 return true;
             }
@@ -1646,7 +1662,8 @@ public class MainActivity extends Activity {
         if (magnifierLens != null) magnifierLens.setVisibility(View.GONE);
     }
 
-    private boolean applyBrushStampAt(float viewX, float viewY) {
+    private boolean applyBrushStrokeSegment(float viewX1, float viewY1,
+                                            float viewX2, float viewY2) {
         try {
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return false;
@@ -1654,23 +1671,32 @@ public class MainActivity extends Activity {
             Matrix inv = new Matrix();
             if (!photoMatrix.invert(inv)) return false;
 
-            float[] point = new float[]{viewX, viewY};
-            inv.mapPoints(point);
+            float[] pts = new float[]{viewX1, viewY1, viewX2, viewY2};
+            inv.mapPoints(pts);
 
-            float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
-            return paintSoftErasePoint(point[0], point[1], radius);
+            float halfWidth = Math.max(1.5f,
+                    currentBrushScreenRadius() / currentImageScale());
+            return paintSoftBrushSegment(pts[0], pts[1], pts[2], pts[3], halfWidth);
         } catch (Throwable ignored) {
             return false;
         }
     }
 
-    private boolean paintSoftErasePoint(float cx, float cy, float radius) {
+    private boolean paintSoftBrushSegment(float x1, float y1, float x2, float y2,
+                                          float halfWidth) {
         int w = eraseMask.getWidth();
         int h = eraseMask.getHeight();
-        int left = Math.max(0, (int)Math.floor(cx - radius));
-        int top = Math.max(0, (int)Math.floor(cy - radius));
-        int right = Math.min(w - 1, (int)Math.ceil(cx + radius));
-        int bottom = Math.min(h - 1, (int)Math.ceil(cy + radius));
+
+        float vx = x2 - x1;
+        float vy = y2 - y1;
+        float lenSq = vx * vx + vy * vy;
+        if (lenSq < 0.25f) return false;
+
+        float margin = halfWidth + 2f;
+        int left = Math.max(0, (int)Math.floor(Math.min(x1, x2) - margin));
+        int top = Math.max(0, (int)Math.floor(Math.min(y1, y2) - margin));
+        int right = Math.min(w - 1, (int)Math.ceil(Math.max(x1, x2) + margin));
+        int bottom = Math.min(h - 1, (int)Math.ceil(Math.max(y1, y2) + margin));
         if (right < left || bottom < top) return false;
 
         int rw = right - left + 1;
@@ -1678,23 +1704,34 @@ public class MainActivity extends Activity {
         int[] px = new int[rw * rh];
         eraseMask.getPixels(px, 0, rw, left, top, rw, rh);
 
-        // Normal soft round brush: solid center + feathered outside edge.
-        float inner = radius * 0.28f;
-        float feather = Math.max(1f, radius - inner);
+        // Real brush strip: full-strength center band with soft side feather.
+        // Finite projection t=0..1 gives line/brush behavior instead of circular stamps.
+        float inner = halfWidth * 0.48f;
+        float feather = Math.max(0.75f, halfWidth - inner);
         boolean changed = false;
 
         for (int yy = 0; yy < rh; yy++) {
             float py = top + yy + 0.5f;
             for (int xx = 0; xx < rw; xx++) {
                 float pxX = left + xx + 0.5f;
-                float d = (float)Math.hypot(pxX - cx, py - cy);
-                if (d > radius) continue;
+
+                float wx = pxX - x1;
+                float wy = py - y1;
+                float t = (wx * vx + wy * vy) / lenSq;
+
+                // Square/brush-like ends: nothing outside the actual moved segment.
+                if (t < 0f || t > 1f) continue;
+
+                float cx = x1 + t * vx;
+                float cy = y1 + t * vy;
+                float side = (float)Math.hypot(pxX - cx, py - cy);
+                if (side > halfWidth) continue;
 
                 float strength;
-                if (d <= inner) {
+                if (side <= inner) {
                     strength = 1f;
                 } else {
-                    float u = 1f - (d - inner) / feather;
+                    float u = 1f - (side - inner) / feather;
                     u = Math.max(0f, Math.min(1f, u));
                     strength = u * u * (3f - 2f * u);
                 }
@@ -2368,7 +2405,7 @@ public class MainActivity extends Activity {
         private float sourceY;
         private float sourceRadius = 20f;
         private int mode = MODE_BRUSH;
-        private float brushRingPx;
+        private float brushWidthPx;
 
         LensView(android.content.Context context) {
             super(context);
@@ -2378,13 +2415,13 @@ public class MainActivity extends Activity {
         }
 
         void setLens(Bitmap bitmap, float x, float y, float radius, int lensMode,
-                     float brushRing) {
+                     float brushWidth) {
             source = bitmap;
             sourceX = x;
             sourceY = y;
             sourceRadius = Math.max(2f, radius);
             mode = lensMode;
-            brushRingPx = brushRing;
+            brushWidthPx = brushWidth;
             invalidate();
         }
 
@@ -2422,22 +2459,26 @@ public class MainActivity extends Activity {
             borderPaint.setColor(accent);
             canvas.drawCircle(cx, cy, radius, borderPaint);
 
-            if (mode == MODE_BRUSH && brushRingPx > 0f) {
-                float rr = Math.min(radius * 0.72f, brushRingPx);
+            if (mode == MODE_BRUSH && brushWidthPx > 0f) {
+                float half = Math.min(radius * 0.44f, brushWidthPx);
+                float len = Math.min(radius * 0.92f, Math.max(22f, half * 2.8f));
 
-                // Show the exact single soft round brush footprint.
+                // Real brush-nib preview: a short strip, never a round cursor/stamp.
+                RectF nib = new RectF(cx - len * 0.5f, cy - half,
+                        cx + len * 0.5f, cy + half);
+
                 guidePaint.setStyle(Paint.Style.FILL);
                 guidePaint.setColor(0x224F8F8B);
-                canvas.drawCircle(cx, cy, rr, guidePaint);
+                canvas.drawRect(nib, guidePaint);
 
                 guidePaint.setStyle(Paint.Style.STROKE);
-                guidePaint.setStrokeWidth(5f);
+                guidePaint.setStrokeWidth(4.5f);
                 guidePaint.setColor(0xEEFFFFFF);
-                canvas.drawCircle(cx, cy, rr, guidePaint);
+                canvas.drawRect(nib, guidePaint);
 
-                guidePaint.setStrokeWidth(2.2f);
+                guidePaint.setStrokeWidth(2.0f);
                 guidePaint.setColor(0xEE111111);
-                canvas.drawCircle(cx, cy, rr, guidePaint);
+                canvas.drawRect(nib, guidePaint);
             } else {
                 guidePaint.setStyle(Paint.Style.STROKE);
                 guidePaint.setStrokeWidth(2.5f);
