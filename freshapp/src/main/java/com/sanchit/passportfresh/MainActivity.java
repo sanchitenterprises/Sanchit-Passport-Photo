@@ -27,7 +27,6 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
-import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -120,7 +119,6 @@ public class MainActivity extends Activity {
     private boolean brushStrokeChanged = false;
     private float lastBrushViewX;
     private float lastBrushViewY;
-    private long lastBrushRenderMs = 0L;
     private TextView toolSeekLabel;
     private int colorToleranceValue = 22;
     private int brushSizeValue = 18;
@@ -1422,7 +1420,7 @@ public class MainActivity extends Activity {
             brushButton.setText("BRUSH ✓");
             if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
             brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • finger चलाकर thin smooth erase करें • tap से erase नहीं होगा");
+            status.setText("Brush ON • position करें • finger छोड़ते ही सिर्फ उसी जगह remove होगा");
         } else {
             brushButton.setText("BRUSH");
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
@@ -1486,12 +1484,11 @@ public class MainActivity extends Activity {
             brushStrokeChanged = false;
 
             if (brushModeOn && !compareOriginal && resultBitmap != null) {
-                pushUndo();
-                clearDeque(redoMasks);
                 brushStrokeStarted = true;
-                lastBrushRenderMs = SystemClock.uptimeMillis();
+                lastBrushViewX = e.getX();
+                lastBrushViewY = e.getY();
                 showLens(e.getX(), e.getY());
-                status.setText("Brush • finger चलाकर remove करें");
+                status.setText("Brush position करें • finger छोड़ते ही सिर्फ उसी जगह remove होगा");
                 return true;
             }
 
@@ -1510,23 +1507,10 @@ public class MainActivity extends Activity {
             }
 
             if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
-                float x = e.getX();
-                float y = e.getY();
-                float move = (float)Math.hypot(x - lastBrushViewX, y - lastBrushViewY);
-
-                // A real brush removes only while the finger is moving.
-                if (move >= dp(1)) {
-                    drawBrushSegment(lastBrushViewX, lastBrushViewY, x, y);
-                    lastBrushViewX = x;
-                    lastBrushViewY = y;
-                }
-                showLens(x, y);
-
-                long now = SystemClock.uptimeMillis();
-                if (brushStrokeChanged && now - lastBrushRenderMs >= 90L) {
-                    lastBrushRenderMs = now;
-                    renderResult();
-                }
+                // Position-only brush: dragging NEVER erases.
+                lastBrushViewX = e.getX();
+                lastBrushViewY = e.getY();
+                showLens(lastBrushViewX, lastBrushViewY);
                 return true;
             }
 
@@ -1550,15 +1534,18 @@ public class MainActivity extends Activity {
 
         if (action == MotionEvent.ACTION_UP) {
             if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
-                float endMove = (float)Math.hypot(e.getX() - lastBrushViewX, e.getY() - lastBrushViewY);
-                if (endMove >= dp(1)) {
-                    drawBrushSegment(lastBrushViewX, lastBrushViewY, e.getX(), e.getY());
-                }
                 brushStrokeStarted = false;
+                lastBrushViewX = e.getX();
+                lastBrushViewY = e.getY();
+                showLens(lastBrushViewX, lastBrushViewY);
 
-                if (brushStrokeChanged) {
+                pushUndo();
+                clearDeque(redoMasks);
+                boolean changed = applyBrushStampAt(lastBrushViewX, lastBrushViewY);
+
+                if (changed) {
                     updateHistoryButtons();
-                    status.setText("Brush applied");
+                    status.setText("Brush applied • सिर्फ छोड़ी गई जगह remove हुई");
                     renderResult();
                 } else if (!undoMasks.isEmpty()) {
                     undoMasks.pop();
@@ -1600,8 +1587,8 @@ public class MainActivity extends Activity {
     private float currentBrushScreenRadius() {
         float density = getResources().getDisplayMetrics().density;
         float t = Math.max(0f, Math.min(1f, brushSizeValue / 100f));
-        // Precise brush radius: about 3dp..26dp instead of the old oversized 4dp..62dp.
-        return density * (3f + 23f * t);
+        // Precise release-point brush radius for hair/ear edge cleanup.
+        return density * (2.5f + 15.5f * t);
     }
 
     private float currentImageScale() {
@@ -1659,34 +1646,21 @@ public class MainActivity extends Activity {
         if (magnifierLens != null) magnifierLens.setVisibility(View.GONE);
     }
 
-    private void drawBrushSegment(float vx1, float vy1, float vx2, float vy2) {
+    private boolean applyBrushStampAt(float viewX, float viewY) {
         try {
             if (eraseMask == null) createEmptyEraseMask();
-            if (eraseMask == null) return;
+            if (eraseMask == null) return false;
 
             Matrix inv = new Matrix();
-            if (!photoMatrix.invert(inv)) return;
+            if (!photoMatrix.invert(inv)) return false;
 
-            float[] pts = new float[]{vx1, vy1, vx2, vy2};
-            inv.mapPoints(pts);
+            float[] point = new float[]{viewX, viewY};
+            inv.mapPoints(point);
 
-            float x1 = pts[0], y1 = pts[1], x2 = pts[2], y2 = pts[3];
-            float distance = (float)Math.hypot(x2 - x1, y2 - y1);
             float radius = Math.max(2f, currentBrushScreenRadius() / currentImageScale());
-
-            // Dense spacing produces one continuous stroke with no dotted gaps.
-            int steps = Math.max(1,
-                    (int)Math.ceil(distance / Math.max(1f, radius * 0.14f)));
-
-            boolean changed = false;
-            for (int i = 0; i <= steps; i++) {
-                float t = i / (float)steps;
-                float x = x1 + (x2 - x1) * t;
-                float y = y1 + (y2 - y1) * t;
-                if (paintSoftErasePoint(x, y, radius)) changed = true;
-            }
-            if (changed) brushStrokeChanged = true;
+            return paintSoftErasePoint(point[0], point[1], radius);
         } catch (Throwable ignored) {
+            return false;
         }
     }
 
