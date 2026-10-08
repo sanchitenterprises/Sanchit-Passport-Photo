@@ -118,6 +118,7 @@ public class MainActivity extends Activity {
     private boolean colorCleanOn = false;
     private boolean brushStrokeStarted = false;
     private boolean brushStrokeChanged = false;
+    private boolean brushFinalizing = false;
     private float lastBrushViewX;
     private float lastBrushViewY;
     private TextView toolSeekLabel;
@@ -862,7 +863,7 @@ public class MainActivity extends Activity {
         final int backgroundColor = selectedBackgroundColor;
         final Bitmap localErase = eraseMask == null ? null : eraseMask.copy(Bitmap.Config.ALPHA_8, false);
         final int token = ++renderToken;
-        final boolean quietBrushRender = brushModeOn && brushStrokeStarted;
+        final boolean quietBrushRender = brushModeOn && (brushStrokeStarted || brushFinalizing);
 
         if (!quietBrushRender) setBusy(true, "Background तैयार हो रहा है…");
 
@@ -1093,7 +1094,16 @@ public class MainActivity extends Activity {
                     compareOriginal = false;
                     imageView.setImageBitmap(resultBitmap);
                     compareButton.setText("COMPARE");
-                    if (!quietBrushRender) setBusy(false, "Ready • Background applied");
+                    if (brushFinalizing) {
+                        brushFinalizing = false;
+                        if (brushCursor != null) {
+                            brushCursor.clearTrail();
+                            brushCursor.setVisibility(View.GONE);
+                        }
+                        if (status != null) status.setText("Brush stroke applied");
+                    } else if (!quietBrushRender) {
+                        setBusy(false, "Ready • Background applied");
+                    }
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
@@ -1428,7 +1438,10 @@ public class MainActivity extends Activity {
             status.setText("Brush ON • real stroke • finger जितना चलाएँगे उतना ही remove होगा");
         } else {
             brushButton.setText("BRUSH");
-            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
+            if (brushCursor != null) {
+                brushCursor.clearTrail();
+                brushCursor.setVisibility(View.GONE);
+            }
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
             status.setText("Brush OFF");
@@ -1468,8 +1481,15 @@ public class MainActivity extends Activity {
         if (action == MotionEvent.ACTION_POINTER_DOWN) {
             // Two fingers are reserved for normal pinch zoom. Finish any active brush stroke.
             gestureWasScaling = true;
-            if (brushStrokeStarted && brushStrokeChanged) renderResult();
-            brushStrokeStarted = false;
+            if (brushStrokeStarted && brushStrokeChanged) {
+                brushStrokeStarted = false;
+                brushFinalizing = true;
+                if (brushCursor != null) brushCursor.finishStroke();
+                renderResult();
+            } else {
+                brushStrokeStarted = false;
+                if (brushCursor != null) brushCursor.clearTrail();
+            }
             hideLens();
             return true;
         }
@@ -1497,8 +1517,12 @@ public class MainActivity extends Activity {
                 brushStrokeChanged = false;
                 lastBrushViewX = e.getX();
                 lastBrushViewY = e.getY();
+                if (brushCursor != null) {
+                    brushCursor.startStroke(e.getX(), e.getY(),
+                            currentBrushScreenRadius() * 2f, selectedBackgroundColor);
+                }
                 showLens(e.getX(), e.getY());
-                status.setText("Brush • finger चलाकर real stroke erase करें");
+                status.setText("Brush • live erase");
                 return true;
             }
 
@@ -1524,7 +1548,13 @@ public class MainActivity extends Activity {
                 if (move >= dp(1)) {
                     boolean changed = applyBrushStrokeSegment(
                             lastBrushViewX, lastBrushViewY, x, y);
-                    if (changed) brushStrokeChanged = true;
+                    if (changed) {
+                        brushStrokeChanged = true;
+                        if (brushCursor != null) {
+                            brushCursor.addStroke(x, y,
+                                    currentBrushScreenRadius() * 2f, selectedBackgroundColor);
+                        }
+                    }
                     lastBrushViewX = x;
                     lastBrushViewY = y;
                 }
@@ -1559,7 +1589,13 @@ public class MainActivity extends Activity {
                 if (move >= dp(1)) {
                     boolean changed = applyBrushStrokeSegment(
                             lastBrushViewX, lastBrushViewY, x, y);
-                    if (changed) brushStrokeChanged = true;
+                    if (changed) {
+                        brushStrokeChanged = true;
+                        if (brushCursor != null) {
+                            brushCursor.addStroke(x, y,
+                                    currentBrushScreenRadius() * 2f, selectedBackgroundColor);
+                        }
+                    }
                 }
 
                 brushStrokeStarted = false;
@@ -1567,12 +1603,18 @@ public class MainActivity extends Activity {
 
                 if (brushStrokeChanged) {
                     updateHistoryButtons();
-                    status.setText("Brush stroke applied");
+                    brushFinalizing = true;
+                    if (brushCursor != null) brushCursor.finishStroke();
+                    status.setText("Brush • finalizing");
                     renderResult();
                 } else if (!undoMasks.isEmpty()) {
-                    // A simple tap without movement must not punch a round hole.
+                    // Tap only: no erase, no live mark.
                     undoMasks.pop();
                     updateHistoryButtons();
+                    if (brushCursor != null) {
+                        brushCursor.clearTrail();
+                        brushCursor.setVisibility(View.GONE);
+                    }
                     status.setText("Brush • stroke चलाएँ");
                 }
 
@@ -1596,12 +1638,21 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_CANCEL) {
-            if (brushStrokeStarted && brushStrokeChanged) renderResult();
-            brushStrokeStarted = false;
+            if (brushStrokeStarted && brushStrokeChanged) {
+                brushStrokeStarted = false;
+                brushFinalizing = true;
+                if (brushCursor != null) brushCursor.finishStroke();
+                renderResult();
+            } else {
+                brushStrokeStarted = false;
+                if (brushCursor != null) {
+                    brushCursor.clearTrail();
+                    brushCursor.setVisibility(View.GONE);
+                }
+            }
             brushStrokeChanged = false;
             gestureWasScaling = false;
             hideLens();
-            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             return true;
         }
 
@@ -2412,7 +2463,12 @@ public class MainActivity extends Activity {
         private final Paint metalPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint bristlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint outlinePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint trailPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint trailFeatherPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Path bristlePath = new Path();
+        private final Path trailPath = new Path();
+        private boolean trailStarted = false;
+        private boolean showBrushTip = true;
         private float tipX;
         private float tipY;
         private float brushWidth = 16f;
@@ -2430,17 +2486,73 @@ public class MainActivity extends Activity {
             outlinePaint.setStyle(Paint.Style.STROKE);
             outlinePaint.setStrokeWidth(1.8f);
             outlinePaint.setColor(0xEE111111);
+
+            trailPaint.setStyle(Paint.Style.STROKE);
+            trailPaint.setStrokeCap(Paint.Cap.BUTT);
+            trailPaint.setStrokeJoin(Paint.Join.ROUND);
+            trailFeatherPaint.setStyle(Paint.Style.STROKE);
+            trailFeatherPaint.setStrokeCap(Paint.Cap.BUTT);
+            trailFeatherPaint.setStrokeJoin(Paint.Join.ROUND);
+        }
+
+        void startStroke(float x, float y, float width, int backgroundColor) {
+            trailPath.reset();
+            trailPath.moveTo(x, y);
+            trailStarted = true;
+            showBrushTip = true;
+            tipX = x;
+            tipY = y;
+            brushWidth = Math.max(8f, Math.min(52f, width));
+            setTrailStyle(backgroundColor);
+            invalidate();
+        }
+
+        void addStroke(float x, float y, float width, int backgroundColor) {
+            if (!trailStarted) startStroke(x, y, width, backgroundColor);
+            brushWidth = Math.max(8f, Math.min(52f, width));
+            setTrailStyle(backgroundColor);
+            trailPath.lineTo(x, y);
+            tipX = x;
+            tipY = y;
+            invalidate();
+        }
+
+        void finishStroke() {
+            showBrushTip = false;
+            invalidate();
+        }
+
+        void clearTrail() {
+            trailPath.reset();
+            trailStarted = false;
+            showBrushTip = true;
+            invalidate();
+        }
+
+        private void setTrailStyle(int backgroundColor) {
+            trailPaint.setColor(backgroundColor);
+            trailPaint.setStrokeWidth(Math.max(3f, brushWidth * 0.72f));
+            trailFeatherPaint.setColor((backgroundColor & 0x00FFFFFF) | 0x66000000);
+            trailFeatherPaint.setStrokeWidth(Math.max(4f, brushWidth));
         }
 
         void setBrush(float x, float y, float width) {
             tipX = x;
             tipY = y;
             brushWidth = Math.max(8f, Math.min(52f, width));
+            showBrushTip = true;
             invalidate();
         }
 
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
+
+            if (trailStarted) {
+                canvas.drawPath(trailPath, trailFeatherPaint);
+                canvas.drawPath(trailPath, trailPaint);
+            }
+            if (!showBrushTip) return;
+
             float w = brushWidth;
             float angle = -48f;
             double rad = Math.toRadians(angle);
