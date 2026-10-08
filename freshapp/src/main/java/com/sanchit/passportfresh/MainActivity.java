@@ -1421,7 +1421,7 @@ public class MainActivity extends Activity {
         if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
         colorToleranceSeek.setProgress(colorToleranceValue);
         status.setText(fadeCleanOn
-                ? "Area चुनें • screen/lens में circle दिखेगा • majority keep, minority smooth remove"
+                ? "Area चुनें • leftover BG, hair-gap और white halo smooth clean होगा"
                 : "Fade Color Clean OFF");
         if (!fadeCleanOn && selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
         renderToolChoiceRow();
@@ -1603,7 +1603,10 @@ public class MainActivity extends Activity {
 
     private void applyFadeColorCleanAt(float viewX, float viewY) {
         try {
-            if (resultBitmap == null || originalBitmap == null) return;
+            if (resultBitmap == null || originalBitmap == null || personMask == null) {
+                status.setText("Fade clean के लिए person mask तैयार नहीं है");
+                return;
+            }
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return;
 
@@ -1624,125 +1627,55 @@ public class MainActivity extends Activity {
             int minY = Math.max(0, sy - localRadius);
             int maxY = Math.min(h - 1, sy + localRadius);
 
-            int[] resultPixels = new int[w * h];
+            int[] sourcePixels = new int[w * h];
             int[] maskPixels = new int[w * h];
-            resultBitmap.getPixels(resultPixels, 0, w, 0, 0, w, h);
+            originalBitmap.getPixels(sourcePixels, 0, w, 0, 0, w, h);
             eraseMask.getPixels(maskPixels, 0, w, 0, 0, w, h);
 
-            // Sample the selected circle and split its colours into two natural groups.
-            // The larger group is the dominant colour to KEEP; the smaller group is REMOVE.
-            int step = Math.max(1, localRadius / 42);
-            int maxSamples = Math.max(256,
-                    ((maxX - minX + 1) / step + 2) * ((maxY - minY + 1) / step + 2));
-            int[] samples = new int[maxSamples];
-            int sampleCount = 0;
-
-            long sumR = 0, sumG = 0, sumB = 0;
+            // Build a local OLD-background reference from low person-confidence pixels
+            // inside the selected circle. This is the residue/halo colour we want to remove,
+            // not the currently selected replacement background colour.
+            int step = Math.max(1, localRadius / 48);
+            double bgR = 0d, bgG = 0d, bgB = 0d, bgWeight = 0d;
             for (int y = minY; y <= maxY; y += step) {
                 for (int x = minX; x <= maxX; x += step) {
                     int dx = x - sx;
                     int dy = y - sy;
                     if (dx * dx + dy * dy > localRadius * localRadius) continue;
-                    int c = resultPixels[y * w + x];
-                    if (sampleCount < samples.length) samples[sampleCount++] = c;
-                    sumR += Color.red(c);
-                    sumG += Color.green(c);
-                    sumB += Color.blue(c);
+
+                    int mx = Math.max(0, Math.min(maskWidth - 1,
+                            Math.round(x * (maskWidth - 1f) / Math.max(1f, w - 1f))));
+                    int my = Math.max(0, Math.min(maskHeight - 1,
+                            Math.round(y * (maskHeight - 1f) / Math.max(1f, h - 1f))));
+                    float conf = personMask[my * maskWidth + mx];
+                    if (conf > 0.46f) continue;
+
+                    float weight = 0.12f + (0.46f - conf) * (0.46f - conf) * 5.0f;
+                    int c = sourcePixels[y * w + x];
+                    bgR += Color.red(c) * weight;
+                    bgG += Color.green(c) * weight;
+                    bgB += Color.blue(c) * weight;
+                    bgWeight += weight;
                 }
             }
 
-            if (sampleCount < 24) {
-                status.setText("Area बहुत छोटा है");
-                return;
-            }
-
-            float avgR = sumR / (float)sampleCount;
-            float avgG = sumG / (float)sampleCount;
-            float avgB = sumB / (float)sampleCount;
-
-            // Seed A = colour farthest from average; Seed B = colour farthest from Seed A.
-            int seedA = samples[0];
-            float farA = -1f;
-            for (int i = 0; i < sampleCount; i++) {
-                int c = samples[i];
-                float d = colorDistanceSq(Color.red(c), Color.green(c), Color.blue(c),
-                        Math.round(avgR), Math.round(avgG), Math.round(avgB));
-                if (d > farA) { farA = d; seedA = c; }
-            }
-
-            int seedB = samples[0];
-            float farB = -1f;
-            int aR0 = Color.red(seedA), aG0 = Color.green(seedA), aB0 = Color.blue(seedA);
-            for (int i = 0; i < sampleCount; i++) {
-                int c = samples[i];
-                float d = colorDistanceSq(Color.red(c), Color.green(c), Color.blue(c),
-                        aR0, aG0, aB0);
-                if (d > farB) { farB = d; seedB = c; }
-            }
-
-            float c1r = Color.red(seedA), c1g = Color.green(seedA), c1b = Color.blue(seedA);
-            float c2r = Color.red(seedB), c2g = Color.green(seedB), c2b = Color.blue(seedB);
-            int count1 = 0, count2 = 0;
-
-            // Small 2-means clustering, bounded and local to selected area.
-            for (int iter = 0; iter < 6; iter++) {
-                float s1r = 0f, s1g = 0f, s1b = 0f;
-                float s2r = 0f, s2g = 0f, s2b = 0f;
-                count1 = 0;
-                count2 = 0;
-
-                for (int i = 0; i < sampleCount; i++) {
-                    int c = samples[i];
-                    int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
-                    float d1 = colorDistanceSq(r, g, b,
-                            Math.round(c1r), Math.round(c1g), Math.round(c1b));
-                    float d2 = colorDistanceSq(r, g, b,
-                            Math.round(c2r), Math.round(c2g), Math.round(c2b));
-                    if (d1 <= d2) {
-                        s1r += r; s1g += g; s1b += b; count1++;
-                    } else {
-                        s2r += r; s2g += g; s2b += b; count2++;
-                    }
-                }
-
-                if (count1 > 0) {
-                    c1r = s1r / count1; c1g = s1g / count1; c1b = s1b / count1;
-                }
-                if (count2 > 0) {
-                    c2r = s2r / count2; c2g = s2g / count2; c2b = s2b / count2;
-                }
-            }
-
-            if (count1 == 0 || count2 == 0) {
-                status.setText("इस area में अलग minority colour नहीं मिला");
-                return;
-            }
-
-            float centersDistance = (float)Math.sqrt(colorDistanceSq(
-                    Math.round(c1r), Math.round(c1g), Math.round(c1b),
-                    Math.round(c2r), Math.round(c2g), Math.round(c2b)));
-            if (centersDistance < 14f) {
-                status.setText("Area के colours लगभग एक जैसे हैं");
-                return;
-            }
-
-            boolean cluster1Minority = count1 < count2;
-            int minorityCount = Math.min(count1, count2);
-            int dominantCount = Math.max(count1, count2);
-            float minorityPct = 100f * minorityCount / Math.max(1f, sampleCount);
-            float dominantPct = 100f * dominantCount / Math.max(1f, sampleCount);
-
-            float minR = cluster1Minority ? c1r : c2r;
-            float minG = cluster1Minority ? c1g : c2g;
-            float minB = cluster1Minority ? c1b : c2b;
-            float domR = cluster1Minority ? c2r : c1r;
-            float domG = cluster1Minority ? c2g : c1g;
-            float domB = cluster1Minority ? c2b : c1b;
+            boolean hasLocalBackground = bgWeight > 2.0d;
+            int localBgR = hasLocalBackground ? clamp255((int)Math.round(bgR / bgWeight)) : 0;
+            int localBgG = hasLocalBackground ? clamp255((int)Math.round(bgG / bgWeight)) : 0;
+            int localBgB = hasLocalBackground ? clamp255((int)Math.round(bgB / bgWeight)) : 0;
 
             pushUndo();
             clearDeque(redoMasks);
 
+            float toleranceProgress = Math.max(0f,
+                    Math.min(1f, colorToleranceSeek.getProgress() / 100f));
+            float sensitivity = 0.78f + 0.52f * toleranceProgress;
+
             int changed = 0;
+            int residueCount = 0;
+            int haloCount = 0;
+            int gapCount = 0;
+
             for (int y = minY; y <= maxY; y++) {
                 for (int x = minX; x <= maxX; x++) {
                     float dx = x - sx;
@@ -1751,26 +1684,99 @@ public class MainActivity extends Activity {
                     if (distance > localRadius) continue;
 
                     int idx = y * w + x;
-                    int c = resultPixels[idx];
-                    int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
+                    int c = sourcePixels[idx];
+                    int r = Color.red(c);
+                    int g = Color.green(c);
+                    int b = Color.blue(c);
 
-                    float dMin = (float)Math.sqrt(colorDistanceSq(r, g, b,
-                            Math.round(minR), Math.round(minG), Math.round(minB)));
-                    float dDom = (float)Math.sqrt(colorDistanceSq(r, g, b,
-                            Math.round(domR), Math.round(domG), Math.round(domB)));
+                    int mx = Math.max(0, Math.min(maskWidth - 1,
+                            Math.round(x * (maskWidth - 1f) / Math.max(1f, w - 1f))));
+                    int my = Math.max(0, Math.min(maskHeight - 1,
+                            Math.round(y * (maskHeight - 1f) / Math.max(1f, h - 1f))));
+                    float conf = personMask[my * maskWidth + mx];
 
-                    // Only minority-side pixels are removed.
-                    if (dMin >= dDom) continue;
+                    int inner = sampleInnerForegroundColor(sourcePixels, w, h, x, y,
+                            personMask, maskWidth, maskHeight, mx, my, conf);
+                    int outer = sampleOuterBackgroundColor(sourcePixels, w, h, x, y,
+                            personMask, maskWidth, maskHeight, mx, my, conf);
 
-                    // 0.5 is the cluster boundary; toward 1.0 is a stronger minority match.
-                    float minorityMembership = dDom / Math.max(1f, dMin + dDom);
-                    float colourStrength = smoothStep(0.50f, 0.82f, minorityMembership);
+                    int refBgR, refBgG, refBgB;
+                    if (outer != -1) {
+                        refBgR = Color.red(outer);
+                        refBgG = Color.green(outer);
+                        refBgB = Color.blue(outer);
+                    } else if (hasLocalBackground) {
+                        refBgR = localBgR;
+                        refBgG = localBgG;
+                        refBgB = localBgB;
+                    } else {
+                        continue;
+                    }
 
-                    // Feather selected circle boundary, so cleanup never leaves a hard ring.
+                    float dBg = (float)Math.sqrt(colorDistanceSq(r, g, b,
+                            refBgR, refBgG, refBgB));
+                    float dFg = 255f;
+                    if (inner != -1) {
+                        dFg = (float)Math.sqrt(colorDistanceSq(r, g, b,
+                                Color.red(inner), Color.green(inner), Color.blue(inner)));
+                    }
+
+                    // High value means this pixel looks more like the old background
+                    // than the real subject colour sampled inward from the matte.
+                    float backgroundMembership = dFg / Math.max(1f, dBg + dFg);
+
+                    int maxC = Math.max(r, Math.max(g, b));
+                    int minC = Math.min(r, Math.min(g, b));
+                    float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
+                    boolean lowSaturationLight = (maxC - minC) < 42 && luminance > 178f;
+                    boolean skin = isSkinLikeColor(r, g, b);
+
+                    // 1) Leftover original background / spill.
+                    float residue = smoothStep(0.54f, 0.84f,
+                            backgroundMembership * sensitivity);
+
+                    // 2) Hair gaps / missed holes: weak-to-medium person confidence combined
+                    // with an old-background-looking source pixel.
+                    float gapEvidence = (1f - smoothStep(0.28f, 0.64f, conf))
+                            * smoothStep(0.46f, 0.76f, backgroundMembership * sensitivity);
+
+                    // 3) White/pale halo around ear, hair, jaw and clothes.
+                    float haloEvidence = 0f;
+                    if (lowSaturationLight && conf > 0.12f && conf < 0.92f) {
+                        haloEvidence = smoothStep(0.42f, 0.72f,
+                                backgroundMembership * sensitivity);
+                    }
+
+                    float strength = Math.max(residue * 0.92f,
+                            Math.max(gapEvidence * 0.96f, haloEvidence * 0.88f));
+
+                    // Strong foreground protection. Real hair/skin/clothes must survive.
+                    if (inner != -1 && dFg + 18f < dBg) {
+                        strength *= 0.08f;
+                    }
+                    if (conf > 0.84f && backgroundMembership < 0.78f) {
+                        strength *= 0.10f;
+                    }
+
+                    // Protect dark hair strands even when segmentation confidence is not perfect.
+                    boolean darkHairLike = !skin && luminance < 158f && conf > 0.20f
+                            && (inner == -1 || dFg <= dBg * 1.08f);
+                    if (darkHairLike) strength *= 0.10f;
+
+                    // Protect ear/face skin. Only a very strong contamination match may trim it,
+                    // and even then the cleanup remains partial/soft.
+                    if (skin && conf > 0.34f) {
+                        if (backgroundMembership < 0.88f) strength *= 0.06f;
+                        else strength = Math.min(strength, 0.34f);
+                    }
+
+                    // Softly feather the outside of the user's selected circle.
                     float inside = 1f - distance / Math.max(1f, localRadius);
-                    float areaStrength = smoothStep(0f, 0.16f, inside);
-                    float strength = colourStrength * areaStrength;
-                    if (strength < 0.02f) continue;
+                    float areaFeather = smoothStep(0f, 0.18f, inside);
+                    strength *= areaFeather;
+
+                    if (strength < 0.025f) continue;
+                    strength = Math.max(0f, Math.min(1f, strength));
 
                     int oldA = Color.alpha(maskPixels[idx]);
                     int addA = Math.round(255f * strength);
@@ -1778,6 +1784,9 @@ public class MainActivity extends Activity {
                     if (newA != oldA) {
                         maskPixels[idx] = Color.argb(newA, 255, 255, 255);
                         changed++;
+                        if (haloEvidence >= gapEvidence && haloEvidence >= residue) haloCount++;
+                        else if (gapEvidence >= residue) gapCount++;
+                        else residueCount++;
                     }
                 }
             }
@@ -1785,14 +1794,14 @@ public class MainActivity extends Activity {
             if (changed == 0) {
                 if (!undoMasks.isEmpty()) undoMasks.pop();
                 updateHistoryButtons();
-                status.setText("Minority colour मिला, लेकिन removable pixels नहीं मिले");
+                status.setText("Selected area में leftover background/halo नहीं मिला");
                 return;
             }
 
             eraseMask.setPixels(maskPixels, 0, w, 0, 0, w, h);
             updateHistoryButtons();
-            status.setText("Keep " + Math.round(dominantPct) + "% • Remove "
-                    + Math.round(minorityPct) + "% • smooth");
+            status.setText("Fade clean • BG " + residueCount
+                    + " • Hair-gap " + gapCount + " • Halo " + haloCount);
             renderResult();
         } catch (Throwable ignored) {
             status.setText("Fade Color Clean apply नहीं हुआ");
