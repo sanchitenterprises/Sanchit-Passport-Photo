@@ -285,10 +285,10 @@ public class MainActivity extends Activity {
         brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row2 = buttonRow();
-        compareButton = button("COMPARE", false);
+        compareButton = button("SMART EDGE CLEAN", false);
         brushButton = button("BRUSH", false);
         objectButton = button("LOCAL COLOR CLEAN", false);
-        compareButton.setTextSize(11);
+        compareButton.setTextSize(9);
         brushButton.setTextSize(11);
         objectButton.setTextSize(10);
         row2.addView(compareButton, weightedButton());
@@ -307,7 +307,7 @@ public class MainActivity extends Activity {
 
         camera.setOnClickListener(v -> openCamera());
         gallery.setOnClickListener(v -> openGallery());
-        compareButton.setOnClickListener(v -> toggleCompare());
+        compareButton.setOnClickListener(v -> smartEdgeClean());
         brushButton.setOnClickListener(v -> toggleBrushMode());
         objectButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
@@ -400,6 +400,7 @@ public class MainActivity extends Activity {
         int textColor = Color.WHITE;
         if (text.contains("UNDO")) bgColor = 0xFF7C7399;
         else if (text.contains("REDO")) bgColor = 0xFF7E9B76;
+        else if (text.contains("SMART EDGE")) { bgColor = 0xFF7E9B76; textColor = 0xFF111827; }
         else if (text.contains("COMPARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
         else if (text.contains("BRUSH")) bgColor = 0xFF4F8F8B;
         else if (text.contains("LOCAL")) bgColor = 0xFF5B7FA3;
@@ -713,11 +714,16 @@ public class MainActivity extends Activity {
 
     private void showTopMenu(View anchor) {
         PopupMenu popup = new PopupMenu(this, anchor);
+        popup.getMenu().add(compareOriginal ? "Show Result" : "Compare");
         popup.getMenu().add("Share");
         popup.getMenu().add("Save");
         popup.getMenu().add("About");
         popup.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
+            if ("Compare".equals(title) || "Show Result".equals(title)) {
+                toggleCompare();
+                return true;
+            }
             if ("Share".equals(title)) {
                 sharePhoto();
                 return true;
@@ -1199,7 +1205,6 @@ public class MainActivity extends Activity {
                     replaceResult(ready);
                     compareOriginal = false;
                     imageView.setImageBitmap(resultBitmap);
-                    compareButton.setText("COMPARE");
                     if (brushFinalizing) {
                         brushFinalizing = false;
                         if (brushCursor != null) {
@@ -1529,7 +1534,202 @@ public class MainActivity extends Activity {
         if (originalBitmap == null || resultBitmap == null) return;
         compareOriginal = !compareOriginal;
         imageView.setImageBitmap(compareOriginal ? originalBitmap : resultBitmap);
-        compareButton.setText(compareOriginal ? "SHOW RESULT" : "COMPARE");
+        status.setText(compareOriginal ? "Compare • Original" : "Compare • Result");
+    }
+
+    private void smartEdgeClean() {
+        if (destroyed || originalBitmap == null || resultBitmap == null
+                || personMask == null || worker.isShutdown()) {
+            toast("पहले फोटो process करें");
+            return;
+        }
+
+        // Smart Edge Clean works on the result, not Compare/Original view.
+        compareOriginal = false;
+        imageView.setImageBitmap(resultBitmap);
+
+        // Exit manual tools so the automatic pass is predictable.
+        brushModeOn = false;
+        colorCleanOn = false;
+        brushShapeIndex = -1;
+        brushRotationDegrees = 0f;
+        dualBrushRotateActive = false;
+        brushButton.setText("BRUSH");
+        objectButton.setText("LOCAL COLOR CLEAN");
+        if (brushCursor != null) {
+            brushCursor.clearTrail();
+            brushCursor.clearShapePreview();
+            brushCursor.setVisibility(View.GONE);
+        }
+        hideLens();
+        if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+        brushSeek.setProgress(colorToleranceValue);
+        renderToolChoiceRow();
+
+        if (eraseMask == null) createEmptyEraseMask();
+        if (eraseMask == null) return;
+
+        pushUndo();
+        clearDeque(redoMasks);
+
+        final Bitmap source = originalBitmap;
+        final float[] mask = personMask;
+        final int mw = maskWidth;
+        final int mh = maskHeight;
+        final Bitmap oldErase = eraseMask.copy(Bitmap.Config.ALPHA_8, false);
+        final int token = ++renderToken;
+
+        setEditingEnabled(false);
+        setBusy(true, "Smart Edge Clean • residue/halo साफ हो रहा है…");
+
+        try {
+            worker.execute(() -> {
+                try {
+                    int w = source.getWidth();
+                    int h = source.getHeight();
+                    int[] src = new int[w * h];
+                    int[] erase = new int[w * h];
+                    source.getPixels(src, 0, w, 0, 0, w, h);
+                    oldErase.getPixels(erase, 0, w, 0, 0, w, h);
+
+                    // A light blur stabilizes noisy segmentation while retaining the real edge.
+                    float[] edgeMask = blurMask(mask, mw, mh, 1);
+                    float[] supportMask = maxFilterMask(edgeMask, mw, mh, 2);
+                    int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
+
+                    int changed = 0;
+
+                    for (int y = 0; y < h; y++) {
+                        int my = Math.min(mh - 1, Math.max(0,
+                                Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+
+                        for (int x = 0; x < w; x++) {
+                            int idx = y * w + x;
+                            int mx = Math.min(mw - 1, Math.max(0,
+                                    Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                            int mi = Math.min(edgeMask.length - 1, my * mw + mx);
+                            float confidence = edgeMask[mi];
+
+                            // Only inspect the uncertain subject boundary. Solid foreground is protected.
+                            if (confidence < 0.08f || confidence > 0.86f) continue;
+
+                            int ml = Math.max(0, mx - 1);
+                            int mr = Math.min(mw - 1, mx + 1);
+                            int mt = Math.max(0, my - 1);
+                            int mb = Math.min(mh - 1, my + 1);
+                            float edgeGradient = Math.abs(edgeMask[my * mw + mr] - edgeMask[my * mw + ml])
+                                    + Math.abs(edgeMask[mb * mw + mx] - edgeMask[mt * mw + mx]);
+
+                            if (confidence > 0.72f && edgeGradient < 0.08f) continue;
+
+                            int c = src[idx];
+                            int r = Color.red(c);
+                            int g = Color.green(c);
+                            int b = Color.blue(c);
+                            float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+
+                            boolean skin = isSkinLikeColor(r, g, b);
+                            boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
+                            float support = supportMask[mi];
+                            boolean likelyHair = headZone && !skin && lum < 165f && support > 0.34f;
+
+                            int inner = sampleInnerForegroundColor(src, w, h, x, y,
+                                    edgeMask, mw, mh, mx, my, confidence);
+                            int outer = sampleOuterBackgroundColor(src, w, h, x, y,
+                                    edgeMask, mw, mh, mx, my, confidence);
+                            if (outer == -1) continue;
+
+                            int or = Color.red(outer);
+                            int og = Color.green(outer);
+                            int ob = Color.blue(outer);
+                            float dOuter = colorDistanceSq(r, g, b, or, og, ob);
+
+                            float dInner = Float.MAX_VALUE;
+                            if (inner != -1) {
+                                dInner = colorDistanceSq(r, g, b,
+                                        Color.red(inner), Color.green(inner), Color.blue(inner));
+                            }
+
+                            // Background residue must be clearly closer to the sampled outside
+                            // background than to the real subject colour.
+                            boolean stronglyOuterLike = dOuter < 625f; // within about 25 RGB units
+                            boolean outerCloser = inner != -1
+                                    && (dOuter + 260f < dInner * 0.72f);
+                            boolean veryLowConfidence = confidence < 0.24f && dOuter < 1600f;
+
+                            if (!stronglyOuterLike && !outerCloser && !veryLowConfidence) continue;
+
+                            // Protect real hair strands and skin unless the pixel is overwhelmingly
+                            // background-like and segmentation confidence is already very low.
+                            if (likelyHair && confidence > 0.24f && dOuter > 324f) continue;
+                            if (skin && confidence > 0.38f && !stronglyOuterLike) continue;
+
+                            float strength;
+                            if (confidence < 0.18f) {
+                                strength = 1f;
+                            } else {
+                                float confWeight = 1f - smoothStep(0.18f, 0.82f, confidence);
+                                float colorWeight;
+                                if (inner != -1 && dInner < Float.MAX_VALUE) {
+                                    colorWeight = Math.max(0f, Math.min(1f,
+                                            (dInner - dOuter) / Math.max(1f, dInner)));
+                                } else {
+                                    colorWeight = Math.max(0f, Math.min(1f,
+                                            1f - dOuter / 1800f));
+                                }
+                                strength = 0.28f + 0.58f * confWeight + 0.34f * colorWeight;
+                            }
+
+                            if (likelyHair) strength *= 0.42f;
+                            if (skin) strength *= 0.50f;
+                            strength = Math.max(0f, Math.min(1f, strength));
+
+                            int oldA = Color.alpha(erase[idx]);
+                            int newA = Math.max(oldA, Math.round(255f * strength));
+                            if (newA > oldA + 2) {
+                                erase[idx] = Color.argb(newA, 255, 255, 255);
+                                changed++;
+                            }
+                        }
+                    }
+
+                    final int changedCount = changed;
+                    final Bitmap updated = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
+                    updated.setPixels(erase, 0, w, 0, 0, w, h);
+
+                    runOnUiThread(() -> {
+                        if (destroyed || token != renderToken) return;
+
+                        if (changedCount == 0) {
+                            if (!undoMasks.isEmpty()) undoMasks.pop();
+                            updateHistoryButtons();
+                            setEditingEnabled(true);
+                            setBusy(false, "Smart Edge Clean • कुछ extra residue नहीं मिला");
+                            return;
+                        }
+
+                        eraseMask = updated;
+                        updateHistoryButtons();
+                        setEditingEnabled(true);
+                        status.setText("Smart Edge Clean • " + changedCount + " edge pixels refined");
+                        renderResult();
+                    });
+                } catch (Throwable e) {
+                    runOnUiThread(() -> {
+                        if (destroyed || token != renderToken) return;
+                        if (!undoMasks.isEmpty()) undoMasks.pop();
+                        updateHistoryButtons();
+                        setEditingEnabled(true);
+                        setBusy(false, "Smart Edge Clean error");
+                    });
+                }
+            });
+        } catch (Throwable e) {
+            if (!undoMasks.isEmpty()) undoMasks.pop();
+            updateHistoryButtons();
+            setEditingEnabled(true);
+            setBusy(false, "Smart Edge Clean error");
+        }
     }
 
     private void toggleBrushMode() {
@@ -1576,7 +1776,6 @@ public class MainActivity extends Activity {
         if (compareOriginal && colorCleanOn) {
             compareOriginal = false;
             imageView.setImageBitmap(resultBitmap);
-            compareButton.setText("COMPARE");
         }
         objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
         renderToolChoiceRow();
