@@ -84,7 +84,7 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 8;
 
     private static final String[] BRUSH_SHAPE_NAMES = new String[]{
-            "Soft Round", "Soft Wide Round", "Soft Half-Circle", "Soft Vertical",
+            "Soft Round", "Soft Wide Round", "Soft Crescent", "Soft Vertical",
             "Soft Horizontal", "Soft Wedge", "Soft Point"
     };
     private static final String[] BRUSH_SHAPE_PNG = new String[]{
@@ -542,6 +542,27 @@ public class MainActivity extends Activity {
         icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         icon.setPadding(dp(2), dp(2), dp(2), dp(2));
         icon.setContentDescription(BRUSH_SHAPE_NAMES[index]);
+
+        if (index == 2) {
+            try {
+                Bitmap crescent = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888);
+                Canvas cc = new Canvas(crescent);
+                Paint cp = new Paint(Paint.ANTI_ALIAS_FLAG);
+                cp.setStyle(Paint.Style.FILL);
+                cp.setColor(0xFF111827);
+                cc.drawCircle(30f, 32f, 24f, cp);
+
+                cp.setXfermode(new android.graphics.PorterDuffXfermode(
+                        android.graphics.PorterDuff.Mode.CLEAR));
+                cc.drawCircle(40f, 32f, 20.2f, cp);
+                cp.setXfermode(null);
+
+                icon.setImageBitmap(crescent);
+                return icon;
+            } catch (Throwable ignored) {
+            }
+        }
+
         try {
             byte[] bytes = Base64.decode(BRUSH_SHAPE_PNG[index], Base64.DEFAULT);
             Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
@@ -1894,8 +1915,8 @@ public class MainActivity extends Activity {
         float[] pt = new float[]{viewX, viewY};
         inv.mapPoints(pt);
 
-        float magnification = 3.4f;
-        float lensRadiusPx = dp(66);
+        float magnification = 3.6f;
+        float lensRadiusPx = dp(88);
         float sourceRadius = lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
         float brushWidthInLens = brushModeOn
                 ? Math.min(dp(52), currentBrushScreenRadius() * magnification)
@@ -1919,9 +1940,9 @@ public class MainActivity extends Activity {
             brushCursor.setVisibility(View.GONE);
         }
 
-        int lensSize = dp(132);
+        int lensSize = dp(176);
         int margin = dp(8);
-        int gap = dp(28);
+        int gap = dp(32);
         int left = Math.round(viewX - lensSize * 0.5f);
         int top = Math.round(viewY - lensSize - gap);
         if (top < margin) top = Math.round(viewY + gap);
@@ -2129,10 +2150,20 @@ public class MainActivity extends Activity {
         float norm = (float)Math.sqrt((dx * dx + dy * dy)
                 / Math.max(1f, useRadius * useRadius));
 
-        if (shape == 2) {
-            float radial = softShapeFalloff(norm, 0.50f);
-            float straight = smoothStep(-radius * 0.18f, radius * 0.18f, dx);
-            return radial * straight;
+        if (shape == 2) { // Soft Crescent / अर्धचंद्र
+            // Outer soft circle minus a slightly smaller circle shifted to the right.
+            // Rotation is already applied above, so 2-finger rotate turns the crescent naturally.
+            float outerNorm = (float)Math.hypot(dx, dy) / Math.max(1f, radius);
+            float outer = softShapeFalloff(outerNorm, 0.76f);
+
+            float innerRadius = Math.max(1f, radius * 0.84f);
+            float innerCx = radius * 0.38f;
+            float innerNorm = (float)Math.hypot(dx - innerCx, dy) / innerRadius;
+
+            // Deep inside the inner circle = transparent cutout.
+            // Feather only around the inner moon edge.
+            float innerKeep = smoothStep(0.80f, 1.05f, innerNorm);
+            return outer * innerKeep;
         }
 
         if (shape == 1) return softShapeFalloff(norm, 0.62f);
@@ -2993,13 +3024,16 @@ public class MainActivity extends Activity {
                 canvas.drawCircle(cx, cy, radius, paint);
                 return;
             }
-            if (shape == 2) {
-                RectF oval = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
+            if (shape == 2) { // Soft Crescent / अर्धचंद्र
                 Path p = new Path();
-                p.moveTo(cx, cy - radius);
-                p.arcTo(oval, -90f, 180f);
-                p.lineTo(cx, cy - radius);
-                p.close();
+                p.setFillType(Path.FillType.EVEN_ODD);
+                p.addOval(new RectF(cx - radius, cy - radius,
+                        cx + radius, cy + radius), Path.Direction.CW);
+
+                float innerR = radius * 0.84f;
+                float innerCx = cx + radius * 0.38f;
+                p.addOval(new RectF(innerCx - innerR, cy - innerR,
+                        innerCx + innerR, cy + innerR), Path.Direction.CW);
                 canvas.drawPath(p, paint);
                 return;
             }
@@ -3188,13 +3222,16 @@ public class MainActivity extends Activity {
                 canvas.drawCircle(cx, cy, radius, paint);
                 return;
             }
-            if (shape == 2) {
-                RectF oval = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
+            if (shape == 2) { // Soft Crescent / अर्धचंद्र
                 Path p = new Path();
-                p.moveTo(cx, cy - radius);
-                p.arcTo(oval, -90f, 180f);
-                p.lineTo(cx, cy - radius);
-                p.close();
+                p.setFillType(Path.FillType.EVEN_ODD);
+                p.addOval(new RectF(cx - radius, cy - radius,
+                        cx + radius, cy + radius), Path.Direction.CW);
+
+                float innerR = radius * 0.84f;
+                float innerCx = cx + radius * 0.38f;
+                p.addOval(new RectF(innerCx - innerR, cy - innerR,
+                        innerCx + innerR, cy + innerR), Path.Direction.CW);
                 canvas.drawPath(p, paint);
                 return;
             }
