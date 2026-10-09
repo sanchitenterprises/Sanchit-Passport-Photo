@@ -1,7 +1,6 @@
 package com.sanchit.passportfresh;
 
 import android.Manifest;
-import android.util.Base64;
 import android.animation.Animator;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
@@ -84,17 +83,11 @@ public class MainActivity extends Activity {
     private static final int MAX_HISTORY = 8;
 
     private static final String[] BRUSH_SHAPE_NAMES = new String[]{
-            "Soft Round", "Soft Wide Round", "Soft Crescent", "Soft Vertical",
-            "Soft Horizontal", "Soft Wedge", "Soft Point"
+            "Crescent -135°", "Crescent -90°", "Crescent -45°", "Crescent 0°",
+            "Crescent 45°", "Crescent 90°", "Crescent 135°"
     };
-    private static final String[] BRUSH_SHAPE_PNG = new String[]{
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAFUElEQVR42u2Xy44byRFFz40sFllN9UP9nGnDXnjhBxfe+APmg/0V/gQ/0AsvbFCL6VFLPS2ySbGKVZnXC1KAeqwRJHkMbyaAAhIJRMbNGxU3IuFn+z+bPtdhNpvVL3Me10uPSzMJAEV4y6o77PvtfD7fAuWnBqCLi9m0TMZH4zQcMoomD9QphgpAimLUFYZOpVm1sHj4569X8Kf8XwOYzWb1atWctdX2PBFHFKakfCBS7aHsAFCKqTpTWsQ6rMei9L03+fXLl39dfzGAq6s/TMdHvup6Xcg+jVSO7TSF0tgxUTjtDylGHXJL77VSLC0eyOV1TfpuPv/LAvCHYqSPBa+mcZ2Lr2VfRcRFQefY56BTwYnhGDhEmsplWqzG0gRcA5UjqiFIZ4eX/WJx1346gNmsPhvpOhdfG66IuARfgM8Fp+AT8InEoeCZ0ZTiRtJEMA4igSrJqQwDZVy7+eq0ffvq1fZJhVQ/jH5xMZu2VTqP7FNFnGJOTDlFPDdxjHgGNDK19/6CbNELGu/2EyAiiqFXLl1UvP32Nyz5B68/BkCTyfhooByJ4bgQx7Gj+8jEseCYwjPwxDCWVAHYLkIdppZIGCEXinuCztJbo2XetMffwJs/w/DBFMxms3qTucL5kogL5HPMKYrnmGPBETBFTJEOZO9pV4Vd7WhHkmxUgCzTI3U27Uipvf3q5HFzf7/9IAMvcx6PR6OGrZuSYpJyaQqlkdUADXiCOMBqEDVonwJnoLL1bt0LWvAEoolQE5lGozIZ5WYCPH4QQG2PA+qiVKfsiaEGjS3qfc7HoBpRC9eWdnRDFpKgIPW2O4kxirFNTfE40DiLOjmP9/rj/wBQhklIQ2VHRSLZVIIErgyV3lGNkqUke+dvgSiGJFxpd24yVILKduVwco4ql5TeBxBf3MT8REW1Q/H5ze0JA4qwcAEVcEHKskuxiiDb+71dnvMuJrLI8n5/x0QWKpKzTd6dh1EuitETSX7CQFeWW6Pu3SeX3oWtxHZX5+owPWYrq0f0yL1Mb3lrsTXqhHrDVoUtij6CzpkuwTa7695v108YOMq564aho0qtCq3lDUSLvXlP6fZ/O94JjrRnZIvZIFrkDdAatdhtttuA1kTblWX3owzM5/MuRnoksUZeF8UasUKsba+R15i18AqxEn63XgNrpHWwX5uVxRqVVRJrgpWKVr+YTt9+TAk98WTZbvvHHFpG8dThCVYNO4WTKMCu1Pb++5z3yBvDGrQULMELrGWRliXx6H5Y3tzc9B9tRg8Pt8P0+ekoItWGSqaSlHazl21UBINEj9giWkkb71hYYZbCC4cegAeJV0nxKjJ3E1YvF4vF8NFmBGR1B6+ouyalqIsYUSSCDO4p7vaKODZR7csgQ9kKt1KsDQusB8y9rXsU91XJd/MX8/aT5oHV6rY/O/l62AapMJCMiyILBpkeYmvUCjbaUf4IfiTijeFBju9RucfllSrdDZTbb+d/v/+siWixeNmdHV72xbUtFxVnowGrI9RKbIzfAivEMkJvkN9E5nsH91bcVVR3A+X27l+/fw035YuG0ouL2TM16TKq6tTko1T8DJeDUqU6XPYXUHFmC9ESeZWLHivxUBXuXrz425sfmwc/Yyz/4+j6en3Up3RST0bPcG7yQO3YdUOUS3onXkWrvgzLA9Zv5vN5+xM/TL6pzn77XTPKzSSRx0MflRRWdM6Orte4/Xqy2dzc3Gz/Zy+jH/i+71/42b7A/g2YLx7Og7oNnQAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAD4ElEQVR42sWXz2tcVRTHP+fcN0lDGytokk4yocnCH6SNIEXJpoyIWnSdKbhyIf4F0qUWoQs3oiBu3LgT2tCFrlyIMasWoiANTmkJsaExwUhM0w6tad49x8V7k06HSciPSX279+67937Pud9zvt8L//MjbZzrTwKwUi4nUAktxkI2hh5EBgQqChPx0adKOH78ZjdAjF3rCwtXHzStK4C1AUAl1DceGBgtWSfjOKeBF4FinvsacF3gShAuL8zNzDTP3SOAbIFnBl/o70g6LwDjqtoN4O64O0i+iAgigsUYReSnNPrHy/MzV+G8wie+FUe2AxCAWBw6cQbVb1RD0WIE9xRBQKRhvoM7jiOSqAbMLEX83NLczBc5L1qC0K0jJxaHRj+QkPwgSNHSNIVsA5CQz62DUJCQjYHFNIIH1eTzY8Mnv842ruhWUbZMe3H45JsSwiU3i+AgEnZMWhEFcItpSAqvHDnaQ+3O5CTlcsL8vG13BAp4z/GRviQkvwG92UHvrrSaekMU0YDbW4t/zPzYTMymhSsCeKL6qYr2YRb3sXkeoCuCmPtXpdJYF0xYY+D6+M8TcXDw5X5g3Nw8T/t+m626WVRNnt8o3H+jmQ+PAJTLASAtpGdVk8N59NKeBuog7gF7P3ufaFEFU1NZibifdpys1NomOeLuYnAqOwY2g9MGMlqpNNblzsmMdyJt1RB3F7Qn1X+Hs0/npZkDDne7gL42KGXLcxCRToP+7LUqrRuRHLSsRt+yEz54EDdA7h2U93D3VC3cbQXAAV1ZuXEPvCoigFs704+I4LZ65FDtRl4J1lyGmsHUXwQBb+dRuImII1yfnZ2tNYhTYxm+ZgBR/aJZTOv9vG1tABH38G1mUsq6nRZYcXj0Z1Etu8WYK99+0++4r8n6oecWF6f/afSQTVGer8P40N0jiO/fbHqqoirw0eLi9Erehn0LOZ5yqITa6uSf3U/13tUkecfNNpBN7d9t7A81KXRYjJeXbs2co1IJVB+3aC3SW81ArE1eOXz02YGQFF51N8tA77g7Ou6pJoUOs3S6EDm7trb8kGrVd2BIAKoAWruz/H33072I6OuiKrjFOqVacMjBDcdFVVVDMLNLYSO+e/v276v5v74bT7hprYtDL51B/DPRcEIAd8t9yqbtFkRERBAEt7jsLheWbl37spHce7Pl5XLC1FQ6MjLSsXo/vO3CewinxBkQ1VB3yJj/jcg11C+ay3d/zV1b3s6M7vZiEnIJBaBUGutKu9aHgtkxgGhpbV0O3Vyd+3Wt1X2ijffIStiaN/VUl5PdVIzsHQySe8i6w7EndUFt6/MfvI+lcL5oCcAAAAAASUVORK5CYII=",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAACa0lEQVR42tVXPWtUQRQ95868fBAJWKhJCGw2hZVPC5t020TxD+wvkNT6B3QV7C0kjT9A0NXCUrtgEwgiJBARo5EQIkZkUUNMdt/ca/HekjUaRbM7welmmDdz5p57zrsXOOLBLn5vR/0Yh0rFA5BoESiVSgNmw4OqQzvr6/Pf9p1LAPqnM+Sfbs5fiqYbvpIl7k1ItpZHyumT0XJ6Y3wyTQs6FKi63gDYY32I5HGCEyJyUZyrBcOLscmzT0+W0imgHoCa/C7ShwJAMsDMzNA0DUGzLAPgSLnghM9GJ9OrwE3toKS7AMysONgEoAPpAUBDFgBzIv72SPnM3ZySqnSfgoND4wBAs1bLuWRmtJzWgHpo507vAbSVQHoNWUbK9bFyOo25uWx/Ykrvjc4EBNVsdnx8ahCoa2c+SO/9iWKqQcSfbiXb0/vzQeKYpAE0c9DL+byOyABIM6MC53MaENo0RAIAyTUrJzLZKedLtagAAMBI9iswlk+XowMoRrCYMvwhEcwsE3VfOhd9rPCDJFQbxwa2XxVK0JgyVJIG4uXKyspWca/FA2C5L5u5e3mdUIlqRAYRqoaGNPse5vqfCxEBWCYUIXBtY2PhU2HDFgeAoSkuSTSERxurS7OoVl1eJfVehgazlnjfp5otJIoZAIJ6XXtZDxhgAWaBJMX5REN44Jrh0traUuOg3uFQPkDSANO2zklxBGEaNlX11vt3i3c6HvrLEv1QABTo8+IEqgK1j0Ysmuh9JR9/WF3c7NC7drsxIQA7VTo34b0vB9v9uov+1423zz/vbfk54eL8dlHxXeg5/yYSVVeEmvgfx3ebIfH/k2UM3AAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABP0lEQVR42u2XP0sDQRDF35u5ixxKCiMWKVNoo5VgJxZ+hnyAtH4jIdhY5gvY2Asi+Afs5EyVw8qANno7Y5EgFgrJkYsI+5rdYvfNj7dTzCoqq6vYyxK024rRlgBDwxIlizJixTu+2dk9UscBALjzsXi6O/vm53UBCABrd3Z6oJ6SnJQiYaE8GeX3x9NzVgcAAaDV2l5Lm42c5DrMPwAnSFI0McN+kd9cAV0FBmEW02TOBDzLNC0nSRBECpAADO5mwZq1N5OI+i9vLKSEZXUzF9XUgj9WBIgAESACRIAIEAEiwL8F+GkmNLjXP5KR4oSvAAiAh6+VFEq9Q6kD0OHwduxAX0SVoglFVLSRupWX4e39euI5mPljolXyf315Pl9tbhhIwD0384ukDL2ieBjP+zVbtLjEWofJNEGd7isV/wRDX2FgiSiF5gAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABP0lEQVR42u2UvUpDQRCFz8xuROWCaKOE26RWK9E2FvoIeQHzBr6A4rPY5RGsUmiXRu3EmDQaBPGHgCB751gkaZL4U9ybJvvBNrPFnDnMGSASiUTmHflnLU/426ebwdD607QCgGmaLqmuLoooScvFDRElAHw4z9d2632aAAVg5crWEcWdgrbMMaV5WK8iZrTz3sPt8bC3CVBzQCMrV7YPoHoBEmRBm0DCOQ8L2clj5/oMqHrFTlsBgCL7AiGNXxioyP+BwWgZlIcDRU36MY0GUACRAlMnpNio4NFKCAA03sGLG8bECgqgiWiJCPeDQlUc0DUA2n+r3iQrz+vi/J5ACkHVOVp2idJCvf/y9Al0OWH1RmVz16lPQggAfH7Te0Ayy3qdtSugGUaxn/UVnOgj069hrcDeDfvrHEcikch88Q3w4a+Q0hzBOAAAAABJRU5ErkJggg==",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABXklEQVR42uWXPU4DMRBGv2/WWXoaCtLR0XCETc0xQIITUEAT5QjUFLlKcgZSpCTNRhQUSDQh6xmaBBAskF3bgGAky5J/9J4tWx4D/z1Y0yYoCklGHI+rX7oD/b5gMNDdvYMegJ55r0YG7QTNzEiamYoIzMxxsbwsy+ndim3uefRoJABU1Q5dJz9TA0gGL4+2qpnB+8V5We7cA1MBoADg3s0hHrRaVqq+qutvEgYYSSWZm6+O57PJcL3ylwP3dpKZgHQAHMiQkpEUimyZ2mk5mwxRFO41vFYgUhgApUhmXk/mN9dXKApXdwPkJ+EpBBrBYws0hscUaAWPJdAaHkMgCB4qEAwPEYgCbysQDd5GICq8qUB0eBOBJPBNBZLBNxFICv9KIDn8UwEDLTX8o4xIAaiI5Knh9QJkRsnEwx+lhtcnpYbO8nFxcbvO4b77I9Ht7m8nzheTv5JJ/ot/N54AMMk3WZk1w/QAAAAASUVORK5CYII=",
-            "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABg0lEQVR42u2VMUsDQRCF38xuYm2KgCJCsBMDNgpWJ6JoZedfMPiDRP+CiK1ieYUgpLAQbZUgKgoRU1iY23kWd0FBJAletLkPFhZuZ+ftm905oKCgoOCfkV/EOkRRGh9XCRwaAP63cBm1A731nJyZWzKTFRXxMF7c31aOgTgBoABsFAIkGzZRq++LuoZ8+cIQzrQbNu/urtvZOuYtQAFwolbfU+cbFroB/EyizntjaJYSrLdal6+ZAA6y6QBsOQA2OT2/JOoaFpIEEIWI7w0L4V3VL3Q9tgEYosgNeqr+RE+pU95WBTCQ390TOtIM5Fr6MmLLT0Dv5gHl/iVlCUPWtT9xNa2lsfljDGECEcJdpK5FmqMDhwZAy+ycBkvO1XsP4h1gABBAdkVdycxenOguAEG8bKN4hpyamq2EsjtR9YtkmkNEYRbaZNh4vLlqDtML3JCNSDud57ex6viBM22bkSBbhB0pkp2Hm+vLYRtR3v8PxR8hiCKfOajZ/M+SFxQUFOTKB+yymFcEeIr0AAAAAElFTkSuQmCC"
+    private static final float[] BRUSH_SHAPE_BASE_ANGLES = new float[]{
+            -135f, -90f, -45f, 0f, 45f, 90f, 135f
     };
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -488,7 +481,7 @@ public class MainActivity extends Activity {
             normalLp.setMargins(dp(1), dp(1), dp(1), dp(1));
             backgroundColorRow.addView(normalSlot, normalLp);
 
-            // The seven original brush shapes.
+            // Seven crescent presets at different directions/angles.
             for (int i = 0; i < BRUSH_SHAPE_NAMES.length; i++) {
                 final int shapeIndex = i;
                 FrameLayout slot = new FrameLayout(this);
@@ -504,10 +497,11 @@ public class MainActivity extends Activity {
 
                 slot.setOnClickListener(v -> {
                     brushShapeIndex = shapeIndex;
+                    brushRotationDegrees = BRUSH_SHAPE_BASE_ANGLES[shapeIndex];
                     dualBrushRotateActive = false;
                     if (brushCursor != null) brushCursor.clearTrail();
                     renderToolChoiceRow();
-                    status.setText("Shape • " + BRUSH_SHAPE_NAMES[shapeIndex]
+                    status.setText(BRUSH_SHAPE_NAMES[shapeIndex]
                             + " • 2-finger rotate");
                 });
                 attachTouchAnimation(slot);
@@ -543,30 +537,24 @@ public class MainActivity extends Activity {
         icon.setPadding(dp(2), dp(2), dp(2), dp(2));
         icon.setContentDescription(BRUSH_SHAPE_NAMES[index]);
 
-        if (index == 2) {
-            try {
-                Bitmap crescent = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888);
-                Canvas cc = new Canvas(crescent);
-                Paint cp = new Paint(Paint.ANTI_ALIAS_FLAG);
-                cp.setStyle(Paint.Style.FILL);
-                cp.setColor(0xFF111827);
-                cc.drawCircle(30f, 32f, 24f, cp);
-
-                cp.setXfermode(new android.graphics.PorterDuffXfermode(
-                        android.graphics.PorterDuff.Mode.CLEAR));
-                cc.drawCircle(40f, 32f, 20.2f, cp);
-                cp.setXfermode(null);
-
-                icon.setImageBitmap(crescent);
-                return icon;
-            } catch (Throwable ignored) {
-            }
-        }
-
         try {
-            byte[] bytes = Base64.decode(BRUSH_SHAPE_PNG[index], Base64.DEFAULT);
-            Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-            icon.setImageBitmap(bitmap);
+            Bitmap crescent = Bitmap.createBitmap(72, 72, Bitmap.Config.ARGB_8888);
+            Canvas cc = new Canvas(crescent);
+            Paint cp = new Paint(Paint.ANTI_ALIAS_FLAG);
+            cp.setStyle(Paint.Style.FILL);
+            cp.setColor(0xFF111827);
+
+            cc.save();
+            cc.rotate(BRUSH_SHAPE_BASE_ANGLES[index], 36f, 36f);
+
+            Path moon = new Path();
+            moon.setFillType(Path.FillType.EVEN_ODD);
+            moon.addCircle(34f, 36f, 27f, Path.Direction.CW);
+            moon.addCircle(45f, 36f, 22.7f, Path.Direction.CW);
+            cc.drawPath(moon, cp);
+
+            cc.restore();
+            icon.setImageBitmap(crescent);
         } catch (Throwable ignored) {
             icon.setImageResource(com.sanchit.passportfresh.R.drawable.ic_passport_logo);
         }
@@ -1915,11 +1903,13 @@ public class MainActivity extends Activity {
         float[] pt = new float[]{viewX, viewY};
         inv.mapPoints(pt);
 
-        float magnification = 3.6f;
+        float magnification = brushModeOn && brushShapeIndex >= 0 ? 5.4f : 3.6f;
         float lensRadiusPx = dp(88);
-        float sourceRadius = lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
+        float sourceRadius = lensRadiusPx
+                / Math.max(0.0001f, currentImageScale() * magnification);
         float brushWidthInLens = brushModeOn
-                ? Math.min(dp(52), currentBrushScreenRadius() * magnification)
+                ? Math.min(brushShapeIndex >= 0 ? dp(76) : dp(52),
+                        currentBrushScreenRadius() * magnification)
                 : 0f;
 
         magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
@@ -2077,7 +2067,7 @@ public class MainActivity extends Activity {
         int w = eraseMask.getWidth();
         int h = eraseMask.getHeight();
 
-        float boundsRadius = shape == 6 ? radius * 0.36f : radius;
+        float boundsRadius = radius;
         int left = Math.max(0, (int)Math.floor(cx - boundsRadius - 3));
         int top = Math.max(0, (int)Math.floor(cy - boundsRadius - 3));
         int right = Math.min(w - 1, (int)Math.ceil(cx + boundsRadius + 3));
@@ -2122,53 +2112,17 @@ public class MainActivity extends Activity {
         dx = localX;
         dy = localY;
 
-        float ax = Math.abs(dx);
-        float ay = Math.abs(dy);
+        // Every non-normal shape is the same soft crescent.
+        // Only its direction/angle differs.
+        float outerNorm = (float)Math.hypot(dx, dy) / Math.max(1f, radius);
+        float outer = softShapeFalloff(outerNorm, 0.76f);
 
-        if (shape == 3) {
-            float nx = ax / Math.max(1f, radius * 0.30f);
-            float ny = ay / radius;
-            return softShapeFalloff(Math.max(nx, ny), 0.50f);
-        }
+        float innerRadius = Math.max(1f, radius * 0.84f);
+        float innerCx = radius * 0.38f;
+        float innerNorm = (float)Math.hypot(dx - innerCx, dy) / innerRadius;
+        float innerKeep = smoothStep(0.80f, 1.05f, innerNorm);
 
-        if (shape == 4) {
-            float nx = ax / radius;
-            float ny = ay / Math.max(1f, radius * 0.30f);
-            return softShapeFalloff(Math.max(nx, ny), 0.50f);
-        }
-
-        if (shape == 5) {
-            float nx = (dx + radius) / Math.max(1f, radius * 2f);
-            float ny = (dy + radius) / Math.max(1f, radius * 2f);
-            float edgeRoom = Math.min(Math.min(nx, ny), 1f - nx - ny);
-            if (edgeRoom <= -0.10f) return 0f;
-            if (edgeRoom >= 0.14f) return 1f;
-            return smoothStep(-0.10f, 0.14f, edgeRoom);
-        }
-
-        float useRadius = shape == 6 ? radius * 0.30f : radius;
-        float norm = (float)Math.sqrt((dx * dx + dy * dy)
-                / Math.max(1f, useRadius * useRadius));
-
-        if (shape == 2) { // Soft Crescent / अर्धचंद्र
-            // Outer soft circle minus a slightly smaller circle shifted to the right.
-            // Rotation is already applied above, so 2-finger rotate turns the crescent naturally.
-            float outerNorm = (float)Math.hypot(dx, dy) / Math.max(1f, radius);
-            float outer = softShapeFalloff(outerNorm, 0.76f);
-
-            float innerRadius = Math.max(1f, radius * 0.84f);
-            float innerCx = radius * 0.38f;
-            float innerNorm = (float)Math.hypot(dx - innerCx, dy) / innerRadius;
-
-            // Deep inside the inner circle = transparent cutout.
-            // Feather only around the inner moon edge.
-            float innerKeep = smoothStep(0.80f, 1.05f, innerNorm);
-            return outer * innerKeep;
-        }
-
-        if (shape == 1) return softShapeFalloff(norm, 0.62f);
-        if (shape == 0) return softShapeFalloff(norm, 0.30f);
-        return softShapeFalloff(norm, 0.42f);
+        return outer * innerKeep;
     }
 
     private float softShapeFalloff(float normalizedDistance, float fullStrengthUntil) {
@@ -3020,45 +2974,17 @@ public class MainActivity extends Activity {
         private void drawShapeOutline(Canvas canvas, float cx, float cy,
                                       float radius, int shape, Paint paint) {
             if (radius <= 0f) return;
-            if (shape == 0 || shape == 1) {
-                canvas.drawCircle(cx, cy, radius, paint);
-                return;
-            }
-            if (shape == 2) { // Soft Crescent / अर्धचंद्र
-                Path p = new Path();
-                p.setFillType(Path.FillType.EVEN_ODD);
-                p.addOval(new RectF(cx - radius, cy - radius,
-                        cx + radius, cy + radius), Path.Direction.CW);
 
-                float innerR = radius * 0.84f;
-                float innerCx = cx + radius * 0.38f;
-                p.addOval(new RectF(innerCx - innerR, cy - innerR,
-                        innerCx + innerR, cy + innerR), Path.Direction.CW);
-                canvas.drawPath(p, paint);
-                return;
-            }
-            if (shape == 3) {
-                RectF rect = new RectF(cx - radius * 0.30f, cy - radius,
-                        cx + radius * 0.30f, cy + radius);
-                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
-                return;
-            }
-            if (shape == 4) {
-                RectF rect = new RectF(cx - radius, cy - radius * 0.30f,
-                        cx + radius, cy + radius * 0.30f);
-                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
-                return;
-            }
-            if (shape == 5) {
-                Path p = new Path();
-                p.moveTo(cx - radius, cy - radius);
-                p.lineTo(cx + radius, cy - radius);
-                p.lineTo(cx - radius, cy + radius);
-                p.close();
-                canvas.drawPath(p, paint);
-                return;
-            }
-            canvas.drawCircle(cx, cy, radius * 0.30f, paint);
+            Path moon = new Path();
+            moon.setFillType(Path.FillType.EVEN_ODD);
+            moon.addOval(new RectF(cx - radius, cy - radius,
+                    cx + radius, cy + radius), Path.Direction.CW);
+
+            float innerR = radius * 0.84f;
+            float innerCx = cx + radius * 0.38f;
+            moon.addOval(new RectF(innerCx - innerR, cy - innerR,
+                    innerCx + innerR, cy + innerR), Path.Direction.CW);
+            canvas.drawPath(moon, paint);
         }
     }
 
@@ -3131,7 +3057,7 @@ public class MainActivity extends Activity {
 
             if (mode == MODE_BRUSH && brushWidthPx > 0f) {
                 if (brushShape >= 0) {
-                    float rr = Math.min(radius * 0.72f, Math.max(10f, brushWidthPx));
+                    float rr = Math.min(radius * 0.84f, Math.max(12f, brushWidthPx));
                     canvas.save();
                     canvas.rotate(brushRotationDegrees, cx, cy);
 
@@ -3210,53 +3136,16 @@ public class MainActivity extends Activity {
                                            float radius, int shape, Paint paint) {
             if (radius <= 0f) return;
 
-            if (shape == 0) {
-                canvas.drawCircle(cx, cy, radius, paint);
-                int oldAlpha = paint.getAlpha();
-                paint.setAlpha(Math.min(190, oldAlpha));
-                canvas.drawCircle(cx, cy, radius * 0.36f, paint);
-                paint.setAlpha(oldAlpha);
-                return;
-            }
-            if (shape == 1) {
-                canvas.drawCircle(cx, cy, radius, paint);
-                return;
-            }
-            if (shape == 2) { // Soft Crescent / अर्धचंद्र
-                Path p = new Path();
-                p.setFillType(Path.FillType.EVEN_ODD);
-                p.addOval(new RectF(cx - radius, cy - radius,
-                        cx + radius, cy + radius), Path.Direction.CW);
+            Path moon = new Path();
+            moon.setFillType(Path.FillType.EVEN_ODD);
+            moon.addOval(new RectF(cx - radius, cy - radius,
+                    cx + radius, cy + radius), Path.Direction.CW);
 
-                float innerR = radius * 0.84f;
-                float innerCx = cx + radius * 0.38f;
-                p.addOval(new RectF(innerCx - innerR, cy - innerR,
-                        innerCx + innerR, cy + innerR), Path.Direction.CW);
-                canvas.drawPath(p, paint);
-                return;
-            }
-            if (shape == 3) {
-                RectF rect = new RectF(cx - radius * 0.30f, cy - radius,
-                        cx + radius * 0.30f, cy + radius);
-                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
-                return;
-            }
-            if (shape == 4) {
-                RectF rect = new RectF(cx - radius, cy - radius * 0.30f,
-                        cx + radius, cy + radius * 0.30f);
-                canvas.drawRoundRect(rect, radius * 0.12f, radius * 0.12f, paint);
-                return;
-            }
-            if (shape == 5) {
-                Path p = new Path();
-                p.moveTo(cx - radius, cy - radius);
-                p.lineTo(cx + radius, cy - radius);
-                p.lineTo(cx - radius, cy + radius);
-                p.close();
-                canvas.drawPath(p, paint);
-                return;
-            }
-            canvas.drawCircle(cx, cy, radius * 0.30f, paint);
+            float innerR = radius * 0.84f;
+            float innerCx = cx + radius * 0.38f;
+            moon.addOval(new RectF(innerCx - innerR, cy - innerR,
+                    innerCx + innerR, cy + innerR), Path.Direction.CW);
+            canvas.drawPath(moon, paint);
         }
 
     }
