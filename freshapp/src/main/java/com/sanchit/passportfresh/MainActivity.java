@@ -3178,7 +3178,7 @@ public class MainActivity extends Activity {
 
             if (shape == 0) {
                 canvas.drawCircle(cx, cy, radius, paint);
-                float oldAlpha = paint.getAlpha();
+                int oldAlpha = paint.getAlpha();
                 paint.setAlpha(Math.min(190, oldAlpha));
                 canvas.drawCircle(cx, cy, radius * 0.36f, paint);
                 paint.setAlpha(oldAlpha);
