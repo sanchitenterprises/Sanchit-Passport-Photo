@@ -1687,13 +1687,13 @@ public class MainActivity extends Activity {
         float magnification = 3.4f;
         float lensRadiusPx = dp(66);
         float sourceRadius = lensRadiusPx / Math.max(0.0001f, currentImageScale() * magnification);
-        float brushRing = brushModeOn
+        float brushWidthInLens = brushModeOn
                 ? Math.min(dp(52), currentBrushScreenRadius() * magnification)
                 : 0f;
 
         magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
                 brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
-                brushRing);
+                brushWidthInLens);
 
         if (brushModeOn && brushCursor != null) {
             brushCursor.setBrush(viewX, viewY, currentBrushScreenRadius() * 2f);
@@ -2658,19 +2658,14 @@ public class MainActivity extends Activity {
             canvas.drawColor(0xFFF7FBFC);
 
             if (source != null && !source.isRecycled()) {
-                float l = Math.max(0f, sourceX - sourceRadius);
-                float t = Math.max(0f, sourceY - sourceRadius);
-                float r = Math.min(source.getWidth() - 1f, sourceX + sourceRadius);
-                float b = Math.min(source.getHeight() - 1f, sourceY + sourceRadius);
-
-                int il = Math.max(0, Math.min(source.getWidth() - 1, Math.round(l)));
-                int it = Math.max(0, Math.min(source.getHeight() - 1, Math.round(t)));
-                int ir = Math.max(il + 1, Math.min(source.getWidth(), Math.round(r)));
-                int ib = Math.max(it + 1, Math.min(source.getHeight(), Math.round(b)));
-
-                Rect src = new Rect(il, it, ir, ib);
-                RectF dst = new RectF(cx - radius, cy - radius, cx + radius, cy + radius);
-                canvas.drawBitmap(source, src, dst, bitmapPaint);
+                // Anchor the magnified image to the exact brush-tip/touch pixel.
+                // This keeps the FRONT bristle tip at lens center even near photo edges.
+                float scale = radius / Math.max(1f, sourceRadius);
+                Matrix lensMatrix = new Matrix();
+                lensMatrix.postTranslate(-sourceX, -sourceY);
+                lensMatrix.postScale(scale, scale);
+                lensMatrix.postTranslate(cx, cy);
+                canvas.drawBitmap(source, lensMatrix, bitmapPaint);
             }
             canvas.restore();
 
@@ -2721,10 +2716,15 @@ public class MainActivity extends Activity {
                         fy - uy * Math.max(28f, w * 1.55f), guidePaint);
                 guidePaint.setStrokeCap(Paint.Cap.BUTT);
 
-                guidePaint.setStrokeWidth(1.8f);
+                // FRONT/contact edge is locked to exact lens center.
+                guidePaint.setStrokeWidth(2.2f);
                 guidePaint.setColor(0xEE111111);
                 canvas.drawLine(tipX - nx * w * 0.42f, tipY - ny * w * 0.42f,
                         tipX + nx * w * 0.42f, tipY + ny * w * 0.42f, guidePaint);
+                guidePaint.setStrokeWidth(1.4f);
+                guidePaint.setColor(0xCCFFFFFF);
+                canvas.drawLine(tipX - nx * w * 0.28f, tipY - ny * w * 0.28f,
+                        tipX + nx * w * 0.28f, tipY + ny * w * 0.28f, guidePaint);
             } else {
                 guidePaint.setStyle(Paint.Style.STROKE);
                 guidePaint.setStrokeWidth(2.5f);
