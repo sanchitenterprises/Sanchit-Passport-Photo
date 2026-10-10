@@ -1677,7 +1677,7 @@ public class MainActivity extends Activity {
         brushButton.setText("CHOOSE COLOR");
         objectButton.setText("LOCAL COLOR CLEAN");
         updateSelectionOverlayFromSource();
-        status.setText("Area selected • CHOOSE COLOR से edge colour चुनें या LOCAL COLOR CLEAN अलग से use करें");
+        status.setText("Area selected • CHOOSE COLOR selected-edge tool है • LOCAL COLOR CLEAN अलग independent tool है");
     }
 
     private boolean isSourcePointInsideSelection(float sx, float sy) {
@@ -1721,25 +1721,28 @@ public class MainActivity extends Activity {
         if (resultBitmap == null) return;
 
         localColorCleanOn = !localColorCleanOn;
-        colorCleanOn = false;
-        localColorCleanOn = false;
-        selectionModeOn = false;
-        selectionDragging = false;
+        if (localColorCleanOn) {
+            brushModeOn = false;
+            colorCleanOn = false;
+            selectionModeOn = false;
+            selectionDragging = false;
+            brushButton.setText("CHOOSE COLOR");
+            if (brushCursor != null) brushCursor.setVisibility(View.GONE);
+            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
+            brushSeek.setProgress(colorToleranceValue);
+        }
 
         if (compareOriginal && localColorCleanOn) {
             compareOriginal = false;
             imageView.setImageBitmap(resultBitmap);
         }
 
-        brushButton.setText("CHOOSE COLOR");
         objectButton.setText(localColorCleanOn
                 ? "LOCAL COLOR CLEAN ✓"
                 : "LOCAL COLOR CLEAN");
-        if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
-        brushSeek.setProgress(colorToleranceValue);
-        updateSelectionOverlayFromSource();
+        renderToolChoiceRow();
         status.setText(localColorCleanOn
-                ? "Local Color Clean ON • पहले जैसा photo पर target colour touch करें"
+                ? "Finger रखें • lens में exact colour देखकर clean करें"
                 : "Local Color Clean OFF");
         hideLens();
     }
@@ -1778,10 +1781,19 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            if ((colorCleanOn || localColorCleanOn) && !compareOriginal && resultBitmap != null) {
+            // Old Local Color Clean behavior: touch shows the magnifier and
+            // waits until finger release before applying the old local flood clean.
+            if (!compareOriginal && resultBitmap != null && localColorCleanOn) {
                 showLens(e.getX(), e.getY());
                 return true;
             }
+
+            // New selected-edge workflow stays separate.
+            if (!compareOriginal && resultBitmap != null && colorCleanOn) {
+                showLens(e.getX(), e.getY());
+                return true;
+            }
+
             return true;
         }
 
@@ -1798,7 +1810,14 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            if ((colorCleanOn || localColorCleanOn) && !compareOriginal && resultBitmap != null) {
+            // Exact old Local Color Clean movement behavior: magnifier follows
+            // finger; cleanup happens only on ACTION_UP.
+            if (!compareOriginal && resultBitmap != null && localColorCleanOn) {
+                showLens(e.getX(), e.getY());
+                return true;
+            }
+
+            if (!compareOriginal && resultBitmap != null && colorCleanOn) {
                 showLens(e.getX(), e.getY());
                 return true;
             }
@@ -1825,15 +1844,23 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            if ((colorCleanOn || localColorCleanOn) && !compareOriginal && resultBitmap != null
-                    && !gestureWasScaling
-                    && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
+            // Exact v1.0.45 Local Color Clean release rule.
+            if (!compareOriginal && resultBitmap != null && !gestureWasScaling
+                    && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())
+                    && localColorCleanOn && !panMoved) {
                 showLens(e.getX(), e.getY());
-                if (colorCleanOn) {
-                    applySelectedEdgeColorAt(e.getX(), e.getY());
-                } else if (localColorCleanOn) {
-                    applyLocalColorCleanAt(e.getX(), e.getY());
-                }
+                applyLocalColorCleanAt(e.getX(), e.getY());
+                hideLens();
+                gestureWasScaling = false;
+                return true;
+            }
+
+            // New selected-area edge cleanup stays separate from Local Color Clean.
+            if (!compareOriginal && resultBitmap != null && !gestureWasScaling
+                    && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())
+                    && colorCleanOn && !panMoved) {
+                showLens(e.getX(), e.getY());
+                applySelectedEdgeColorAt(e.getX(), e.getY());
                 hideLens();
                 gestureWasScaling = false;
                 return true;
@@ -1900,7 +1927,7 @@ public class MainActivity extends Activity {
         float[] pt = new float[]{viewX, viewY};
         inv.mapPoints(pt);
 
-        float magnification = 4.5f;
+        float magnification = localColorCleanOn ? 3.6f : 4.5f;
         float lensRadiusPx = dp(88);
         float sourceRadius = lensRadiusPx
                 / Math.max(0.0001f, currentImageScale() * magnification);
