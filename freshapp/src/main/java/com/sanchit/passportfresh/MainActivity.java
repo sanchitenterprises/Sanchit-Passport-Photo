@@ -1065,7 +1065,8 @@ public class MainActivity extends Activity {
                         // semi-transparent boundary pixels. Sample both directions of the mask:
                         // inward = true subject color, outward = old background color. Remove
                         // the old background contribution before compositing over blue.
-                        // Hair keeps its original RGB. Auto BG may change only hair alpha/mask, never hair colour.\n                        if (!hairCandidate && a > 0.025f && a < 0.995f) {
+                        // Hair keeps its original RGB. Auto BG may change only hair alpha/mask, never hair colour.
+                        if (!hairCandidate && a > 0.025f && a < 0.995f) {
                             int inner = sampleInnerForegroundColor(src, w, h, x, y,
                                     smoothMask, mw, mh, mx, my, confidence);
                             int outer = sampleOuterBackgroundColor(src, w, h, x, y,
@@ -2843,7 +2844,8 @@ public class MainActivity extends Activity {
                     a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
                 }
 
-                // Hair keeps its original RGB. Auto BG may change only hair alpha/mask, never hair colour.\n                        if (!hairCandidate && a > 0.025f && a < 0.995f) {
+                // Hair keeps its original RGB. Auto BG may change only hair alpha/mask, never hair colour.
+                        if (!hairCandidate && a > 0.025f && a < 0.995f) {
                     int inner = sampleInnerForegroundColor(previewSrc, pw, ph, px, py,
                             smoothMask, mw, mh, mx, my, confidence);
                     int outer = sampleOuterBackgroundColor(previewSrc, pw, ph, px, py,
