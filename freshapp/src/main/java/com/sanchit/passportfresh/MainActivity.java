@@ -1825,11 +1825,15 @@ public class MainActivity extends Activity {
                 return true;
             }
 
-            if (colorCleanOn && !compareOriginal && resultBitmap != null
+            if ((colorCleanOn || localColorCleanOn) && !compareOriginal && resultBitmap != null
                     && !gestureWasScaling
                     && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
                 showLens(e.getX(), e.getY());
-                chooseEdgeColorAt(e.getX(), e.getY());
+                if (colorCleanOn) {
+                    applySelectedEdgeColorAt(e.getX(), e.getY());
+                } else if (localColorCleanOn) {
+                    applyLocalColorCleanAt(e.getX(), e.getY());
+                }
                 hideLens();
                 gestureWasScaling = false;
                 return true;
