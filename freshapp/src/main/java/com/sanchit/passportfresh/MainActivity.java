@@ -2171,11 +2171,13 @@ public class MainActivity extends Activity {
             final int tg = Color.green(target);
             final int tb = Color.blue(target);
 
-            int br = Color.red(selectedBackgroundColor);
-            int bg = Color.green(selectedBackgroundColor);
-            int bb = Color.blue(selectedBackgroundColor);
-            if (tr == br && tg == bg && tb == bb) {
-                status.setText("यह पहले से background है • बचा हुआ edge colour चुनें");
+            final int br = Color.red(selectedBackgroundColor);
+            final int bg = Color.green(selectedBackgroundColor);
+            final int bb = Color.blue(selectedBackgroundColor);
+
+            // Ignore a tap that is effectively on the already-replaced solid background.
+            if (colorDistanceSq(tr, tg, tb, br, bg, bb) <= 36f) {
+                status.setText("यह background है • edge का बचा हुआ colour चुनें");
                 return;
             }
 
@@ -2195,33 +2197,48 @@ public class MainActivity extends Activity {
             final int maxY = Math.max(0, Math.min(h - 1, (int)Math.ceil(selectedAreaSource.bottom)));
             final int boxW = maxX - minX + 1;
             final int boxH = maxY - minY + 1;
+
+            // CHOOSE COLOR now really uses the visible Color Tolerance slider.
+            final float toleranceProgress = Math.max(0f,
+                    Math.min(1f, brushSeek.getProgress() / 100f));
+            final float rgbTolerance = 8f + 70f * toleranceProgress;
+            final float rgbToleranceSq = rgbTolerance * rgbTolerance;
+            final float channelTolerance = 5f + 48f * toleranceProgress;
+            final float luminanceTolerance = 6f + 54f * toleranceProgress;
+            final float chromaTolerance = 6f + 31f * toleranceProgress;
+            final float chromaToleranceSq = chromaTolerance * chromaTolerance;
+
+            final float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
+            final float targetCr = tr - targetLum;
+            final float targetCg = tg - targetLum;
+            final float targetCb = tb - targetLum;
+
             final int token = ++renderToken;
 
-            // CHOOSE COLOR stays active until the button is clicked again.
+            // Persistent toggle: only a second CHOOSE COLOR button click turns it OFF.
             brushButton.setText("CHOOSE COLOR ✓");
             setEditingEnabled(false);
-            setBusy(true, "CHOOSE COLOR • selected edge में target colour पूरी तरह smooth remove…");
+            setBusy(true, "CHOOSE COLOR • edge पर target colour family clean हो रही है…");
 
             worker.execute(() -> {
                 try {
+                    if (mask == null || mw <= 0 || mh <= 0 || mask.length < mw * mh) {
+                        throw new IllegalStateException("person mask unavailable");
+                    }
+
                     int[] resultPixels = new int[w * h];
                     int[] erasePixels = new int[w * h];
                     resultSnapshot.getPixels(resultPixels, 0, w, 0, 0, w, h);
                     oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
 
-                    boolean[] exactEdgeMatch = new boolean[boxW * boxH];
+                    boolean[] targetFamilyOnEdge = new boolean[boxW * boxH];
                     int matched = 0;
 
-                    // FINAL RULE:
-                    // 1) Scan the entire SELECTED AREA.
-                    // 2) Match ONLY the exact target RGB chosen by the user.
-                    // 3) Remove it ONLY if it is near the actual person/background edge.
-                    // 4) Same RGB in the middle/interior stays untouched.
-                    // 5) All other colours/shades stay untouched.
-                    if (mask == null || mw <= 0 || mh <= 0 || mask.length < mw * mh) {
-                        throw new IllegalStateException("person mask unavailable");
-                    }
-
+                    // Scan the complete selected area. A pixel is allowed only when:
+                    // - it belongs to the chosen colour family according to Color Tolerance,
+                    // - it is in the real person/background edge band,
+                    // - it is not solid subject interior,
+                    // - and it is not the already-replaced blue background.
                     for (int y = minY; y <= maxY; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX; x++) {
@@ -2234,38 +2251,60 @@ public class MainActivity extends Activity {
                             int g = Color.green(c);
                             int bl = Color.blue(c);
 
-                            // Exact chosen colour only. No tolerance, no similar shade.
-                            if (r != tr || g != tg || bl != tb) continue;
+                            // Never touch pixels that are already the chosen background.
+                            if (colorDistanceSq(r, g, bl, br, bg, bb) <= 36f) continue;
+
+                            float dr = r - tr;
+                            float dg = g - tg;
+                            float db = bl - tb;
+                            float rgbDistanceSq = dr * dr + dg * dg + db * db;
+                            if (rgbDistanceSq > rgbToleranceSq) continue;
+                            if (Math.abs(dr) > channelTolerance
+                                    || Math.abs(dg) > channelTolerance
+                                    || Math.abs(db) > channelTolerance) continue;
+
+                            float lum = 0.299f * r + 0.587f * g + 0.114f * bl;
+                            if (Math.abs(lum - targetLum) > luminanceTolerance) continue;
+
+                            // Chroma comparison lets white/grey halo vary in brightness while
+                            // protecting skin/hair/clothes that have a different colour character.
+                            float cr = r - lum;
+                            float cg = g - lum;
+                            float cb = bl - lum;
+                            float dcr = cr - targetCr;
+                            float dcg = cg - targetCg;
+                            float dcb = cb - targetCb;
+                            float chromaDistanceSq = dcr * dcr + dcg * dcg + dcb * dcb;
+                            if (chromaDistanceSq > chromaToleranceSq) continue;
 
                             int mx = Math.min(mw - 1, Math.max(0,
                                     Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
                             int my = Math.min(mh - 1, Math.max(0,
                                     Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
-                            int mi = my * mw + mx;
-                            float rawConfidence = mask[mi];
+                            float rawConfidence = mask[my * mw + mx];
 
-                            // Edge-zone gate is the only spatial permission.
-                            // This keeps the exact same RGB in face/hair/clothes/interior untouched.
-                            if (!isNearPersonBoundary(mask, mw, mh, mx, my, 5)) continue;
-                            if (rawConfidence > 0.975f) continue;
+                            // Wider practical edge band catches anti-aliased white/grey halo,
+                            // while the same colour in the middle/interior remains protected.
+                            if (!isNearPersonBoundary(mask, mw, mh, mx, my, 8)) continue;
+                            if (rawConfidence > 0.985f) continue;
 
-                            exactEdgeMatch[localIndex] = true;
+                            targetFamilyOnEdge[localIndex] = true;
                             matched++;
                         }
                     }
 
                     int changed = 0;
-                    final int maxChanged = 180000;
+                    final int maxChanged = 200000;
 
-                    // Full removal for every exact-colour pixel that passed the edge gate.
-                    // Smoothness comes from the existing rendered/feathered person edge;
-                    // importantly, we do NOT modify any different RGB pixel to fake feathering.
+                    // Every accepted target-family pixel in the edge band is removed fully.
+                    // Because only the colour family itself is accepted, other colours remain
+                    // untouched; including the family transition shades produces the smooth cut.
                     for (int y = minY; y <= maxY && changed < maxChanged; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX && changed < maxChanged; x++) {
                             int lx = x - minX;
                             int localIndex = ly * boxW + lx;
-                            if (!exactEdgeMatch[localIndex]) continue;
+                            if (!targetFamilyOnEdge[localIndex]) continue;
 
                             int idx = y * w + x;
                             int oldA = Color.alpha(erasePixels[idx]);
@@ -2278,6 +2317,7 @@ public class MainActivity extends Activity {
 
                     final int changedCount = changed;
                     final int matchedCount = matched;
+                    final int toleranceValue = Math.round(toleranceProgress * 100f);
                     final Bitmap updated = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
                     updated.setPixels(erasePixels, 0, w, 0, 0, w, h);
 
@@ -2290,8 +2330,8 @@ public class MainActivity extends Activity {
                             setEditingEnabled(true);
                             brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
                             setBusy(false, matchedCount > 0
-                                    ? "Target colour edge पर पहले से साफ है"
-                                    : "Selected area के edge पर exact target colour नहीं मिला");
+                                    ? "Target colour family edge पर पहले से साफ है"
+                                    : "Edge पर target colour family नहीं मिली • Color Tolerance बढ़ाएँ");
                             return;
                         }
 
@@ -2300,7 +2340,7 @@ public class MainActivity extends Activity {
                         setEditingEnabled(true);
                         brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
                         status.setText("CHOOSE COLOR • " + changedCount
-                                + " px • exact target colour edge से पूरी तरह removed");
+                                + " px edge clean • Tolerance " + toleranceValue + "%");
                         renderResult();
                     });
                 } catch (Throwable e) {

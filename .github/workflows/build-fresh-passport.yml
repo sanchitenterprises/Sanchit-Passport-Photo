@@ -44,7 +44,7 @@ jobs:
           set -euo pipefail
           BT="$ANDROID_SDK_ROOT/build-tools/35.0.0"
           IN="freshapp/build/outputs/apk/release/freshapp-release-unsigned.apk"
-          OUT="freshapp/build/outputs/apk/release/STS-Photo-Background-Remover-v1.0.53-aligned-unsigned.apk"
+          OUT="freshapp/build/outputs/apk/release/STS-Photo-Background-Remover-v1.0.54-aligned-unsigned.apk"
           "$BT/zipalign" -p -f 4 "$IN" "$OUT"
           "$BT/zipalign" -c -P 16 -v 4 "$OUT" | tee freshapp/build/outputs/apk/release/ZIPALIGN-VERIFY.txt
           "$BT/aapt" dump badging "$OUT" | tee freshapp/build/outputs/apk/release/AAPT-BADGING.txt
@@ -59,9 +59,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: STS-Photo-Background-Remover-v1.0.53
+          name: STS-Photo-Background-Remover-v1.0.54
           path: |
-            freshapp/build/outputs/apk/release/STS-Photo-Background-Remover-v1.0.53-aligned-unsigned.apk
+            freshapp/build/outputs/apk/release/STS-Photo-Background-Remover-v1.0.54-aligned-unsigned.apk
             freshapp/build/outputs/apk/release/ZIPALIGN-VERIFY.txt
             freshapp/build/outputs/apk/release/AAPT-BADGING.txt
             freshapp/build/outputs/apk/release/PERMISSIONS.txt
