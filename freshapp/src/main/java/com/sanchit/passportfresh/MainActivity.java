@@ -970,24 +970,21 @@ public class MainActivity extends Activity {
 
                 // Smooth BG is edge smoothing, not a whole-person blur.
                 // 0% = tight/raw edge, 100% = clearly smoother/anti-aliased edge.
-                int blurRadius = smooth == 0 ? 0 : Math.max(1, Math.round(1f + smoothAmount * 8f));
+                int blurRadius = smooth == 0 ? 0 : Math.max(1, Math.round(1f + smoothAmount * 6f));
                 float[] smoothMask = blurRadius == 0 ? mask : blurMask(mask, mw, mh, blurRadius);
 
-                // A small second pass only at higher values removes stair-step/jagged edge noise.
-                if (smoothAmount > 0.62f) {
+                // Alpha-only second pass begins at normal Smooth values so shirt/shoulder
+                // stair-steps are rounded without changing any foreground RGB.
+                if (smoothAmount > 0.25f) {
                     smoothMask = blurMask(smoothMask, mw, mh,
-                            Math.max(1, Math.round((smoothAmount - 0.58f) * 5f)));
+                            Math.max(1, Math.round(1f + smoothAmount * 2f)));
                 }
 
-                // Hair support is intentionally conservative so smoothing does not eat strands.
-                int hairRadius = 1 + Math.round(smoothAmount * 2f);
-                float[] hairSupportMask = maxFilterMask(mask, mw, mh, hairRadius);
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
-                // Increasing Smooth BG widens only the transition band and slightly trims
-                // old background matte; the actual subject position stays stable.
-                float threshold = 0.50f + (0.030f * smoothAmount);
-                float feather = 0.075f + (0.205f * smoothAmount);
+                // Slight inward alpha trim hides old-background fringe without recolouring.
+                float threshold = 0.515f + (0.045f * smoothAmount);
+                float feather = 0.105f + (0.190f * smoothAmount);
                 float low = threshold - feather * 0.5f;
                 float high = threshold + feather * 0.5f;
                 float brightnessAmount = Math.max(0f, Math.min(1f, brightness / 100f));
@@ -998,25 +995,27 @@ public class MainActivity extends Activity {
                 int bb = Color.blue(backgroundColor);
 
                 for (int y = 0; y < h; y++) {
-                    int my = Math.min(mh - 1, Math.max(0, Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+                    float maskY = y * (mh - 1f) / Math.max(1f, h - 1f);
+                    int my = Math.min(mh - 1, Math.max(0, Math.round(maskY)));
                     for (int x = 0; x < w; x++) {
                         int idx = y * w + x;
 
                         float manualErase = erase == null ? 0f : (Color.alpha(erase[idx]) / 255f);
 
-                        int mx = Math.min(mw - 1, Math.max(0, Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                        float maskX = x * (mw - 1f) / Math.max(1f, w - 1f);
+                        int mx = Math.min(mw - 1, Math.max(0, Math.round(maskX)));
 
                         int c = src[idx];
                         int r = Color.red(c);
                         int g = Color.green(c);
                         int b = Color.blue(c);
-                        float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
 
-                        int maskIndex = Math.min(smoothMask.length - 1, my * mw + mx);
-                        float rawConfidence = mask[Math.min(mask.length - 1, my * mw + mx)];
-                        float blurredConfidence = smoothMask[maskIndex];
-                        float confidence = rawConfidence * (1f - smoothAmount)
-                                + blurredConfidence * smoothAmount;
+                        float rawConfidence = sampleMaskBilinear(mask, mw, mh, maskX, maskY);
+                        float blurredConfidence = sampleMaskBilinear(smoothMask, mw, mh, maskX, maskY);
+                        // Bilinear alpha sampling removes mask-cell blocks/stair-steps.
+                        float edgeMix = smooth == 0 ? 0f : Math.min(0.90f, 0.52f + 0.70f * smoothAmount);
+                        float confidence = rawConfidence * (1f - edgeMix)
+                                + blurredConfidence * edgeMix;
                         // Auto BG Remove rule: foreground RGB stays exactly from source.
                         // Only segmentation alpha is smoothed; no hair/skin recolour or decontamination.
                         float linearA = Math.max(0f, Math.min(1f,
@@ -1026,7 +1025,7 @@ public class MainActivity extends Activity {
                         float a = linearA * (1f - curveMix) + curvedA * curveMix;
 
                         // Smooth BG affects edge alpha only.
-                        float edgeTrim = 0.055f * smoothAmount;
+                        float edgeTrim = 0.035f + 0.075f * smoothAmount;
                         a = Math.max(0f, Math.min(1f,
                                 (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
 
@@ -1450,6 +1449,25 @@ public class MainActivity extends Activity {
             }
         }
         return out;
+    }
+
+    private float sampleMaskBilinear(float[] src, int w, int h, float x, float y) {
+        if (src == null || src.length < w * h || w <= 0 || h <= 0) return 0f;
+        x = Math.max(0f, Math.min(w - 1f, x));
+        y = Math.max(0f, Math.min(h - 1f, y));
+        int x0 = (int)Math.floor(x);
+        int y0 = (int)Math.floor(y);
+        int x1 = Math.min(w - 1, x0 + 1);
+        int y1 = Math.min(h - 1, y0 + 1);
+        float fx = x - x0;
+        float fy = y - y0;
+        float v00 = src[y0 * w + x0];
+        float v10 = src[y0 * w + x1];
+        float v01 = src[y1 * w + x0];
+        float v11 = src[y1 * w + x1];
+        float top = v00 + (v10 - v00) * fx;
+        float bottom = v01 + (v11 - v01) * fx;
+        return top + (bottom - top) * fy;
     }
 
     private float smoothStep(float edge0, float edge1, float x) {
@@ -2694,18 +2712,16 @@ public class MainActivity extends Activity {
         }
 
         float smoothAmount = Math.max(0f, Math.min(1f, smooth / 100f));
-        int blurRadius = smooth == 0 ? 0 : Math.max(1, Math.round(1f + smoothAmount * 8f));
+        int blurRadius = smooth == 0 ? 0 : Math.max(1, Math.round(1f + smoothAmount * 6f));
         float[] smoothMask = blurRadius == 0 ? mask : blurMask(mask, mw, mh, blurRadius);
-        if (smoothAmount > 0.62f) {
+        if (smoothAmount > 0.25f) {
             smoothMask = blurMask(smoothMask, mw, mh,
-                    Math.max(1, Math.round((smoothAmount - 0.58f) * 5f)));
+                    Math.max(1, Math.round(1f + smoothAmount * 2f)));
         }
-        int hairRadius = 1 + Math.round(smoothAmount * 2f);
-        float[] hairSupportMask = maxFilterMask(mask, mw, mh, hairRadius);
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
-        float threshold = 0.50f + (0.030f * smoothAmount);
-        float feather = 0.075f + (0.205f * smoothAmount);
+        float threshold = 0.515f + (0.045f * smoothAmount);
+        float feather = 0.105f + (0.190f * smoothAmount);
         float low = threshold - feather * 0.5f;
         float high = threshold + feather * 0.5f;
         float brightnessAmount = Math.max(0f, Math.min(1f, brightness / 100f));
@@ -2720,14 +2736,14 @@ public class MainActivity extends Activity {
         for (int y = 0; y < h; y++) {
             full.getPixels(row, 0, w, 0, y, w, 1);
 
-            int my = Math.min(mh - 1, Math.max(0,
-                    Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+            float maskY = y * (mh - 1f) / Math.max(1f, h - 1f);
+            int my = Math.min(mh - 1, Math.max(0, Math.round(maskY)));
             int py = Math.min(ph - 1, Math.max(0,
                     Math.round(y * (ph - 1f) / Math.max(1f, h - 1f))));
 
             for (int x = 0; x < w; x++) {
-                int mx = Math.min(mw - 1, Math.max(0,
-                        Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                float maskX = x * (mw - 1f) / Math.max(1f, w - 1f);
+                int mx = Math.min(mw - 1, Math.max(0, Math.round(maskX)));
                 int px = Math.min(pw - 1, Math.max(0,
                         Math.round(x * (pw - 1f) / Math.max(1f, w - 1f))));
 
@@ -2735,13 +2751,12 @@ public class MainActivity extends Activity {
                 int r = Color.red(color);
                 int g = Color.green(color);
                 int b = Color.blue(color);
-                float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
 
-                int maskIndex = Math.min(smoothMask.length - 1, my * mw + mx);
-                float rawConfidence = mask[Math.min(mask.length - 1, my * mw + mx)];
-                float blurredConfidence = smoothMask[maskIndex];
-                float confidence = rawConfidence * (1f - smoothAmount)
-                        + blurredConfidence * smoothAmount;
+                float rawConfidence = sampleMaskBilinear(mask, mw, mh, maskX, maskY);
+                float blurredConfidence = sampleMaskBilinear(smoothMask, mw, mh, maskX, maskY);
+                float edgeMix = smooth == 0 ? 0f : Math.min(0.90f, 0.52f + 0.70f * smoothAmount);
+                float confidence = rawConfidence * (1f - edgeMix)
+                        + blurredConfidence * edgeMix;
                 // Same rule as preview: original foreground RGB is untouched.
                 // Smooth BG changes only segmentation alpha.
                 float linearA = Math.max(0f, Math.min(1f,
@@ -2749,7 +2764,7 @@ public class MainActivity extends Activity {
                 float curvedA = smoothStep(0f, 1f, linearA);
                 float curveMix = 0.18f + 0.62f * smoothAmount;
                 float a = linearA * (1f - curveMix) + curvedA * curveMix;
-                float edgeTrim = 0.055f * smoothAmount;
+                float edgeTrim = 0.035f + 0.075f * smoothAmount;
                 a = Math.max(0f, Math.min(1f,
                         (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
 
