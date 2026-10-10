@@ -1707,7 +1707,7 @@ public class MainActivity extends Activity {
         brushSeek.setProgress(colorToleranceValue);
         updateSelectionOverlayFromSource();
         status.setText(colorCleanOn
-                ? "Selected area के अंदर बचा colour touch करें • बाहर कुछ नहीं बदलेगा"
+                ? "Selected area में edge का बचा colour touch करें • पूरे matching edge को smooth हटाएगा"
                 : "Local Color Clean OFF");
         hideLens();
     }
@@ -2134,15 +2134,20 @@ public class MainActivity extends Activity {
             final int maxX = Math.max(0, Math.min(w - 1, (int)Math.ceil(selectedAreaSource.right)));
             final int minY = Math.max(0, Math.min(h - 1, (int)Math.floor(selectedAreaSource.top)));
             final int maxY = Math.max(0, Math.min(h - 1, (int)Math.ceil(selectedAreaSource.bottom)));
+            final int boxW = maxX - minX + 1;
+            final int boxH = maxY - minY + 1;
+
             final float toleranceProgress = Math.max(0f,
                     Math.min(1f, brushSeek.getProgress() / 100f));
-            final float tolerance = 6f + 82f * toleranceProgress;
-            final float toleranceSq = tolerance * tolerance;
+            final float coreTolerance = 10f + 88f * toleranceProgress;
+            final float coreToleranceSq = coreTolerance * coreTolerance;
+            final float softTolerance = coreTolerance * 1.48f + 8f;
+            final float softToleranceSq = softTolerance * softTolerance;
             final float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
             final int token = ++renderToken;
 
             setEditingEnabled(false);
-            setBusy(true, "Local Color Clean • selected area scan हो रहा है…");
+            setBusy(true, "Local Color Clean • पूरे selected edge पर smooth cleanup…");
 
             worker.execute(() -> {
                 try {
@@ -2151,19 +2156,17 @@ public class MainActivity extends Activity {
                     resultSnapshot.getPixels(resultPixels, 0, w, 0, 0, w, h);
                     oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
 
-                    float[] supportMask = (mask != null && mw > 0 && mh > 0)
-                            ? maxFilterMask(mask, mw, mh, 2) : null;
-                    int[] personBounds = (mask != null && mw > 0 && mh > 0)
-                            ? findMaskBounds(mask, mw, mh, 0.55f) : null;
-
-                    int changed = 0;
+                    float[] rawStrength = new float[boxW * boxH];
+                    boolean[] edgeAllowed = new boolean[boxW * boxH];
                     int matched = 0;
-                    final int maxChanged = 120000;
 
-                    // Scan the WHOLE selected area for the tapped colour.
-                    // Nothing outside this rectangle can be changed.
-                    for (int y = minY; y <= maxY && changed < maxChanged; y++) {
-                        for (int x = minX; x <= maxX && changed < maxChanged; x++) {
+                    // First pass: find matching colour across the WHOLE selected edge.
+                    // No connectivity requirement: every matching spot on that edge is included.
+                    for (int y = minY; y <= maxY; y++) {
+                        int ly = y - minY;
+                        for (int x = minX; x <= maxX; x++) {
+                            int lx = x - minX;
+                            int localIndex = ly * boxW + lx;
                             int idx = y * w + x;
                             int c = resultPixels[idx];
                             int r = Color.red(c);
@@ -2171,45 +2174,111 @@ public class MainActivity extends Activity {
                             int b = Color.blue(c);
 
                             float d = colorDistanceSq(r, g, b, tr, tg, tb);
-                            if (d > toleranceSq) continue;
-
-                            float channelLimit = tolerance * 0.94f + 2f;
-                            if (Math.abs(r - tr) > channelLimit
-                                    || Math.abs(g - tg) > channelLimit
-                                    || Math.abs(b - tb) > channelLimit) continue;
+                            if (d > softToleranceSq) continue;
 
                             float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-                            if (Math.abs(lum - targetLum) > tolerance * 0.92f + 3f) continue;
-                            matched++;
+                            if (Math.abs(lum - targetLum) > softTolerance * 1.04f + 4f) continue;
 
-                            // Edge-aware protection: matching colour can be removed anywhere in
-                            // the selected area, but strong real subject interior is protected.
+                            float rawConfidence = 0f;
+                            boolean boundary = true;
                             if (mask != null && mw > 0 && mh > 0 && mask.length >= mw * mh) {
                                 int mx = Math.min(mw - 1, Math.max(0,
                                         Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
                                 int my = Math.min(mh - 1, Math.max(0,
                                         Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
                                 int mi = my * mw + mx;
-                                float rawConfidence = mask[mi];
-                                boolean boundary = isNearPersonBoundary(mask, mw, mh, mx, my, 3);
+                                rawConfidence = mask[mi];
 
-                                boolean skin = isSkinLikeColor(r, g, b);
-                                boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                                float support = supportMask == null ? rawConfidence : supportMask[mi];
-                                float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
-                                boolean likelyHair = headZone && !skin
-                                        && luminance < 175f && support > 0.34f;
-
-                                // Keep real skin/hair and solid interior even if its colour is
-                                // similar to the selected leftover background.
-                                if (skin && rawConfidence > 0.50f) continue;
-                                if (likelyHair && rawConfidence > 0.38f) continue;
-                                if (!boundary && rawConfidence > 0.88f) continue;
+                                // Wide edge band: catches leftover matte on either side of the
+                                // segmentation edge, but rejects solid photo interior.
+                                boundary = isNearPersonBoundary(mask, mw, mh, mx, my, 5);
+                                if (!boundary) continue;
+                                if (rawConfidence > 0.975f) continue;
                             }
 
+                            edgeAllowed[localIndex] = true;
+                            matched++;
+
+                            float distance = (float)Math.sqrt(Math.max(0f, d));
+                            float similarity = 1f - Math.min(1f, distance / Math.max(1f, softTolerance));
+                            boolean coreMatch = d <= coreToleranceSq;
+
+                            float strength;
+                            if (coreMatch) {
+                                float coreSimilarity = 1f - Math.min(1f,
+                                        distance / Math.max(1f, coreTolerance));
+                                strength = 0.88f + 0.12f * coreSimilarity;
+                            } else {
+                                // Near shade is feathered instead of hard cut.
+                                strength = 0.18f + 0.54f * similarity;
+                            }
+
+                            if (mask != null && mw > 0 && mh > 0) {
+                                // On the subject side of the edge, taper rather than cutting hard.
+                                // Background-side residue still gets full cleanup.
+                                if (rawConfidence > 0.72f) {
+                                    strength = Math.min(strength, 0.56f);
+                                } else if (rawConfidence > 0.55f) {
+                                    strength = Math.min(strength, 0.78f);
+                                }
+                            }
+
+                            rawStrength[localIndex] = Math.max(rawStrength[localIndex], strength);
+                        }
+                    }
+
+                    // Second pass: feather between neighbouring matching shades.
+                    // This makes the removed edge smooth instead of a jagged/hard 255-alpha cut.
+                    float[] feathered = new float[rawStrength.length];
+                    for (int ly = 0; ly < boxH; ly++) {
+                        for (int lx = 0; lx < boxW; lx++) {
+                            int localIndex = ly * boxW + lx;
+                            if (!edgeAllowed[localIndex]) continue;
+
+                            float weighted = rawStrength[localIndex] * 4f;
+                            float weight = 4f;
+                            float neighbourMax = rawStrength[localIndex];
+
+                            for (int oy = -2; oy <= 2; oy++) {
+                                int ny = ly + oy;
+                                if (ny < 0 || ny >= boxH) continue;
+                                for (int ox = -2; ox <= 2; ox++) {
+                                    int nx = lx + ox;
+                                    if (nx < 0 || nx >= boxW || (ox == 0 && oy == 0)) continue;
+                                    int ni = ny * boxW + nx;
+                                    if (!edgeAllowed[ni]) continue;
+
+                                    float distanceWeight = (Math.abs(ox) + Math.abs(oy) <= 1) ? 2f : 1f;
+                                    weighted += rawStrength[ni] * distanceWeight;
+                                    weight += distanceWeight;
+                                    if (rawStrength[ni] > neighbourMax) neighbourMax = rawStrength[ni];
+                                }
+                            }
+
+                            float average = weighted / Math.max(1f, weight);
+                            feathered[localIndex] = Math.max(rawStrength[localIndex],
+                                    Math.max(average * 0.86f, neighbourMax * 0.34f));
+                        }
+                    }
+
+                    int changed = 0;
+                    final int maxChanged = 160000;
+
+                    // Apply only inside selected area + real edge band.
+                    for (int y = minY; y <= maxY && changed < maxChanged; y++) {
+                        int ly = y - minY;
+                        for (int x = minX; x <= maxX && changed < maxChanged; x++) {
+                            int lx = x - minX;
+                            int localIndex = ly * boxW + lx;
+                            float strength = feathered[localIndex];
+                            if (strength <= 0.025f) continue;
+
+                            int idx = y * w + x;
                             int oldA = Color.alpha(erasePixels[idx]);
-                            if (oldA < 255) {
-                                erasePixels[idx] = Color.argb(255, 255, 255, 255);
+                            int newA = Math.max(oldA,
+                                    Math.round(255f * Math.max(0f, Math.min(1f, strength))));
+                            if (newA > oldA + 2) {
+                                erasePixels[idx] = Color.argb(newA, 255, 255, 255);
                                 changed++;
                             }
                         }
@@ -2228,16 +2297,16 @@ public class MainActivity extends Activity {
                             updateHistoryButtons();
                             setEditingEnabled(true);
                             setBusy(false, matchedCount > 0
-                                    ? "Matching colour मिला लेकिन subject protection ने उसे बचाया"
-                                    : "Selected area में matching colour नहीं मिला");
+                                    ? "Matching edge colour मिला लेकिन नया erase नहीं बना"
+                                    : "Selected edge में matching colour नहीं मिला");
                             return;
                         }
 
                         eraseMask = updated;
                         updateHistoryButtons();
                         setEditingEnabled(true);
-                        status.setText("Local Clean • " + changedCount
-                                + " px • सिर्फ selected area");
+                        status.setText("Smooth Local Clean • " + changedCount
+                                + " px • पूरा selected edge");
                         renderResult();
                     });
                 } catch (Throwable e) {
