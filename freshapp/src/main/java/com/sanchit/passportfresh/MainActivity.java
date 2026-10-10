@@ -1014,13 +1014,13 @@ public class MainActivity extends Activity {
                         float hairSupport = hairSupportMask[maskIndex];
 
                         boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                        // Dark/medium pixels near a strong person mask are likely hair.
-                        // This protects hair strands and fills small blue holes inside the hair mass.
-                        boolean skinLike = isSkinLikeColor(r, g, b);
+                        // Hair must win over skin detection. Dark/brown hair can fall inside
+                        // skin-like YCbCr ranges, so classify hair first and exclude it from
+                        // fairness/brightness/RGB decontamination.
                         boolean hairCandidate = headZone
-                                && !skinLike
-                                && luminance < 165f
-                                && hairSupport > 0.30f;
+                                && luminance < 190f
+                                && hairSupport > 0.26f;
+                        boolean skinLike = isSkinLikeColor(r, g, b) && !hairCandidate;
 
                         float a;
                         if (hairCandidate) {
@@ -1152,7 +1152,7 @@ public class MainActivity extends Activity {
 
                         // Do not brighten the semi-transparent edge itself; that was creating
                         // a visible white outline. Brightness fades in only toward solid foreground.
-                        if (a > 0.03f && brighten > 0f) {
+                        if (!hairCandidate && a > 0.03f && brighten > 0f) {
                             float interior = smoothStep(0.48f, 0.93f, a);
                             float localBrighten = brighten * interior;
                             r = clamp255(Math.round(r + (255 - r) * localBrighten));
@@ -2812,11 +2812,11 @@ public class MainActivity extends Activity {
                 float hairSupport = hairSupportMask[maskIndex];
 
                 boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                boolean skinLike = isSkinLikeColor(r, g, b);
+                // Hair must win over skin detection here too, so saved output matches preview.
                 boolean hairCandidate = headZone
-                        && !skinLike
-                        && luminance < 165f
-                        && hairSupport > 0.30f;
+                        && luminance < 190f
+                        && hairSupport > 0.26f;
+                boolean skinLike = isSkinLikeColor(r, g, b) && !hairCandidate;
 
                 float a;
                 if (hairCandidate) {
@@ -2922,7 +2922,7 @@ public class MainActivity extends Activity {
                     b = clamp255(Math.round(b * scale));
                 }
 
-                if (a > 0.03f && brighten > 0f) {
+                if (!hairCandidate && a > 0.03f && brighten > 0f) {
                     float interior = smoothStep(0.48f, 0.93f, a);
                     float localBrighten = brighten * interior;
                     r = clamp255(Math.round(r + (255 - r) * localBrighten));
