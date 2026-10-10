@@ -124,9 +124,10 @@ public class MainActivity extends Activity {
     private Uri cameraUri;
     private Uri sourceUri;
     private boolean compareOriginal;
-    private boolean brushModeOn = false;
+    private boolean brushModeOn = false; // legacy backend only; no BRUSH UI/runtime
     private boolean colorCleanOn = false;
-    private boolean smartEdgeCleanOn = false;
+    private boolean hairEdgeOn = false;
+    private boolean skinEdgeOn = false;
     private boolean brushStrokeStarted = false;
     private boolean brushStrokeChanged = false;
     private boolean brushFinalizing = false;
@@ -290,11 +291,11 @@ public class MainActivity extends Activity {
         brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row2 = buttonRow();
-        compareButton = button("SMART EDGE CLEAN", false);
-        brushButton = button("BRUSH", false);
+        compareButton = button("SKIN EDGE", false);
+        brushButton = button("HAIR EDGE", false);
         objectButton = button("LOCAL COLOR CLEAN", false);
-        compareButton.setTextSize(9);
-        brushButton.setTextSize(11);
+        compareButton.setTextSize(10);
+        brushButton.setTextSize(10);
         objectButton.setTextSize(10);
         row2.addView(compareButton, weightedButton());
         row2.addView(brushButton, weightedButton());
@@ -312,8 +313,8 @@ public class MainActivity extends Activity {
 
         camera.setOnClickListener(v -> openCamera());
         gallery.setOnClickListener(v -> openGallery());
-        compareButton.setOnClickListener(v -> smartEdgeClean());
-        brushButton.setOnClickListener(v -> toggleBrushMode());
+        compareButton.setOnClickListener(v -> toggleSkinEdge());
+        brushButton.setOnClickListener(v -> toggleHairEdge());
         objectButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
@@ -352,12 +353,11 @@ public class MainActivity extends Activity {
         smoothSeek.setOnSeekBarChangeListener(redraw);
         brushSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
-                if (brushModeOn) {
-                    brushSizeValue = p;
-                    if (fromUser && status != null) status.setText("Brush Size " + p + "%");
-                } else {
-                    colorToleranceValue = p;
-                    if (fromUser && status != null) status.setText("Color Tolerance " + p + "%");
+                colorToleranceValue = p;
+                if (fromUser && status != null) {
+                    if (hairEdgeOn) status.setText("Hair Edge Range " + p + "%");
+                    else if (skinEdgeOn) status.setText("Skin Edge Range " + p + "%");
+                    else status.setText("Color Tolerance " + p + "%");
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -420,9 +420,9 @@ public class MainActivity extends Activity {
         int textColor = Color.WHITE;
         if (text.contains("UNDO")) bgColor = 0xFF7C7399;
         else if (text.contains("REDO")) bgColor = 0xFF7E9B76;
-        else if (text.contains("SMART EDGE")) { bgColor = 0xFF7E9B76; textColor = 0xFF111827; }
+        else if (text.contains("SKIN EDGE")) { bgColor = 0xFF7E9B76; textColor = 0xFF111827; }
+        else if (text.contains("HAIR EDGE")) bgColor = 0xFF4F8F8B;
         else if (text.contains("COMPARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
-        else if (text.contains("BRUSH")) bgColor = 0xFF4F8F8B;
         else if (text.contains("LOCAL")) bgColor = 0xFF5B7FA3;
         else if (text.contains("कैमरा")) bgColor = 0xFF7C7399;
         else if (text.contains("फोटो")) bgColor = 0xFF5B7FA3;
@@ -470,69 +470,6 @@ public class MainActivity extends Activity {
     private void renderToolChoiceRow() {
         if (backgroundColorRow == null) return;
         backgroundColorRow.removeAllViews();
-
-        if (brushModeOn) {
-            // First slot is the default NORMAL live brush.
-            FrameLayout normalSlot = new FrameLayout(this);
-            normalSlot.setTag(-1);
-            boolean normalSelected = brushShapeIndex < 0;
-            normalSlot.setBackground(rounded(normalSelected ? 0xFFD7EAE8 : 0xFFF8FBFA, 12));
-            normalSlot.setElevation(normalSelected ? dp(3) : dp(1));
-
-            TextView normalIcon = new TextView(this);
-            normalIcon.setText("✎");
-            normalIcon.setTextSize(24);
-            normalIcon.setTextColor(0xFF111827);
-            normalIcon.setGravity(Gravity.CENTER);
-            normalIcon.setContentDescription("Normal Brush");
-            normalSlot.addView(normalIcon, new FrameLayout.LayoutParams(-1, -1));
-            normalSlot.setOnClickListener(v -> {
-                brushShapeIndex = -1;
-                brushRotationDegrees = 0f;
-                dualBrushRotateActive = false;
-                if (brushCursor != null) {
-                    brushCursor.clearTrail();
-                    brushCursor.clearShapePreview();
-                }
-                renderToolChoiceRow();
-                status.setText("Normal Brush • live stroke");
-            });
-            attachTouchAnimation(normalSlot);
-            LinearLayout.LayoutParams normalLp = new LinearLayout.LayoutParams(0, -1, 1f);
-            normalLp.setMargins(dp(1), dp(1), dp(1), dp(1));
-            backgroundColorRow.addView(normalSlot, normalLp);
-
-            // Seven crescent presets at different directions/angles.
-            for (int i = 0; i < BRUSH_SHAPE_NAMES.length; i++) {
-                final int shapeIndex = i;
-                FrameLayout slot = new FrameLayout(this);
-                slot.setTag(shapeIndex);
-                boolean selected = shapeIndex == brushShapeIndex;
-                slot.setBackground(rounded(selected ? 0xFFD7EAE8 : 0xFFF8FBFA, 12));
-                slot.setElevation(selected ? dp(3) : dp(1));
-
-                ImageView icon = createBrushShapePngIcon(shapeIndex);
-                FrameLayout.LayoutParams iconLp = new FrameLayout.LayoutParams(dp(30), dp(30));
-                iconLp.gravity = Gravity.CENTER;
-                slot.addView(icon, iconLp);
-
-                slot.setOnClickListener(v -> {
-                    brushShapeIndex = shapeIndex;
-                    brushRotationDegrees = BRUSH_SHAPE_BASE_ANGLES[shapeIndex];
-                    dualBrushRotateActive = false;
-                    if (brushCursor != null) brushCursor.clearTrail();
-                    renderToolChoiceRow();
-                    status.setText(BRUSH_SHAPE_NAMES[shapeIndex]
-                            + " • 2-finger rotate");
-                });
-                attachTouchAnimation(slot);
-
-                LinearLayout.LayoutParams slotLp = new LinearLayout.LayoutParams(0, -1, 1f);
-                slotLp.setMargins(dp(1), dp(1), dp(1), dp(1));
-                backgroundColorRow.addView(slot, slotLp);
-            }
-            return;
-        }
 
         for (int i = 0; i < PHOTO_BG_COLORS.length; i++) {
             final int color = PHOTO_BG_COLORS[i];
@@ -1558,58 +1495,97 @@ public class MainActivity extends Activity {
 
     private void toggleCompare() {
         if (originalBitmap == null || resultBitmap == null) return;
-        smartEdgeCleanOn = false;
-        if (compareButton != null) compareButton.setText("SMART EDGE CLEAN");
+        hairEdgeOn = false;
+        skinEdgeOn = false;
+        colorCleanOn = false;
+        if (brushButton != null) brushButton.setText("HAIR EDGE");
+        if (compareButton != null) compareButton.setText("SKIN EDGE");
+        if (objectButton != null) objectButton.setText("LOCAL COLOR CLEAN");
         compareOriginal = !compareOriginal;
         imageView.setImageBitmap(compareOriginal ? originalBitmap : resultBitmap);
         status.setText(compareOriginal ? "Compare • Original" : "Compare • Result");
     }
 
-    private void smartEdgeClean() {
+    private void toggleHairEdge() {
         if (resultBitmap == null || originalBitmap == null || personMask == null) {
             toast("पहले फोटो process करें");
             return;
         }
 
-        smartEdgeCleanOn = !smartEdgeCleanOn;
+        hairEdgeOn = !hairEdgeOn;
+        skinEdgeOn = false;
+        colorCleanOn = false;
+        brushModeOn = false;
+        compareOriginal = false;
+        imageView.setImageBitmap(resultBitmap);
 
-        if (smartEdgeCleanOn) {
-            compareOriginal = false;
-            imageView.setImageBitmap(resultBitmap);
+        brushButton.setText(hairEdgeOn ? "HAIR EDGE ✓" : "HAIR EDGE");
+        compareButton.setText("SKIN EDGE");
+        objectButton.setText("LOCAL COLOR CLEAN");
 
-            brushModeOn = false;
-            colorCleanOn = false;
-            brushShapeIndex = -1;
-            brushRotationDegrees = 0f;
-            dualBrushRotateActive = false;
-
-            brushButton.setText("BRUSH");
-            objectButton.setText("LOCAL COLOR CLEAN");
-            compareButton.setText("SMART EDGE CLEAN ✓");
-
-            if (brushCursor != null) {
-                brushCursor.clearTrail();
-                brushCursor.clearShapePreview();
-                brushCursor.setVisibility(View.GONE);
-            }
-
-            if (toolSeekLabel != null) toolSeekLabel.setText("Smart Clean Range");
-            brushSeek.setProgress(colorToleranceValue);
-            renderToolChoiceRow();
-            status.setText("Smart Edge Clean ON • जहाँ residue छूटा है वहीं finger रखें");
-        } else {
-            compareButton.setText("SMART EDGE CLEAN");
-            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
-            brushSeek.setProgress(colorToleranceValue);
-            status.setText("Smart Edge Clean OFF");
+        if (brushCursor != null) {
+            brushCursor.clearTrail();
+            brushCursor.clearShapePreview();
+            brushCursor.setVisibility(View.GONE);
         }
 
+        if (toolSeekLabel != null) {
+            toolSeekLabel.setText(hairEdgeOn ? "Hair Edge Range" : "Color Tolerance");
+        }
+        brushSeek.setProgress(colorToleranceValue);
+        renderToolChoiceRow();
+        status.setText(hairEdgeOn
+                ? "Hair Edge ON • बालों में छूटा background touch करें"
+                : "Hair Edge OFF");
         hideLens();
     }
 
-    private void applySmartEdgeCleanAt(float viewX, float viewY) {
-        if (!smartEdgeCleanOn || destroyed || originalBitmap == null
-                || resultBitmap == null || personMask == null || worker.isShutdown()) return;
+    private void toggleSkinEdge() {
+        if (resultBitmap == null || originalBitmap == null || personMask == null) {
+            toast("पहले फोटो process करें");
+            return;
+        }
+
+        skinEdgeOn = !skinEdgeOn;
+        hairEdgeOn = false;
+        colorCleanOn = false;
+        brushModeOn = false;
+        compareOriginal = false;
+        imageView.setImageBitmap(resultBitmap);
+
+        compareButton.setText(skinEdgeOn ? "SKIN EDGE ✓" : "SKIN EDGE");
+        brushButton.setText("HAIR EDGE");
+        objectButton.setText("LOCAL COLOR CLEAN");
+
+        if (brushCursor != null) {
+            brushCursor.clearTrail();
+            brushCursor.clearShapePreview();
+            brushCursor.setVisibility(View.GONE);
+        }
+
+        if (toolSeekLabel != null) {
+            toolSeekLabel.setText(skinEdgeOn ? "Skin Edge Range" : "Color Tolerance");
+        }
+        brushSeek.setProgress(colorToleranceValue);
+        renderToolChoiceRow();
+        status.setText(skinEdgeOn
+                ? "Skin Edge ON • skin के पास छूटा background touch करें"
+                : "Skin Edge OFF");
+        hideLens();
+    }
+
+    private void applyHairEdgeAt(float viewX, float viewY) {
+        applyTargetedEdgeAt(viewX, viewY, true);
+    }
+
+    private void applySkinEdgeAt(float viewX, float viewY) {
+        applyTargetedEdgeAt(viewX, viewY, false);
+    }
+
+    private void applyTargetedEdgeAt(float viewX, float viewY, boolean hairMode) {
+        if (destroyed || originalBitmap == null || resultBitmap == null
+                || personMask == null || worker.isShutdown()) return;
+        if (hairMode ? !hairEdgeOn : !skinEdgeOn) return;
 
         Matrix inv = new Matrix();
         if (!photoMatrix.invert(inv)) return;
@@ -1633,11 +1609,13 @@ public class MainActivity extends Activity {
         final float[] mask = personMask;
         final int mw = maskWidth;
         final int mh = maskHeight;
-        final int toleranceProgress = brushSeek == null ? colorToleranceValue : brushSeek.getProgress();
+        final int range = brushSeek == null ? colorToleranceValue : brushSeek.getProgress();
         final int token = ++renderToken;
 
         setEditingEnabled(false);
-        setBusy(true, "Smart Edge Clean • selected residue साफ हो रहा है…");
+        setBusy(true, hairMode
+                ? "Hair Edge • selected hair residue साफ हो रहा है…"
+                : "Skin Edge • selected skin residue साफ हो रहा है…");
 
         try {
             worker.execute(() -> {
@@ -1648,7 +1626,7 @@ public class MainActivity extends Activity {
                     oldErase.getPixels(erase, 0, w, 0, 0, w, h);
 
                     float[] edgeMask = blurMask(mask, mw, mh, 1);
-                    float[] supportMask = maxFilterMask(edgeMask, mw, mh, 2);
+                    float[] supportMask = maxFilterMask(mask, mw, mh, hairMode ? 3 : 2);
                     int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                     int smx = Math.min(mw - 1, Math.max(0,
@@ -1658,10 +1636,10 @@ public class MainActivity extends Activity {
                     int smi = Math.min(edgeMask.length - 1, smy * mw + smx);
                     float seedConfidence = edgeMask[smi];
 
-                    int seedColor = src[sy * w + sx];
-                    int sr = Color.red(seedColor);
-                    int sg = Color.green(seedColor);
-                    int sb = Color.blue(seedColor);
+                    int seed = src[sy * w + sx];
+                    int sr = Color.red(seed);
+                    int sg = Color.green(seed);
+                    int sb = Color.blue(seed);
 
                     int seedOuter = sampleOuterBackgroundColor(src, w, h, sx, sy,
                             edgeMask, mw, mh, smx, smy, seedConfidence);
@@ -1679,23 +1657,44 @@ public class MainActivity extends Activity {
                                 Color.red(seedInner), Color.green(seedInner), Color.blue(seedInner));
                     }
 
-                    if (seedConfidence > 0.88f
+                    boolean seedHeadZone = isInsideHeadZone(smx, smy, personBounds, mw, mh);
+                    boolean seedInnerSkin = seedInner != -1 && isSkinLikeColor(
+                            Color.red(seedInner), Color.green(seedInner), Color.blue(seedInner));
+                    boolean seedNearSkin = seedInnerSkin
+                            || hasNearbySkinColor(src, w, h, sx, sy, Math.max(3, Math.min(w,h) / 180));
+
+                    if (hairMode) {
+                        if (!seedHeadZone || supportMask[smi] < 0.16f) {
+                            runOnUiThread(() -> rejectTargetedEdge(token,
+                                    "Hair Edge • यह hair area नहीं है"));
+                            return;
+                        }
+                    } else {
+                        if (!seedNearSkin) {
+                            runOnUiThread(() -> rejectTargetedEdge(token,
+                                    "Skin Edge • skin edge के पास touch करें"));
+                            return;
+                        }
+                    }
+
+                    // Strong foreground selection is rejected: point at the leftover background,
+                    // not at the real hair/skin itself.
+                    if (seedConfidence > (hairMode ? 0.86f : 0.90f)
                             && seedOuterDist > 900f
                             && seedInnerDist < seedOuterDist) {
-                        runOnUiThread(() -> {
-                            if (destroyed || token != renderToken) return;
-                            if (!undoMasks.isEmpty()) undoMasks.pop();
-                            updateHistoryButtons();
-                            setEditingEnabled(true);
-                            setBusy(false, "यह subject है • residue वाली जगह पर touch करें");
-                        });
+                        runOnUiThread(() -> rejectTargetedEdge(token,
+                                hairMode
+                                        ? "Hair Edge • छूटे background पर touch करें"
+                                        : "Skin Edge • halo/background पर touch करें"));
                         return;
                     }
 
-                    float p = Math.max(0f, Math.min(1f, toleranceProgress / 100f));
-                    int localRadius = Math.min(150, Math.max(26,
-                            Math.round(Math.min(w, h) * (0.035f + 0.055f * p))));
-                    float colorTolerance = 18f + 34f * p;
+                    float p = Math.max(0f, Math.min(1f, range / 100f));
+                    int localRadius = Math.min(hairMode ? 125 : 105, Math.max(24,
+                            Math.round(Math.min(w, h)
+                                    * (hairMode ? (0.030f + 0.044f * p)
+                                                : (0.026f + 0.038f * p)))));
+                    float colorTolerance = hairMode ? (18f + 30f * p) : (15f + 25f * p);
                     float toleranceSq = colorTolerance * colorTolerance;
 
                     int minX = Math.max(0, sx - localRadius);
@@ -1710,7 +1709,7 @@ public class MainActivity extends Activity {
                     queue.add((sy - minY) * boxW + (sx - minX));
 
                     int changed = 0;
-                    final int maxChanged = 24000;
+                    final int maxChanged = hairMode ? 18000 : 14000;
 
                     while (!queue.isEmpty() && changed < maxChanged) {
                         int q = queue.removeFirst();
@@ -1731,6 +1730,7 @@ public class MainActivity extends Activity {
                         int r = Color.red(c);
                         int g = Color.green(c);
                         int b = Color.blue(c);
+                        float lum = 0.299f * r + 0.587f * g + 0.114f * b;
 
                         float dSeed = colorDistanceSq(r, g, b, sr, sg, sb);
                         if (dSeed > toleranceSq) continue;
@@ -1741,8 +1741,11 @@ public class MainActivity extends Activity {
                                 Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
                         int mi = Math.min(edgeMask.length - 1, my * mw + mx);
                         float confidence = edgeMask[mi];
+                        float support = supportMask[mi];
 
-                        if (confidence > 0.92f && seedOuterDist > 625f) continue;
+                        boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
+                        boolean skin = isSkinLikeColor(r, g, b);
+                        boolean likelyHair = headZone && !skin && lum < 175f && support > 0.30f;
 
                         int outer = sampleOuterBackgroundColor(src, w, h, x, y,
                                 edgeMask, mw, mh, mx, my, confidence);
@@ -1760,30 +1763,54 @@ public class MainActivity extends Activity {
                                     Color.red(inner), Color.green(inner), Color.blue(inner));
                         }
 
-                        boolean clickedColorMatch = dSeed <= toleranceSq * 0.58f;
-                        boolean outerLike = dOuter < 1100f;
+                        boolean outerLike = dOuter < (hairMode ? 1450f : 1050f);
                         boolean outerCloser = inner != -1 && outer != -1
-                                && dOuter + 180f < dInner;
+                                && dOuter + (hairMode ? 150f : 110f) < dInner;
+                        boolean closeSeed = dSeed <= toleranceSq * (hairMode ? 0.72f : 0.58f);
 
-                        if (!clickedColorMatch && !outerLike && !outerCloser) continue;
+                        if (hairMode) {
+                            // Hair Edge never wanders to body/skin. It only cleans connected
+                            // leftover background inside/around the detected head/hair support.
+                            if (!headZone || support < 0.14f) continue;
+                            if (skin) continue;
+                            if (likelyHair && confidence > 0.17f) continue;
+                            if (!closeSeed && !outerLike && !outerCloser) continue;
+                        } else {
+                            // Skin Edge requires skin adjacency and protects actual skin/hair.
+                            boolean innerSkin = inner != -1 && isSkinLikeColor(
+                                    Color.red(inner), Color.green(inner), Color.blue(inner));
+                            boolean nearSkin = innerSkin || hasNearbySkinColor(
+                                    src, w, h, x, y, Math.max(2, Math.min(w,h) / 220));
+                            if (!nearSkin) continue;
+                            if (likelyHair) continue;
+                            if (!closeSeed && !outerLike && !outerCloser) continue;
 
-                        float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-                        boolean skin = isSkinLikeColor(r, g, b);
-                        boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                        boolean likelyHair = headZone && !skin && lum < 165f
-                                && supportMask[mi] > 0.38f;
+                            // Solid real skin is never erased. Semi-transparent skin-colored
+                            // halo is only reduced gently if background contamination is clear.
+                            if (skin && confidence > 0.54f && !outerCloser) continue;
+                        }
 
-                        if (likelyHair && dSeed > toleranceSq * 0.18f) continue;
-                        if (skin && dSeed > toleranceSq * 0.12f) continue;
+                        float colorWeight = 1f - Math.min(1f,
+                                dSeed / Math.max(1f, toleranceSq));
+                        float strength;
 
-                        float colorWeight = 1f - Math.min(1f, dSeed / Math.max(1f, toleranceSq));
-                        float confWeight = 1f - smoothStep(0.30f, 0.92f, confidence);
-                        float strength = 0.52f + 0.35f * colorWeight + 0.24f * confWeight;
-                        if (outerLike || outerCloser) strength = Math.max(strength, 0.86f);
-                        if (likelyHair) strength *= 0.55f;
-                        if (skin) strength *= 0.48f;
+                        if (hairMode) {
+                            strength = (outerLike || outerCloser)
+                                    ? (0.88f + 0.12f * colorWeight)
+                                    : (0.70f + 0.20f * colorWeight);
+                        } else {
+                            if (skin) {
+                                strength = outerCloser
+                                        ? (0.26f + 0.22f * colorWeight)
+                                        : (0.14f + 0.14f * colorWeight);
+                            } else {
+                                strength = (outerLike || outerCloser)
+                                        ? (0.90f + 0.10f * colorWeight)
+                                        : (0.72f + 0.18f * colorWeight);
+                            }
+                        }
+
                         strength = Math.max(0f, Math.min(1f, strength));
-
                         int oldA = Color.alpha(erase[idx]);
                         int newA = Math.max(oldA, Math.round(255f * strength));
                         if (newA > oldA + 2) {
@@ -1812,14 +1839,18 @@ public class MainActivity extends Activity {
                             if (!undoMasks.isEmpty()) undoMasks.pop();
                             updateHistoryButtons();
                             setEditingEnabled(true);
-                            setBusy(false, "इस point पर matching residue नहीं मिला");
+                            setBusy(false, hairMode
+                                    ? "Hair Edge • matching residue नहीं मिला"
+                                    : "Skin Edge • matching residue नहीं मिला");
                             return;
                         }
 
                         eraseMask = updated;
                         updateHistoryButtons();
                         setEditingEnabled(true);
-                        status.setText("Smart Edge Clean • selected area cleaned");
+                        status.setText(hairMode
+                                ? "Hair Edge • selected hair area cleaned"
+                                : "Skin Edge • selected skin edge cleaned");
                         renderResult();
                     });
                 } catch (Throwable e) {
@@ -1828,7 +1859,7 @@ public class MainActivity extends Activity {
                         if (!undoMasks.isEmpty()) undoMasks.pop();
                         updateHistoryButtons();
                         setEditingEnabled(true);
-                        setBusy(false, "Smart Edge Clean error");
+                        setBusy(false, hairMode ? "Hair Edge error" : "Skin Edge error");
                     });
                 }
             });
@@ -1836,38 +1867,28 @@ public class MainActivity extends Activity {
             if (!undoMasks.isEmpty()) undoMasks.pop();
             updateHistoryButtons();
             setEditingEnabled(true);
-            setBusy(false, "Smart Edge Clean error");
+            setBusy(false, hairMode ? "Hair Edge error" : "Skin Edge error");
         }
     }
 
-    private void toggleBrushMode() {
-        if (resultBitmap == null) return;
-        brushModeOn = !brushModeOn;
-        if (brushModeOn) {
-            colorCleanOn = false;
-            smartEdgeCleanOn = false;
-            compareButton.setText("SMART EDGE CLEAN");
-            brushShapeIndex = -1;
-            brushRotationDegrees = 0f;
-            dualBrushRotateActive = false;
-            objectButton.setText("LOCAL COLOR CLEAN");
-            brushButton.setText("BRUSH ✓");
-            if (toolSeekLabel != null) toolSeekLabel.setText("Brush Size");
-            brushSeek.setProgress(brushSizeValue);
-            status.setText("Brush ON • Normal live stroke • shape चुनने पर old shape mode");
-        } else {
-            brushButton.setText("BRUSH");
-            if (brushCursor != null) {
-                brushCursor.clearTrail();
-                brushCursor.clearShapePreview();
-                brushCursor.setVisibility(View.GONE);
+    private void rejectTargetedEdge(int token, String message) {
+        if (destroyed || token != renderToken) return;
+        if (!undoMasks.isEmpty()) undoMasks.pop();
+        updateHistoryButtons();
+        setEditingEnabled(true);
+        setBusy(false, message);
+    }
+
+    private boolean hasNearbySkinColor(int[] src, int w, int h,
+                                       int cx, int cy, int radius) {
+        int step = Math.max(1, radius / 3);
+        for (int y = Math.max(0, cy - radius); y <= Math.min(h - 1, cy + radius); y += step) {
+            for (int x = Math.max(0, cx - radius); x <= Math.min(w - 1, cx + radius); x += step) {
+                int c = src[y * w + x];
+                if (isSkinLikeColor(Color.red(c), Color.green(c), Color.blue(c))) return true;
             }
-            if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
-            brushSeek.setProgress(colorToleranceValue);
-            status.setText("Brush OFF");
         }
-        renderToolChoiceRow();
-        hideLens();
+        return false;
     }
 
     private void toggleColorClean() {
@@ -1875,12 +1896,10 @@ public class MainActivity extends Activity {
         colorCleanOn = !colorCleanOn;
         if (colorCleanOn) {
             brushModeOn = false;
-            smartEdgeCleanOn = false;
-            compareButton.setText("SMART EDGE CLEAN");
-            brushShapeIndex = -1;
-            brushRotationDegrees = 0f;
-            dualBrushRotateActive = false;
-            brushButton.setText("BRUSH");
+            hairEdgeOn = false;
+            skinEdgeOn = false;
+            compareButton.setText("SKIN EDGE");
+            brushButton.setText("HAIR EDGE");
             if (brushCursor != null) brushCursor.setVisibility(View.GONE);
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
             brushSeek.setProgress(colorToleranceValue);
@@ -1898,160 +1917,48 @@ public class MainActivity extends Activity {
     }
 
     private boolean handlePhotoTouch(View v, MotionEvent e) {
-        boolean shapeBrush = brushModeOn && brushShapeIndex >= 0;
-
-        // Normal brush keeps pinch zoom. Old shape mode owns two fingers for rotation.
-        if (!shapeBrush && scaleGestureDetector != null) {
+        if (scaleGestureDetector != null) {
             scaleGestureDetector.onTouchEvent(e);
         }
 
         int action = e.getActionMasked();
 
-        if (action == MotionEvent.ACTION_POINTER_DOWN) {
-            if (shapeBrush && !compareOriginal && resultBitmap != null
-                    && e.getPointerCount() >= 2) {
-                dualBrushRotateActive = true;
-                dualBrushRotateStartAngle = twoFingerAngle(e);
-                dualBrushRotateStartDegrees = brushRotationDegrees;
-                gestureWasScaling = true;
-                brushStrokeStarted = false;
-                brushStrokeChanged = false;
-                if (brushCursor != null) brushCursor.clearTrail();
-                showLens(lastBrushViewX, lastBrushViewY);
-                status.setText("2-finger rotate • " + Math.round(brushRotationDegrees) + "°");
-                return true;
-            }
-
-            // Normal live brush: finish current stroke before pinch zoom.
+        if (action == MotionEvent.ACTION_POINTER_DOWN
+                || action == MotionEvent.ACTION_POINTER_UP) {
             gestureWasScaling = true;
-            if (brushStrokeStarted && brushStrokeChanged) {
-                brushStrokeStarted = false;
-                brushFinalizing = true;
-                if (brushCursor != null) brushCursor.finishStroke();
-                renderResult();
-            } else {
-                brushStrokeStarted = false;
-                if (brushCursor != null) brushCursor.clearTrail();
-            }
             hideLens();
-            return true;
-        }
-
-        if (action == MotionEvent.ACTION_POINTER_UP) {
-            if (shapeBrush && dualBrushRotateActive) {
-                dualBrushRotateActive = false;
-                showLens(lastBrushViewX, lastBrushViewY);
-                status.setText("Rotation set • " + Math.round(brushRotationDegrees) + "°");
-            } else {
-                gestureWasScaling = true;
-                hideLens();
-            }
             return true;
         }
 
         if (action == MotionEvent.ACTION_DOWN) {
             lastPanX = e.getX();
             lastPanY = e.getY();
-            lastBrushViewX = e.getX();
-            lastBrushViewY = e.getY();
             panMoved = false;
             gestureWasScaling = false;
-            brushStrokeStarted = false;
-            brushStrokeChanged = false;
 
-            if (brushModeOn && !compareOriginal && resultBitmap != null) {
-                if (shapeBrush) {
-                    if (brushCursor != null) brushCursor.clearTrail();
-                    showLens(e.getX(), e.getY());
-                    status.setText(BRUSH_SHAPE_NAMES[brushShapeIndex]
-                            + " • position करें • release पर erase");
-                    return true;
+            if (!compareOriginal && resultBitmap != null
+                    && (hairEdgeOn || skinEdgeOn || colorCleanOn)) {
+                showLens(e.getX(), e.getY());
+                if (hairEdgeOn) {
+                    status.setText("Hair Edge • छूटा background चुनें");
+                } else if (skinEdgeOn) {
+                    status.setText("Skin Edge • skin के पास halo/background चुनें");
                 }
-
-                pushUndo();
-                clearDeque(redoMasks);
-                brushStrokeStarted = true;
-                brushStrokeChanged = false;
-                if (brushCursor != null) {
-                    brushCursor.startStroke(e.getX(), e.getY(),
-                            currentBrushScreenRadius() * 2f, selectedBackgroundColor);
-                }
-                showLens(e.getX(), e.getY());
-                status.setText("Brush • live erase");
                 return true;
-            }
-
-            if (smartEdgeCleanOn && !compareOriginal && resultBitmap != null) {
-                showLens(e.getX(), e.getY());
-                status.setText("Smart Edge Clean • residue वाली जगह चुनें");
-                return true;
-            }
-
-            if (colorCleanOn && !compareOriginal && resultBitmap != null) {
-                showLens(e.getX(), e.getY());
             }
             return true;
         }
 
         if (action == MotionEvent.ACTION_MOVE) {
-            if (shapeBrush && dualBrushRotateActive && e.getPointerCount() >= 2
-                    && !compareOriginal && resultBitmap != null) {
-                float nowAngle = twoFingerAngle(e);
-                brushRotationDegrees = normalizeDegrees(
-                        dualBrushRotateStartDegrees
-                                + angleDeltaDegrees(dualBrushRotateStartAngle, nowAngle));
-                gestureWasScaling = true;
-                showLens(lastBrushViewX, lastBrushViewY);
-                status.setText("2-finger rotate • " + Math.round(brushRotationDegrees) + "°");
-                return true;
-            }
-
-            if (shapeBrush && e.getPointerCount() == 1
-                    && !compareOriginal && resultBitmap != null) {
-                // Old shape behavior: one finger only positions the selected shape.
-                lastBrushViewX = e.getX();
-                lastBrushViewY = e.getY();
-                showLens(lastBrushViewX, lastBrushViewY);
-                return true;
-            }
-
             if (e.getPointerCount() > 1
-                    || (!shapeBrush && scaleGestureDetector != null
-                    && scaleGestureDetector.isInProgress())) {
+                    || (scaleGestureDetector != null && scaleGestureDetector.isInProgress())) {
                 gestureWasScaling = true;
                 hideLens();
                 return true;
             }
 
-            if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
-                float x = e.getX();
-                float y = e.getY();
-                float move = (float)Math.hypot(x - lastBrushViewX, y - lastBrushViewY);
-
-                if (move >= dp(1)) {
-                    boolean changed = applyBrushStrokeSegment(
-                            lastBrushViewX, lastBrushViewY, x, y);
-                    if (changed) {
-                        brushStrokeChanged = true;
-                        if (brushCursor != null) {
-                            brushCursor.addStroke(x, y,
-                                    currentBrushScreenRadius() * 2f, selectedBackgroundColor);
-                        }
-                    }
-                    lastBrushViewX = x;
-                    lastBrushViewY = y;
-                }
-
-                showLens(x, y);
-                return true;
-            }
-
-            if (smartEdgeCleanOn && !compareOriginal && resultBitmap != null) {
-                showLens(e.getX(), e.getY());
-                return true;
-            }
-
-            if (colorCleanOn && !compareOriginal && resultBitmap != null) {
+            if (!compareOriginal && resultBitmap != null
+                    && (hairEdgeOn || skinEdgeOn || colorCleanOn)) {
                 showLens(e.getX(), e.getY());
                 return true;
             }
@@ -2070,118 +1977,39 @@ public class MainActivity extends Activity {
         }
 
         if (action == MotionEvent.ACTION_UP) {
-            if (shapeBrush && !compareOriginal && resultBitmap != null) {
-                lastBrushViewX = e.getX();
-                lastBrushViewY = e.getY();
-
-                if (!gestureWasScaling) {
-                    showLens(lastBrushViewX, lastBrushViewY);
-                    pushUndo();
-                    clearDeque(redoMasks);
-                    boolean changed = applyBrushShapeStampAt(
-                            lastBrushViewX, lastBrushViewY);
-
-                    if (changed) {
-                        updateHistoryButtons();
-                        status.setText(BRUSH_SHAPE_NAMES[brushShapeIndex]
-                                + " • " + Math.round(brushRotationDegrees) + "° • applied");
-                        renderResult();
-                    } else if (!undoMasks.isEmpty()) {
-                        undoMasks.pop();
-                        updateHistoryButtons();
-                    }
-                }
-
-                dualBrushRotateActive = false;
-                gestureWasScaling = false;
-                hideLens();
-                if (brushCursor != null) {
-                    brushCursor.clearShapePreview();
-                    brushCursor.setVisibility(View.GONE);
-                }
-                return true;
-            }
-
-            if (brushModeOn && brushStrokeStarted && !compareOriginal && resultBitmap != null) {
-                float x = e.getX();
-                float y = e.getY();
-                float move = (float)Math.hypot(x - lastBrushViewX, y - lastBrushViewY);
-                if (move >= dp(1)) {
-                    boolean changed = applyBrushStrokeSegment(
-                            lastBrushViewX, lastBrushViewY, x, y);
-                    if (changed) {
-                        brushStrokeChanged = true;
-                        if (brushCursor != null) {
-                            brushCursor.addStroke(x, y,
-                                    currentBrushScreenRadius() * 2f, selectedBackgroundColor);
-                        }
-                    }
-                }
-
-                brushStrokeStarted = false;
-                hideLens();
-
-                if (brushStrokeChanged) {
-                    updateHistoryButtons();
-                    brushFinalizing = true;
-                    if (brushCursor != null) brushCursor.finishStroke();
-                    status.setText("Brush • finalizing");
-                    renderResult();
-                } else if (!undoMasks.isEmpty()) {
-                    undoMasks.pop();
-                    updateHistoryButtons();
-                    if (brushCursor != null) {
-                        brushCursor.clearTrail();
-                        brushCursor.setVisibility(View.GONE);
-                    }
-                    status.setText("Brush • stroke चलाएँ");
-                }
-
-                brushStrokeChanged = false;
-                gestureWasScaling = false;
-                return true;
-            }
-
-            if (smartEdgeCleanOn && !compareOriginal && resultBitmap != null
-                    && !gestureWasScaling
+            if (!compareOriginal && resultBitmap != null && !gestureWasScaling
                     && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
-                showLens(e.getX(), e.getY());
-                applySmartEdgeCleanAt(e.getX(), e.getY());
-                hideLens();
-                gestureWasScaling = false;
-                return true;
+                if (hairEdgeOn) {
+                    showLens(e.getX(), e.getY());
+                    applyHairEdgeAt(e.getX(), e.getY());
+                    hideLens();
+                    gestureWasScaling = false;
+                    return true;
+                }
+
+                if (skinEdgeOn) {
+                    showLens(e.getX(), e.getY());
+                    applySkinEdgeAt(e.getX(), e.getY());
+                    hideLens();
+                    gestureWasScaling = false;
+                    return true;
+                }
+
+                if (colorCleanOn && !panMoved) {
+                    showLens(e.getX(), e.getY());
+                    applyLocalColorCleanAt(e.getX(), e.getY());
+                    hideLens();
+                    gestureWasScaling = false;
+                    return true;
+                }
             }
 
-            if (colorCleanOn && !compareOriginal && resultBitmap != null
-                    && !panMoved && !gestureWasScaling
-                    && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
-                showLens(e.getX(), e.getY());
-                applyLocalColorCleanAt(e.getX(), e.getY());
-                hideLens();
-            } else {
-                hideLens();
-            }
-
+            hideLens();
             gestureWasScaling = false;
             return true;
         }
 
         if (action == MotionEvent.ACTION_CANCEL) {
-            dualBrushRotateActive = false;
-            if (brushStrokeStarted && brushStrokeChanged) {
-                brushStrokeStarted = false;
-                brushFinalizing = true;
-                if (brushCursor != null) brushCursor.finishStroke();
-                renderResult();
-            } else {
-                brushStrokeStarted = false;
-                if (brushCursor != null) {
-                    brushCursor.clearTrail();
-                    brushCursor.clearShapePreview();
-                    brushCursor.setVisibility(View.GONE);
-                }
-            }
-            brushStrokeChanged = false;
             gestureWasScaling = false;
             hideLens();
             return true;
@@ -2235,31 +2063,17 @@ public class MainActivity extends Activity {
         float[] pt = new float[]{viewX, viewY};
         inv.mapPoints(pt);
 
-        float magnification = brushModeOn && brushShapeIndex >= 0
-                ? 5.4f : (smartEdgeCleanOn ? 5.0f : 3.6f);
+        float magnification = hairEdgeOn ? 5.8f : (skinEdgeOn ? 5.2f : 3.6f);
         float lensRadiusPx = dp(88);
         float sourceRadius = lensRadiusPx
                 / Math.max(0.0001f, currentImageScale() * magnification);
-        float brushWidthInLens = brushModeOn
-                ? Math.min(brushShapeIndex >= 0 ? dp(76) : dp(52),
-                        currentBrushScreenRadius() * magnification)
-                : 0f;
 
         magnifierLens.setLens(shown, pt[0], pt[1], sourceRadius,
-                brushModeOn ? LensView.MODE_BRUSH : LensView.MODE_COLOR_CLEAN,
-                brushWidthInLens, brushShapeIndex, brushRotationDegrees);
+                LensView.MODE_COLOR_CLEAN, 0f, -1, 0f);
 
-        if (brushModeOn && brushCursor != null) {
-            if (brushShapeIndex >= 0) {
-                brushCursor.setShapePreview(viewX, viewY,
-                        currentBrushScreenRadius() * 2f,
-                        brushShapeIndex, brushRotationDegrees);
-            } else {
-                brushCursor.setBrush(viewX, viewY, currentBrushScreenRadius() * 2f);
-            }
-            brushCursor.setVisibility(View.VISIBLE);
-            brushCursor.bringToFront();
-        } else if (brushCursor != null) {
+        if (brushCursor != null) {
+            brushCursor.clearTrail();
+            brushCursor.clearShapePreview();
             brushCursor.setVisibility(View.GONE);
         }
 
@@ -3492,6 +3306,10 @@ public class MainActivity extends Activity {
         resultBitmap = null;
         eraseMask = null;
         personMask = null;
+        hairEdgeOn = false;
+        skinEdgeOn = false;
+        colorCleanOn = false;
+        brushModeOn = false;
         if (brushCursor != null) brushCursor.setVisibility(View.GONE);
         clearHistory();
     }
