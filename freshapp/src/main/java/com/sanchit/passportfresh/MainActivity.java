@@ -1409,6 +1409,37 @@ public class MainActivity extends Activity {
         return x >= left && x <= right && y >= top && y <= bottom;
     }
 
+    private boolean isNearPersonBoundary(float[] mask, int w, int h,
+                                         int x, int y, int radius) {
+        if (mask == null || w <= 0 || h <= 0 || mask.length < w * h) return false;
+
+        boolean hasSubject = false;
+        boolean hasBackground = false;
+        float min = 1f;
+        float max = 0f;
+
+        int left = Math.max(0, x - radius);
+        int right = Math.min(w - 1, x + radius);
+        int top = Math.max(0, y - radius);
+        int bottom = Math.min(h - 1, y + radius);
+
+        for (int yy = top; yy <= bottom; yy++) {
+            int row = yy * w;
+            for (int xx = left; xx <= right; xx++) {
+                float v = mask[row + xx];
+                if (v < min) min = v;
+                if (v > max) max = v;
+                if (v >= 0.56f) hasSubject = true;
+                if (v <= 0.44f) hasBackground = true;
+            }
+        }
+
+        // Real segmentation boundary: subject and background evidence coexist nearby.
+        // The range check also admits anti-aliased/uncertain edge cells, but not solid interior.
+        return (hasSubject && hasBackground && (max - min) >= 0.14f)
+                || ((max - min) >= 0.24f && max >= 0.50f && min <= 0.50f);
+    }
+
     private float[] maxFilterMask(float[] src, int w, int h, int radius) {
         if (src == null || radius <= 0 || w <= 1 || h <= 1) return src;
 
@@ -1665,38 +1696,9 @@ public class MainActivity extends Activity {
                                 Color.red(seedInner), Color.green(seedInner), Color.blue(seedInner));
                     }
 
-                    boolean seedHeadZone = isInsideHeadZone(smx, smy, personBounds, mw, mh);
-                    boolean seedInnerSkin = seedInner != -1 && isSkinLikeColor(
-                            Color.red(seedInner), Color.green(seedInner), Color.blue(seedInner));
-                    boolean seedNearSkin = seedInnerSkin
-                            || hasNearbySkinColor(src, w, h, sx, sy,
-                                    Math.max(7, Math.min(w,h) / 90));
-
-                    if (hairMode) {
-                        if (!seedHeadZone) {
-                            runOnUiThread(() -> rejectTargetedEdge(token,
-                                    "Hair Edge • hair/head edge के पास touch करें"));
-                            return;
-                        }
-                    } else {
-                        if (!seedNearSkin) {
-                            runOnUiThread(() -> rejectTargetedEdge(token,
-                                    "Skin Edge • skin edge के पास touch करें"));
-                            return;
-                        }
-                    }
-
-                    // Strong foreground selection is rejected: point at the leftover background,
-                    // not at the real hair/skin itself.
-                    if (seedConfidence > (hairMode ? 0.86f : 0.90f)
-                            && seedOuterDist > 900f
-                            && seedInnerDist < seedOuterDist) {
-                        runOnUiThread(() -> rejectTargetedEdge(token,
-                                hairMode
-                                        ? "Hair Edge • छूटे background पर touch करें"
-                                        : "Skin Edge • halo/background पर touch करें"));
-                        return;
-                    }
+                    // Ring is a search area, not an erase area. The centre point does not
+                    // need to be residue itself; actual editable pixels are found by true
+                    // person/background mask-boundary detection below.
 
                     float p = Math.max(0f, Math.min(1f, range / 100f));
 
@@ -1739,7 +1741,17 @@ public class MainActivity extends Activity {
                                     Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
                             int mi = Math.min(edgeMask.length - 1, my * mw + mx);
                             float confidence = edgeMask[mi];
+                            float rawConfidence = mask[Math.min(mask.length - 1, mi)];
                             float support = supportMask[mi];
+
+                            // The ring only searches. Actual editing is restricted to the real
+                            // segmentation boundary inside the ring.
+                            boolean boundaryPixel = isNearPersonBoundary(
+                                    mask, mw, mh, mx, my, hairMode ? 2 : 2);
+                            if (!boundaryPixel) continue;
+
+                            // Solid interior must never be erased by Edge tools.
+                            if (rawConfidence >= (hairMode ? 0.90f : 0.86f)) continue;
 
                             boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
                             boolean skin = isSkinLikeColor(r, g, b);
@@ -1766,7 +1778,7 @@ public class MainActivity extends Activity {
                             boolean outerLike = dOuter <= outerTolerance;
                             boolean outerCloser = inner != -1 && outer != -1
                                     && dOuter + (hairMode ? 90f : 75f) < dInner;
-                            boolean lowConfidenceResidue = confidence < (hairMode ? 0.38f : 0.34f)
+                            boolean lowConfidenceResidue = rawConfidence < (hairMode ? 0.42f : 0.38f)
                                     && support > 0.05f;
 
                             if (hairMode) {
@@ -1778,7 +1790,7 @@ public class MainActivity extends Activity {
                                 if (!residueEvidence) continue;
 
                                 // Protect strong real hair, but clean background between strands.
-                                if (likelyHair && confidence > 0.54f
+                                if (likelyHair && rawConfidence > 0.54f
                                         && !outerCloser && !outerLike) continue;
 
                                 float colorWeight = seedLike
@@ -1789,8 +1801,8 @@ public class MainActivity extends Activity {
                                 else if (lowConfidenceResidue) strength = 0.94f;
                                 else strength = 0.84f + 0.14f * colorWeight;
 
-                                if (likelyHair && confidence > 0.28f) {
-                                    strength = Math.min(strength, 0.52f);
+                                if (likelyHair && rawConfidence > 0.28f) {
+                                    strength = Math.min(strength, 0.48f);
                                 }
 
                                 int oldA = Color.alpha(erase[idx]);
@@ -1812,7 +1824,9 @@ public class MainActivity extends Activity {
                                 if (!residueEvidence) continue;
 
                                 // Protect solid real skin.
-                                if (skin && confidence > 0.76f && !outerCloser && !outerLike) {
+                                if (skin && rawConfidence > 0.68f) {
+                                    // Actual skin inside the edge is locked. Skin Edge removes
+                                    // background/halo beside it, not the skin itself.
                                     continue;
                                 }
 
@@ -1825,11 +1839,9 @@ public class MainActivity extends Activity {
                                     else if (lowConfidenceResidue) strength = 0.94f;
                                     else strength = 0.84f + 0.14f * colorWeight;
                                 } else {
-                                    if (outerCloser || outerLike) {
-                                        strength = 0.42f + 0.22f * colorWeight;
-                                    } else {
-                                        strength = 0.26f + 0.16f * colorWeight;
-                                    }
+                                    // Skin-coloured pixels are preserved. The cleanup occurs on
+                                    // the adjacent background/halo pixels along the same boundary.
+                                    continue;
                                 }
 
                                 int oldA = Color.alpha(erase[idx]);
@@ -1854,8 +1866,8 @@ public class MainActivity extends Activity {
                             updateHistoryButtons();
                             setEditingEnabled(true);
                             setBusy(false, hairMode
-                                    ? "Hair Edge • ring में removable residue नहीं मिला"
-                                    : "Skin Edge • ring में removable residue नहीं मिला");
+                                    ? "Hair Edge • selected ring में removable edge residue नहीं मिला"
+                                    : "Skin Edge • selected ring में removable edge residue नहीं मिला");
                             return;
                         }
 
@@ -1863,8 +1875,8 @@ public class MainActivity extends Activity {
                         updateHistoryButtons();
                         setEditingEnabled(true);
                         status.setText(hairMode
-                                ? "Hair Edge • ring area cleaned • " + changedCount + " px"
-                                : "Skin Edge • ring area cleaned • " + changedCount + " px");
+                                ? "Hair Edge • edge cleaned • " + changedCount + " px"
+                                : "Skin Edge • edge cleaned • " + changedCount + " px");
                         renderResult();
                     });
                 } catch (Throwable e) {
@@ -1957,9 +1969,9 @@ public class MainActivity extends Activity {
                 showLens(e.getX(), e.getY());
                 if (hairEdgeOn || skinEdgeOn) showEdgeTarget(e.getX(), e.getY());
                 if (hairEdgeOn) {
-                    status.setText("Hair Edge • पूरा ring actual work area है");
+                    status.setText("Hair Edge • ring के अंदर सिर्फ actual edge पर काम होगा");
                 } else if (skinEdgeOn) {
-                    status.setText("Skin Edge • पूरा ring actual work area है");
+                    status.setText("Skin Edge • ring के अंदर सिर्फ actual edge पर काम होगा");
                 }
                 return true;
             }
