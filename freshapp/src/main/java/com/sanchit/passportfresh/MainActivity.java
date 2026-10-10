@@ -2174,7 +2174,7 @@ public class MainActivity extends Activity {
             int br = Color.red(selectedBackgroundColor);
             int bg = Color.green(selectedBackgroundColor);
             int bb = Color.blue(selectedBackgroundColor);
-            if (colorDistanceSq(tr, tg, tb, br, bg, bb) < 900f) {
+            if (tr == br && tg == bg && tb == bb) {
                 status.setText("यह पहले से background है • बचा हुआ edge colour चुनें");
                 return;
             }
@@ -2195,20 +2195,13 @@ public class MainActivity extends Activity {
             final int maxY = Math.max(0, Math.min(h - 1, (int)Math.ceil(selectedAreaSource.bottom)));
             final int boxW = maxX - minX + 1;
             final int boxH = maxY - minY + 1;
-
-            final float toleranceProgress = Math.max(0f,
-                    Math.min(1f, brushSeek.getProgress() / 100f));
-            final float coreTolerance = 10f + 88f * toleranceProgress;
-            final float coreToleranceSq = coreTolerance * coreTolerance;
-            final float softTolerance = coreTolerance * 1.48f + 8f;
-            final float softToleranceSq = softTolerance * softTolerance;
-            final float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
             final int token = ++renderToken;
 
-            colorCleanOn = false;
-            brushButton.setText("CHOOSE COLOR");
+            // IMPORTANT: CHOOSE COLOR remains ON after every target operation.
+            // It turns OFF only when the CHOOSE COLOR button is clicked again.
+            brushButton.setText("CHOOSE COLOR ✓");
             setEditingEnabled(false);
-            setBusy(true, "Selected Edge • chosen colour smooth remove…");
+            setBusy(true, "CHOOSE COLOR • सिर्फ exact target colour edge से smooth remove…");
 
             worker.execute(() -> {
                 try {
@@ -2218,11 +2211,10 @@ public class MainActivity extends Activity {
                     oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
 
                     float[] rawStrength = new float[boxW * boxH];
-                    boolean[] edgeAllowed = new boolean[boxW * boxH];
+                    boolean[] exactMatch = new boolean[boxW * boxH];
                     int matched = 0;
 
-                    // SELECT+CHOOSE COLOR workflow: only matching colour on the
-                    // actual edge inside the selected rectangle can change.
+                    // Exact target colour only: no tolerance, no nearby shades.
                     for (int y = minY; y <= maxY; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX; x++) {
@@ -2232,13 +2224,9 @@ public class MainActivity extends Activity {
                             int c = resultPixels[idx];
                             int r = Color.red(c);
                             int g = Color.green(c);
-                            int b = Color.blue(c);
+                            int bl = Color.blue(c);
 
-                            float d = colorDistanceSq(r, g, b, tr, tg, tb);
-                            if (d > softToleranceSq) continue;
-
-                            float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-                            if (Math.abs(lum - targetLum) > softTolerance * 1.04f + 4f) continue;
+                            if (r != tr || g != tg || bl != tb) continue;
 
                             float rawConfidence = 0f;
                             if (mask != null && mw > 0 && mh > 0 && mask.length >= mw * mh) {
@@ -2249,48 +2237,39 @@ public class MainActivity extends Activity {
                                 int mi = my * mw + mx;
                                 rawConfidence = mask[mi];
 
+                                // Only the actual person/background edge may change.
                                 if (!isNearPersonBoundary(mask, mw, mh, mx, my, 5)) continue;
                                 if (rawConfidence > 0.975f) continue;
                             }
 
-                            edgeAllowed[localIndex] = true;
+                            exactMatch[localIndex] = true;
                             matched++;
 
-                            float distance = (float)Math.sqrt(Math.max(0f, d));
-                            float similarity = 1f - Math.min(1f,
-                                    distance / Math.max(1f, softTolerance));
-                            boolean coreMatch = d <= coreToleranceSq;
-
-                            float strength;
-                            if (coreMatch) {
-                                float coreSimilarity = 1f - Math.min(1f,
-                                        distance / Math.max(1f, coreTolerance));
-                                strength = 0.88f + 0.12f * coreSimilarity;
-                            } else {
-                                strength = 0.18f + 0.54f * similarity;
-                            }
-
+                            // Smooth alpha only on pixels having the EXACT selected RGB.
+                            // No different colour is ever changed.
+                            float strength = 1f;
                             if (mask != null && mw > 0 && mh > 0) {
                                 if (rawConfidence > 0.72f) {
-                                    strength = Math.min(strength, 0.56f);
+                                    strength = 0.56f;
                                 } else if (rawConfidence > 0.55f) {
-                                    strength = Math.min(strength, 0.78f);
+                                    strength = 0.78f;
+                                } else if (rawConfidence > 0.42f) {
+                                    strength = 0.90f;
                                 }
                             }
-
-                            rawStrength[localIndex] = Math.max(rawStrength[localIndex], strength);
+                            rawStrength[localIndex] = strength;
                         }
                     }
 
+                    // Feather only among exact-colour pixels. Different RGB pixels are untouched.
                     float[] feathered = new float[rawStrength.length];
                     for (int ly = 0; ly < boxH; ly++) {
                         for (int lx = 0; lx < boxW; lx++) {
                             int localIndex = ly * boxW + lx;
-                            if (!edgeAllowed[localIndex]) continue;
+                            if (!exactMatch[localIndex]) continue;
 
                             float weighted = rawStrength[localIndex] * 4f;
                             float weight = 4f;
-                            float neighbourMax = rawStrength[localIndex];
 
                             for (int oy = -2; oy <= 2; oy++) {
                                 int ny = ly + oy;
@@ -2299,21 +2278,16 @@ public class MainActivity extends Activity {
                                     int nx = lx + ox;
                                     if (nx < 0 || nx >= boxW || (ox == 0 && oy == 0)) continue;
                                     int ni = ny * boxW + nx;
-                                    if (!edgeAllowed[ni]) continue;
+                                    if (!exactMatch[ni]) continue;
 
                                     float distanceWeight =
                                             (Math.abs(ox) + Math.abs(oy) <= 1) ? 2f : 1f;
                                     weighted += rawStrength[ni] * distanceWeight;
                                     weight += distanceWeight;
-                                    if (rawStrength[ni] > neighbourMax) {
-                                        neighbourMax = rawStrength[ni];
-                                    }
                                 }
                             }
 
-                            float average = weighted / Math.max(1f, weight);
-                            feathered[localIndex] = Math.max(rawStrength[localIndex],
-                                    Math.max(average * 0.86f, neighbourMax * 0.34f));
+                            feathered[localIndex] = weighted / Math.max(1f, weight);
                         }
                     }
 
@@ -2324,6 +2298,8 @@ public class MainActivity extends Activity {
                         for (int x = minX; x <= maxX && changed < maxChanged; x++) {
                             int lx = x - minX;
                             int localIndex = ly * boxW + lx;
+                            if (!exactMatch[localIndex]) continue;
+
                             float strength = feathered[localIndex];
                             if (strength <= 0.025f) continue;
 
@@ -2350,19 +2326,19 @@ public class MainActivity extends Activity {
                             if (!undoMasks.isEmpty()) undoMasks.pop();
                             updateHistoryButtons();
                             setEditingEnabled(true);
-                            brushButton.setText("CHOOSE COLOR");
+                            brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
                             setBusy(false, matchedCount > 0
-                                    ? "Matching edge colour मिला लेकिन नया erase नहीं बना"
-                                    : "Selected edge में chosen colour नहीं मिला");
+                                    ? "Exact target colour मिला लेकिन नया erase नहीं बना"
+                                    : "Selected edge में exact target colour नहीं मिला");
                             return;
                         }
 
                         eraseMask = updated;
                         updateHistoryButtons();
                         setEditingEnabled(true);
-                        brushButton.setText("CHOOSE COLOR");
-                        status.setText("Selected Edge Clean • " + changedCount
-                                + " px • chosen colour smooth removed");
+                        brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
+                        status.setText("CHOOSE COLOR • " + changedCount
+                                + " px • सिर्फ exact target colour removed");
                         renderResult();
                     });
                 } catch (Throwable e) {
@@ -2371,13 +2347,13 @@ public class MainActivity extends Activity {
                         if (!undoMasks.isEmpty()) undoMasks.pop();
                         updateHistoryButtons();
                         setEditingEnabled(true);
-                        brushButton.setText("CHOOSE COLOR");
-                        setBusy(false, "Selected Edge Clean error");
+                        brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
+                        setBusy(false, "CHOOSE COLOR error");
                     });
                 }
             });
         } catch (Throwable e) {
-            status.setText("Selected edge colour clean नहीं हुआ");
+            status.setText("CHOOSE COLOR apply नहीं हुआ");
         }
     }
 
