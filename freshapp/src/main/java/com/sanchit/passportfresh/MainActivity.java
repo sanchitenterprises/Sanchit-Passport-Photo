@@ -111,6 +111,7 @@ public class MainActivity extends Activity {
     private SeekBar brushSeek;
     private Button compareButton;
     private Button brushButton;
+    private Button objectButton;
     private Button undoButton;
     private Button redoButton;
 
@@ -125,7 +126,9 @@ public class MainActivity extends Activity {
     private Uri sourceUri;
     private boolean compareOriginal;
     private boolean brushModeOn = false; // legacy backend only; no BRUSH UI/runtime
-    private boolean colorCleanOn = false;
+    private boolean colorCleanOn = false; // CHOOSE COLOR picking mode only
+    private boolean chosenColorReady = false;
+    private int chosenEdgeColor = 0;
     private boolean selectionModeOn = false;
     private boolean selectionDragging = false;
     private float selectionStartViewX;
@@ -300,10 +303,13 @@ public class MainActivity extends Activity {
         LinearLayout row2 = buttonRow();
         compareButton = button("SELECT", false);
         brushButton = button("CHOOSE COLOR", false);
-        compareButton.setTextSize(11);
-        brushButton.setTextSize(10);
+        objectButton = button("LOCAL COLOR CLEAN", false);
+        compareButton.setTextSize(10);
+        brushButton.setTextSize(9);
+        objectButton.setTextSize(9);
         row2.addView(compareButton, weightedButton());
         row2.addView(brushButton, weightedButton());
+        row2.addView(objectButton, weightedButton());
         controls.addView(row2, weightedControlRow(1.0f));
 
         LinearLayout row3 = buttonRow();
@@ -319,6 +325,7 @@ public class MainActivity extends Activity {
         gallery.setOnClickListener(v -> openGallery());
         compareButton.setOnClickListener(v -> toggleSelectionMode());
         brushButton.setOnClickListener(v -> toggleColorClean());
+        objectButton.setOnClickListener(v -> applyChosenLocalColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
         menuButton.setOnClickListener(v -> showTopMenu(menuButton));
@@ -424,6 +431,7 @@ public class MainActivity extends Activity {
         else if (text.contains("REDO")) bgColor = 0xFF7E9B76;
         else if (text.contains("SELECT")) { bgColor = 0xFF4F8F8B; textColor = 0xFFFFFFFF; }
         else if (text.contains("CHOOSE COLOR")) { bgColor = 0xFF5B7FA3; textColor = 0xFFFFFFFF; }
+        else if (text.contains("LOCAL")) bgColor = 0xFF7C7399;
         else if (text.contains("COMPARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
         else if (text.contains("कैमरा")) bgColor = 0xFF7C7399;
         else if (text.contains("फोटो")) bgColor = 0xFF5B7FA3;
@@ -604,6 +612,7 @@ public class MainActivity extends Activity {
         brushSeek.setEnabled(enabled);
         compareButton.setEnabled(enabled);
         brushButton.setEnabled(enabled);
+        objectButton.setEnabled(enabled);
         if (backgroundColorRow != null) {
             for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
                 View slot = backgroundColorRow.getChildAt(i);
@@ -1530,7 +1539,8 @@ public class MainActivity extends Activity {
         selectionDragging = false;
         colorCleanOn = false;
         compareButton.setText(hasSelection() ? "DESELECT" : "SELECT");
-        brushButton.setText("CHOOSE COLOR");
+        brushButton.setText(chosenColorReady ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
+        objectButton.setText("LOCAL COLOR CLEAN");
 
         compareOriginal = !compareOriginal;
         imageView.setImageBitmap(compareOriginal ? originalBitmap : resultBitmap);
@@ -1567,6 +1577,8 @@ public class MainActivity extends Activity {
 
         compareButton.setText("DESELECT");
         brushButton.setText("CHOOSE COLOR");
+        objectButton.setText("LOCAL COLOR CLEAN");
+        chosenColorReady = false;
         hideLens();
         if (selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
         status.setText("SELECT • जिस हिस्से में BG बचा है उस area पर drag करें");
@@ -1577,8 +1589,11 @@ public class MainActivity extends Activity {
         selectionModeOn = false;
         selectionDragging = false;
         colorCleanOn = false;
+        chosenColorReady = false;
+        chosenEdgeColor = 0;
         compareButton.setText("SELECT");
         brushButton.setText("CHOOSE COLOR");
+        objectButton.setText("LOCAL COLOR CLEAN");
         if (selectionOverlay != null) {
             selectionOverlay.clearSelection();
             selectionOverlay.setVisibility(View.GONE);
@@ -1658,10 +1673,13 @@ public class MainActivity extends Activity {
         selectionModeOn = false;
         selectionDragging = false;
         colorCleanOn = false;
+        chosenColorReady = false;
+        chosenEdgeColor = 0;
         compareButton.setText("DESELECT");
         brushButton.setText("CHOOSE COLOR");
+        objectButton.setText("LOCAL COLOR CLEAN");
         updateSelectionOverlayFromSource();
-        status.setText("Area selected • अब CHOOSE COLOR दबाकर edge का बचा colour चुनें");
+        status.setText("Area selected • अब CHOOSE COLOR से edge का बचा colour चुनें");
     }
 
     private boolean isSourcePointInsideSelection(float sx, float sy) {
@@ -1675,6 +1693,7 @@ public class MainActivity extends Activity {
             colorCleanOn = false;
             compareButton.setText("SELECT");
             brushButton.setText("CHOOSE COLOR");
+            objectButton.setText("LOCAL COLOR CLEAN");
             status.setText("पहले SELECT से बचा हुआ area चुनें");
             toast("पहले area select करें");
             return;
@@ -1690,13 +1709,18 @@ public class MainActivity extends Activity {
             imageView.setImageBitmap(resultBitmap);
         }
 
-        brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
+        brushButton.setText(colorCleanOn
+                ? "CHOOSE COLOR ✓"
+                : (chosenColorReady ? "CHOOSE COLOR ✓" : "CHOOSE COLOR"));
+        objectButton.setText("LOCAL COLOR CLEAN");
         if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
         brushSeek.setProgress(colorToleranceValue);
         updateSelectionOverlayFromSource();
         status.setText(colorCleanOn
-                ? "Selected area के अंदर colour touch करें • वही colour सिर्फ edge के किनारे smooth remove होगा"
-                : "Choose Color OFF");
+                ? "CHOOSE COLOR • selected area के edge का बचा colour touch करें"
+                : (chosenColorReady
+                    ? "Colour selected • अब LOCAL COLOR CLEAN दबाएँ"
+                    : "Choose Color OFF"));
         hideLens();
     }
 
@@ -1785,7 +1809,7 @@ public class MainActivity extends Activity {
                     && !gestureWasScaling
                     && (scaleGestureDetector == null || !scaleGestureDetector.isInProgress())) {
                 showLens(e.getX(), e.getY());
-                applyLocalColorCleanAt(e.getX(), e.getY());
+                chooseEdgeColorAt(e.getX(), e.getY());
                 hideLens();
                 gestureWasScaling = false;
                 return true;
@@ -2070,23 +2094,19 @@ public class MainActivity extends Activity {
         return u * u * (3f - 2f * u);
     }
 
-    private void applyLocalColorCleanAt(float viewX, float viewY) {
+    private void chooseEdgeColorAt(float viewX, float viewY) {
         try {
-            if (resultBitmap == null || originalBitmap == null) return;
-            if (!hasSelection()) {
-                status.setText("पहले SELECT AREA से area चुनें");
-                return;
-            }
+            if (resultBitmap == null || originalBitmap == null || !hasSelection()) return;
 
             Matrix inv = new Matrix();
             if (!photoMatrix.invert(inv)) return;
             float[] point = new float[]{viewX, viewY};
             inv.mapPoints(point);
 
-            final int sx = Math.round(point[0]);
-            final int sy = Math.round(point[1]);
-            final int w = resultBitmap.getWidth();
-            final int h = resultBitmap.getHeight();
+            int sx = Math.round(point[0]);
+            int sy = Math.round(point[1]);
+            int w = resultBitmap.getWidth();
+            int h = resultBitmap.getHeight();
             if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
             if (!isSourcePointInsideSelection(sx, sy)) {
@@ -2094,19 +2114,51 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            final Bitmap resultSnapshot = resultBitmap;
-            final int target = resultSnapshot.getPixel(sx, sy);
-            final int tr = Color.red(target);
-            final int tg = Color.green(target);
-            final int tb = Color.blue(target);
+            int target = resultBitmap.getPixel(sx, sy);
+            int tr = Color.red(target);
+            int tg = Color.green(target);
+            int tb = Color.blue(target);
 
             int br = Color.red(selectedBackgroundColor);
             int bg = Color.green(selectedBackgroundColor);
             int bb = Color.blue(selectedBackgroundColor);
             if (colorDistanceSq(tr, tg, tb, br, bg, bb) < 900f) {
-                status.setText("यह पहले से background है • बचा हुआ colour touch करें");
+                status.setText("यह पहले से background है • बचा हुआ edge colour चुनें");
                 return;
             }
+
+            chosenEdgeColor = target;
+            chosenColorReady = true;
+            colorCleanOn = false;
+            brushButton.setText("CHOOSE COLOR ✓");
+            objectButton.setText("LOCAL COLOR CLEAN");
+            status.setText("Colour selected • अब LOCAL COLOR CLEAN दबाएँ");
+        } catch (Throwable e) {
+            status.setText("Colour choose नहीं हुआ");
+        }
+    }
+
+    private void applyChosenLocalColorClean() {
+        try {
+            if (resultBitmap == null || originalBitmap == null) return;
+            if (!hasSelection()) {
+                status.setText("पहले SELECT से area चुनें");
+                toast("पहले area select करें");
+                return;
+            }
+            if (!chosenColorReady) {
+                status.setText("पहले CHOOSE COLOR से edge का colour चुनें");
+                toast("पहले colour चुनें");
+                return;
+            }
+
+            final int w = resultBitmap.getWidth();
+            final int h = resultBitmap.getHeight();
+            final Bitmap resultSnapshot = resultBitmap;
+            final int target = chosenEdgeColor;
+            final int tr = Color.red(target);
+            final int tg = Color.green(target);
+            final int tb = Color.blue(target);
 
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return;
@@ -2134,8 +2186,9 @@ public class MainActivity extends Activity {
             final float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
             final int token = ++renderToken;
 
+            colorCleanOn = false;
             setEditingEnabled(false);
-            setBusy(true, "Local Color Clean • पूरे selected edge पर smooth cleanup…");
+            setBusy(true, "Local Color Clean • chosen colour को selected edge से smooth remove…");
 
             worker.execute(() -> {
                 try {
@@ -2148,8 +2201,6 @@ public class MainActivity extends Activity {
                     boolean[] edgeAllowed = new boolean[boxW * boxH];
                     int matched = 0;
 
-                    // First pass: find matching colour across the WHOLE selected edge.
-                    // No connectivity requirement: every matching spot on that edge is included.
                     for (int y = minY; y <= maxY; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX; x++) {
@@ -2168,7 +2219,6 @@ public class MainActivity extends Activity {
                             if (Math.abs(lum - targetLum) > softTolerance * 1.04f + 4f) continue;
 
                             float rawConfidence = 0f;
-                            boolean boundary = true;
                             if (mask != null && mw > 0 && mh > 0 && mask.length >= mw * mh) {
                                 int mx = Math.min(mw - 1, Math.max(0,
                                         Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
@@ -2177,10 +2227,8 @@ public class MainActivity extends Activity {
                                 int mi = my * mw + mx;
                                 rawConfidence = mask[mi];
 
-                                // Wide edge band: catches leftover matte on either side of the
-                                // segmentation edge, but rejects solid photo interior.
-                                boundary = isNearPersonBoundary(mask, mw, mh, mx, my, 5);
-                                if (!boundary) continue;
+                                // Only the actual edge band inside the selected area is editable.
+                                if (!isNearPersonBoundary(mask, mw, mh, mx, my, 5)) continue;
                                 if (rawConfidence > 0.975f) continue;
                             }
 
@@ -2188,7 +2236,8 @@ public class MainActivity extends Activity {
                             matched++;
 
                             float distance = (float)Math.sqrt(Math.max(0f, d));
-                            float similarity = 1f - Math.min(1f, distance / Math.max(1f, softTolerance));
+                            float similarity = 1f - Math.min(1f,
+                                    distance / Math.max(1f, softTolerance));
                             boolean coreMatch = d <= coreToleranceSq;
 
                             float strength;
@@ -2197,13 +2246,11 @@ public class MainActivity extends Activity {
                                         distance / Math.max(1f, coreTolerance));
                                 strength = 0.88f + 0.12f * coreSimilarity;
                             } else {
-                                // Near shade is feathered instead of hard cut.
                                 strength = 0.18f + 0.54f * similarity;
                             }
 
+                            // Feather into subject side instead of making a hard cut.
                             if (mask != null && mw > 0 && mh > 0) {
-                                // On the subject side of the edge, taper rather than cutting hard.
-                                // Background-side residue still gets full cleanup.
                                 if (rawConfidence > 0.72f) {
                                     strength = Math.min(strength, 0.56f);
                                 } else if (rawConfidence > 0.55f) {
@@ -2215,8 +2262,6 @@ public class MainActivity extends Activity {
                         }
                     }
 
-                    // Second pass: feather between neighbouring matching shades.
-                    // This makes the removed edge smooth instead of a jagged/hard 255-alpha cut.
                     float[] feathered = new float[rawStrength.length];
                     for (int ly = 0; ly < boxH; ly++) {
                         for (int lx = 0; lx < boxW; lx++) {
@@ -2236,10 +2281,13 @@ public class MainActivity extends Activity {
                                     int ni = ny * boxW + nx;
                                     if (!edgeAllowed[ni]) continue;
 
-                                    float distanceWeight = (Math.abs(ox) + Math.abs(oy) <= 1) ? 2f : 1f;
+                                    float distanceWeight =
+                                            (Math.abs(ox) + Math.abs(oy) <= 1) ? 2f : 1f;
                                     weighted += rawStrength[ni] * distanceWeight;
                                     weight += distanceWeight;
-                                    if (rawStrength[ni] > neighbourMax) neighbourMax = rawStrength[ni];
+                                    if (rawStrength[ni] > neighbourMax) {
+                                        neighbourMax = rawStrength[ni];
+                                    }
                                 }
                             }
 
@@ -2252,7 +2300,6 @@ public class MainActivity extends Activity {
                     int changed = 0;
                     final int maxChanged = 160000;
 
-                    // Apply only inside selected area + real edge band.
                     for (int y = minY; y <= maxY && changed < maxChanged; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX && changed < maxChanged; x++) {
@@ -2284,9 +2331,11 @@ public class MainActivity extends Activity {
                             if (!undoMasks.isEmpty()) undoMasks.pop();
                             updateHistoryButtons();
                             setEditingEnabled(true);
+                            brushButton.setText("CHOOSE COLOR ✓");
+                            objectButton.setText("LOCAL COLOR CLEAN");
                             setBusy(false, matchedCount > 0
                                     ? "Matching edge colour मिला लेकिन नया erase नहीं बना"
-                                    : "Selected edge में matching colour नहीं मिला");
+                                    : "Selected edge में chosen colour नहीं मिला");
                             return;
                         }
 
@@ -2294,8 +2343,9 @@ public class MainActivity extends Activity {
                         updateHistoryButtons();
                         setEditingEnabled(true);
                         brushButton.setText("CHOOSE COLOR ✓");
-                        status.setText("Chosen colour smooth removed • " + changedCount
-                                + " px • सिर्फ selected edge");
+                        objectButton.setText("LOCAL COLOR CLEAN");
+                        status.setText("Local Color Clean • " + changedCount
+                                + " px • chosen colour smooth removed");
                         renderResult();
                     });
                 } catch (Throwable e) {
@@ -2304,12 +2354,14 @@ public class MainActivity extends Activity {
                         if (!undoMasks.isEmpty()) undoMasks.pop();
                         updateHistoryButtons();
                         setEditingEnabled(true);
+                        brushButton.setText(chosenColorReady ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
+                        objectButton.setText("LOCAL COLOR CLEAN");
                         setBusy(false, "Local Color Clean error");
                     });
                 }
             });
         } catch (Throwable e) {
-            status.setText("Color clean apply नहीं हुआ");
+            status.setText("Local Color Clean apply नहीं हुआ");
         }
     }
 
@@ -3298,6 +3350,8 @@ public class MainActivity extends Activity {
         eraseMask = null;
         personMask = null;
         colorCleanOn = false;
+        chosenColorReady = false;
+        chosenEdgeColor = 0;
         selectionModeOn = false;
         selectionDragging = false;
         selectedAreaSource.setEmpty();
