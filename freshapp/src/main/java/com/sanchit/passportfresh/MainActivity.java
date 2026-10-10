@@ -2197,11 +2197,10 @@ public class MainActivity extends Activity {
             final int boxH = maxY - minY + 1;
             final int token = ++renderToken;
 
-            // IMPORTANT: CHOOSE COLOR remains ON after every target operation.
-            // It turns OFF only when the CHOOSE COLOR button is clicked again.
+            // CHOOSE COLOR stays active until the button is clicked again.
             brushButton.setText("CHOOSE COLOR ✓");
             setEditingEnabled(false);
-            setBusy(true, "CHOOSE COLOR • सिर्फ exact target colour edge से smooth remove…");
+            setBusy(true, "CHOOSE COLOR • selected edge में target colour पूरी तरह smooth remove…");
 
             worker.execute(() -> {
                 try {
@@ -2210,11 +2209,19 @@ public class MainActivity extends Activity {
                     resultSnapshot.getPixels(resultPixels, 0, w, 0, 0, w, h);
                     oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
 
-                    float[] rawStrength = new float[boxW * boxH];
-                    boolean[] exactMatch = new boolean[boxW * boxH];
+                    boolean[] exactEdgeMatch = new boolean[boxW * boxH];
                     int matched = 0;
 
-                    // Exact target colour only: no tolerance, no nearby shades.
+                    // FINAL RULE:
+                    // 1) Scan the entire SELECTED AREA.
+                    // 2) Match ONLY the exact target RGB chosen by the user.
+                    // 3) Remove it ONLY if it is near the actual person/background edge.
+                    // 4) Same RGB in the middle/interior stays untouched.
+                    // 5) All other colours/shades stay untouched.
+                    if (mask == null || mw <= 0 || mh <= 0 || mask.length < mw * mh) {
+                        throw new IllegalStateException("person mask unavailable");
+                    }
+
                     for (int y = minY; y <= maxY; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX; x++) {
@@ -2222,93 +2229,48 @@ public class MainActivity extends Activity {
                             int localIndex = ly * boxW + lx;
                             int idx = y * w + x;
                             int c = resultPixels[idx];
+
                             int r = Color.red(c);
                             int g = Color.green(c);
                             int bl = Color.blue(c);
 
+                            // Exact chosen colour only. No tolerance, no similar shade.
                             if (r != tr || g != tg || bl != tb) continue;
 
-                            float rawConfidence = 0f;
-                            if (mask != null && mw > 0 && mh > 0 && mask.length >= mw * mh) {
-                                int mx = Math.min(mw - 1, Math.max(0,
-                                        Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
-                                int my = Math.min(mh - 1, Math.max(0,
-                                        Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
-                                int mi = my * mw + mx;
-                                rawConfidence = mask[mi];
+                            int mx = Math.min(mw - 1, Math.max(0,
+                                    Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                            int my = Math.min(mh - 1, Math.max(0,
+                                    Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+                            int mi = my * mw + mx;
+                            float rawConfidence = mask[mi];
 
-                                // Only the actual person/background edge may change.
-                                if (!isNearPersonBoundary(mask, mw, mh, mx, my, 5)) continue;
-                                if (rawConfidence > 0.975f) continue;
-                            }
+                            // Edge-zone gate is the only spatial permission.
+                            // This keeps the exact same RGB in face/hair/clothes/interior untouched.
+                            if (!isNearPersonBoundary(mask, mw, mh, mx, my, 5)) continue;
+                            if (rawConfidence > 0.975f) continue;
 
-                            exactMatch[localIndex] = true;
+                            exactEdgeMatch[localIndex] = true;
                             matched++;
-
-                            // Smooth alpha only on pixels having the EXACT selected RGB.
-                            // No different colour is ever changed.
-                            float strength = 1f;
-                            if (mask != null && mw > 0 && mh > 0) {
-                                if (rawConfidence > 0.72f) {
-                                    strength = 0.56f;
-                                } else if (rawConfidence > 0.55f) {
-                                    strength = 0.78f;
-                                } else if (rawConfidence > 0.42f) {
-                                    strength = 0.90f;
-                                }
-                            }
-                            rawStrength[localIndex] = strength;
-                        }
-                    }
-
-                    // Feather only among exact-colour pixels. Different RGB pixels are untouched.
-                    float[] feathered = new float[rawStrength.length];
-                    for (int ly = 0; ly < boxH; ly++) {
-                        for (int lx = 0; lx < boxW; lx++) {
-                            int localIndex = ly * boxW + lx;
-                            if (!exactMatch[localIndex]) continue;
-
-                            float weighted = rawStrength[localIndex] * 4f;
-                            float weight = 4f;
-
-                            for (int oy = -2; oy <= 2; oy++) {
-                                int ny = ly + oy;
-                                if (ny < 0 || ny >= boxH) continue;
-                                for (int ox = -2; ox <= 2; ox++) {
-                                    int nx = lx + ox;
-                                    if (nx < 0 || nx >= boxW || (ox == 0 && oy == 0)) continue;
-                                    int ni = ny * boxW + nx;
-                                    if (!exactMatch[ni]) continue;
-
-                                    float distanceWeight =
-                                            (Math.abs(ox) + Math.abs(oy) <= 1) ? 2f : 1f;
-                                    weighted += rawStrength[ni] * distanceWeight;
-                                    weight += distanceWeight;
-                                }
-                            }
-
-                            feathered[localIndex] = weighted / Math.max(1f, weight);
                         }
                     }
 
                     int changed = 0;
-                    final int maxChanged = 160000;
+                    final int maxChanged = 180000;
+
+                    // Full removal for every exact-colour pixel that passed the edge gate.
+                    // Smoothness comes from the existing rendered/feathered person edge;
+                    // importantly, we do NOT modify any different RGB pixel to fake feathering.
                     for (int y = minY; y <= maxY && changed < maxChanged; y++) {
                         int ly = y - minY;
                         for (int x = minX; x <= maxX && changed < maxChanged; x++) {
                             int lx = x - minX;
                             int localIndex = ly * boxW + lx;
-                            if (!exactMatch[localIndex]) continue;
-
-                            float strength = feathered[localIndex];
-                            if (strength <= 0.025f) continue;
+                            if (!exactEdgeMatch[localIndex]) continue;
 
                             int idx = y * w + x;
                             int oldA = Color.alpha(erasePixels[idx]);
-                            int newA = Math.max(oldA,
-                                    Math.round(255f * Math.max(0f, Math.min(1f, strength))));
-                            if (newA > oldA + 2) {
-                                erasePixels[idx] = Color.argb(newA, 255, 255, 255);
+                            if (oldA < 255) {
+                                erasePixels[idx] = Color.argb(255, 255, 255, 255);
                                 changed++;
                             }
                         }
@@ -2328,8 +2290,8 @@ public class MainActivity extends Activity {
                             setEditingEnabled(true);
                             brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
                             setBusy(false, matchedCount > 0
-                                    ? "Exact target colour मिला लेकिन नया erase नहीं बना"
-                                    : "Selected edge में exact target colour नहीं मिला");
+                                    ? "Target colour edge पर पहले से साफ है"
+                                    : "Selected area के edge पर exact target colour नहीं मिला");
                             return;
                         }
 
@@ -2338,7 +2300,7 @@ public class MainActivity extends Activity {
                         setEditingEnabled(true);
                         brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
                         status.setText("CHOOSE COLOR • " + changedCount
-                                + " px • सिर्फ exact target colour removed");
+                                + " px • exact target colour edge से पूरी तरह removed");
                         renderResult();
                     });
                 } catch (Throwable e) {
@@ -2348,7 +2310,7 @@ public class MainActivity extends Activity {
                         updateHistoryButtons();
                         setEditingEnabled(true);
                         brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
-                        setBusy(false, "CHOOSE COLOR error");
+                        setBusy(false, "CHOOSE COLOR edge clean error");
                     });
                 }
             });
