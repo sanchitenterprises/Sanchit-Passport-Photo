@@ -2931,19 +2931,18 @@ public class MainActivity extends Activity {
         }
 
         float smoothAmount = Math.max(0f, Math.min(1f, smooth / 100f));
-                float smoothAmount = smoothAmount * (0.78f + 0.52f * smoothAmount);
-        int blurRadius = smooth == 0 ? 0 : Math.round(2f + smoothAmount * 20f);
-        float[] smoothMask = blurMask(mask, mw, mh, blurRadius);
-        if (smoothAmount > 0.12f) {
+        int blurRadius = smooth == 0 ? 0 : Math.max(1, Math.round(1f + smoothAmount * 8f));
+        float[] smoothMask = blurRadius == 0 ? mask : blurMask(mask, mw, mh, blurRadius);
+        if (smoothAmount > 0.62f) {
             smoothMask = blurMask(smoothMask, mw, mh,
-                    Math.max(1, Math.round(1f + smoothAmount * 8f)));
+                    Math.max(1, Math.round((smoothAmount - 0.58f) * 5f)));
         }
-        int hairRadius = 2 + Math.round(smoothAmount * 2f);
-        float[] hairSupportMask = maxFilterMask(smoothMask, mw, mh, hairRadius);
+        int hairRadius = 1 + Math.round(smoothAmount * 2f);
+        float[] hairSupportMask = maxFilterMask(mask, mw, mh, hairRadius);
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
-        float threshold = 0.50f + (0.10f * smoothAmount);
-        float feather = 0.17f + (0.15f * smoothAmount);
+        float threshold = 0.50f + (0.030f * smoothAmount);
+        float feather = 0.075f + (0.205f * smoothAmount);
         float low = threshold - feather * 0.5f;
         float high = threshold + feather * 0.5f;
         float brightnessAmount = Math.max(0f, Math.min(1f, brightness / 100f));
@@ -2976,7 +2975,10 @@ public class MainActivity extends Activity {
                 float luminance = 0.299f * r + 0.587f * g + 0.114f * b;
 
                 int maskIndex = Math.min(smoothMask.length - 1, my * mw + mx);
-                float confidence = smoothMask[maskIndex];
+                float rawConfidence = mask[Math.min(mask.length - 1, my * mw + mx)];
+                float blurredConfidence = smoothMask[maskIndex];
+                float confidence = rawConfidence * (1f - smoothAmount)
+                        + blurredConfidence * smoothAmount;
                 float hairSupport = hairSupportMask[maskIndex];
 
                 boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
@@ -2989,21 +2991,20 @@ public class MainActivity extends Activity {
                 float a;
                 if (hairCandidate) {
                     confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
-                    float hairThreshold = 0.31f + 0.035f * smoothAmount;
-                    float hairFeather = 0.30f + 0.055f * smoothAmount;
+                    float hairThreshold = 0.31f + 0.020f * smoothAmount;
+                    float hairFeather = 0.24f + 0.050f * smoothAmount;
                     a = smoothStep(hairThreshold - hairFeather * 0.5f,
                             hairThreshold + hairFeather * 0.5f, confidence);
-                    if (hairSupport > 0.62f && a < 0.58f) a = 0.58f;
+                    if (hairSupport > 0.62f && a < 0.60f) a = 0.60f;
                 } else {
-                    a = smoothStep(low, high, confidence);
-                    if (smoothAmount > 0f && a > 0f && a < 1f) {
-                        float softened = smoothStep(0f, 1f, a);
-                        float softMix = Math.min(0.98f, 0.40f + 0.46f * smoothAmount);
-                        a = a * (1f - softMix) + softened * softMix;
-                        float edgeCut = Math.min(0.20f, 0.145f * smoothAmount);
-                        a = Math.max(0f, Math.min(1f,
-                                (a - edgeCut) / Math.max(0.01f, 1f - edgeCut)));
-                    }
+                    float linearA = Math.max(0f, Math.min(1f,
+                            (confidence - low) / Math.max(0.001f, high - low)));
+                    float curvedA = smoothStep(0f, 1f, linearA);
+                    float curveMix = 0.18f + 0.62f * smoothAmount;
+                    a = linearA * (1f - curveMix) + curvedA * curveMix;
+                    float edgeTrim = 0.055f * smoothAmount;
+                    a = Math.max(0f, Math.min(1f,
+                            (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
                 }
 
                 boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
