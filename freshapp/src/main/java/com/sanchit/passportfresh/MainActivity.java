@@ -1617,6 +1617,7 @@ public class MainActivity extends Activity {
         final int mw = maskWidth;
         final int mh = maskHeight;
         final int range = brushSeek == null ? colorToleranceValue : brushSeek.getProgress();
+        final int localRadius = currentEdgeTargetRadiusSource(hairMode);
         final int token = ++renderToken;
 
         setEditingEnabled(false);
@@ -1698,12 +1699,11 @@ public class MainActivity extends Activity {
                     }
 
                     float p = Math.max(0f, Math.min(1f, range / 100f));
-                    int localRadius = Math.min(hairMode ? 155 : 130, Math.max(28,
-                            Math.round(Math.min(w, h)
-                                    * (hairMode ? (0.036f + 0.050f * p)
-                                                : (0.032f + 0.045f * p)))));
-                    float colorTolerance = hairMode ? (24f + 34f * p) : (21f + 30f * p);
+
+                    // Multi-shade tolerance for complete one-pass cleanup inside the ring.
+                    float colorTolerance = hairMode ? (32f + 44f * p) : (28f + 38f * p);
                     float toleranceSq = colorTolerance * colorTolerance;
+                    float outerTolerance = hairMode ? (2100f + 1500f * p) : (1650f + 1200f * p);
 
                     int minX = Math.max(0, sx - localRadius);
                     int maxX = Math.min(w - 1, sx + localRadius);
@@ -1712,132 +1712,134 @@ public class MainActivity extends Activity {
                     int boxW = maxX - minX + 1;
                     int boxH = maxY - minY + 1;
 
-                    boolean[] visited = new boolean[boxW * boxH];
-                    ArrayDeque<Integer> queue = new ArrayDeque<>();
-                    queue.add((sy - minY) * boxW + (sx - minX));
-
                     int changed = 0;
-                    final int maxChanged = hairMode ? 18000 : 14000;
+                    int examined = 0;
+                    final int maxChanged = Math.max(24000,
+                            Math.min(boxW * boxH, hairMode ? 52000 : 42000));
 
-                    while (!queue.isEmpty() && changed < maxChanged) {
-                        int q = queue.removeFirst();
-                        if (q < 0 || q >= visited.length || visited[q]) continue;
-                        visited[q] = true;
-
-                        int lx = q % boxW;
-                        int ly = q / boxW;
-                        int x = minX + lx;
-                        int y = minY + ly;
-
-                        int dx = x - sx;
+                    // Scan EVERY pixel inside the visible ring. This catches mixed residue shades
+                    // (white/grey/blue/shadow) in one pass instead of one centre-colour flood-fill.
+                    for (int y = minY; y <= maxY && changed < maxChanged; y++) {
                         int dy = y - sy;
-                        if (dx * dx + dy * dy > localRadius * localRadius) continue;
+                        for (int x = minX; x <= maxX && changed < maxChanged; x++) {
+                            int dx = x - sx;
+                            if (dx * dx + dy * dy > localRadius * localRadius) continue;
+                            examined++;
 
-                        int idx = y * w + x;
-                        int c = src[idx];
-                        int r = Color.red(c);
-                        int g = Color.green(c);
-                        int b = Color.blue(c);
-                        float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+                            int idx = y * w + x;
+                            int c = src[idx];
+                            int r = Color.red(c);
+                            int g = Color.green(c);
+                            int b = Color.blue(c);
+                            float lum = 0.299f * r + 0.587f * g + 0.114f * b;
 
-                        float dSeed = colorDistanceSq(r, g, b, sr, sg, sb);
-                        if (dSeed > toleranceSq) continue;
+                            int mx = Math.min(mw - 1, Math.max(0,
+                                    Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                            int my = Math.min(mh - 1, Math.max(0,
+                                    Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+                            int mi = Math.min(edgeMask.length - 1, my * mw + mx);
+                            float confidence = edgeMask[mi];
+                            float support = supportMask[mi];
 
-                        // Traverse the connected matching-colour region even when one matching
-                        // pixel itself is protected. This prevents the local clean from stopping
-                        // immediately at tiny hair/skin boundary pixels.
-                        if (lx > 0) queue.add(q - 1);
-                        if (lx + 1 < boxW) queue.add(q + 1);
-                        if (ly > 0) queue.add(q - boxW);
-                        if (ly + 1 < boxH) queue.add(q + boxW);
-                        if (lx > 0 && ly > 0) queue.add(q - boxW - 1);
-                        if (lx + 1 < boxW && ly > 0) queue.add(q - boxW + 1);
-                        if (lx > 0 && ly + 1 < boxH) queue.add(q + boxW - 1);
-                        if (lx + 1 < boxW && ly + 1 < boxH) queue.add(q + boxW + 1);
+                            boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
+                            boolean skin = isSkinLikeColor(r, g, b);
+                            boolean likelyHair = headZone && !skin && lum < 178f && support > 0.30f;
 
-                        int mx = Math.min(mw - 1, Math.max(0,
-                                Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
-                        int my = Math.min(mh - 1, Math.max(0,
-                                Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
-                        int mi = Math.min(edgeMask.length - 1, my * mw + mx);
-                        float confidence = edgeMask[mi];
-                        float support = supportMask[mi];
+                            int outer = sampleOuterBackgroundColor(src, w, h, x, y,
+                                    edgeMask, mw, mh, mx, my, confidence);
+                            int inner = sampleInnerForegroundColor(src, w, h, x, y,
+                                    edgeMask, mw, mh, mx, my, confidence);
 
-                        boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                        boolean skin = isSkinLikeColor(r, g, b);
-                        boolean likelyHair = headZone && !skin && lum < 175f && support > 0.30f;
+                            float dSeed = colorDistanceSq(r, g, b, sr, sg, sb);
+                            float dOuter = Float.MAX_VALUE;
+                            float dInner = Float.MAX_VALUE;
+                            if (outer != -1) {
+                                dOuter = colorDistanceSq(r, g, b,
+                                        Color.red(outer), Color.green(outer), Color.blue(outer));
+                            }
+                            if (inner != -1) {
+                                dInner = colorDistanceSq(r, g, b,
+                                        Color.red(inner), Color.green(inner), Color.blue(inner));
+                            }
 
-                        int outer = sampleOuterBackgroundColor(src, w, h, x, y,
-                                edgeMask, mw, mh, mx, my, confidence);
-                        int inner = sampleInnerForegroundColor(src, w, h, x, y,
-                                edgeMask, mw, mh, mx, my, confidence);
+                            boolean seedLike = dSeed <= toleranceSq;
+                            boolean outerLike = dOuter <= outerTolerance;
+                            boolean outerCloser = inner != -1 && outer != -1
+                                    && dOuter + (hairMode ? 90f : 75f) < dInner;
+                            boolean lowConfidenceResidue = confidence < (hairMode ? 0.38f : 0.34f)
+                                    && support > 0.05f;
 
-                        float dOuter = Float.MAX_VALUE;
-                        float dInner = Float.MAX_VALUE;
-                        if (outer != -1) {
-                            dOuter = colorDistanceSq(r, g, b,
-                                    Color.red(outer), Color.green(outer), Color.blue(outer));
-                        }
-                        if (inner != -1) {
-                            dInner = colorDistanceSq(r, g, b,
-                                    Color.red(inner), Color.green(inner), Color.blue(inner));
-                        }
+                            if (hairMode) {
+                                if (!headZone) continue;
+                                if (skin) continue;
 
-                        boolean outerLike = dOuter < (hairMode ? 1450f : 1050f);
-                        boolean outerCloser = inner != -1 && outer != -1
-                                && dOuter + (hairMode ? 150f : 110f) < dInner;
-                        boolean closeSeed = dSeed <= toleranceSq * (hairMode ? 0.72f : 0.58f);
+                                boolean residueEvidence = seedLike || outerLike
+                                        || outerCloser || lowConfidenceResidue;
+                                if (!residueEvidence) continue;
 
-                        if (hairMode) {
-                            // Hair Edge stays in the head zone, but it may enter low-confidence
-                            // gaps between strands where the old background is still visible.
-                            if (!headZone) continue;
-                            if (skin) continue;
-                            if (likelyHair && confidence > 0.46f && !outerCloser) continue;
-                            if (!closeSeed && !outerLike && !outerCloser) continue;
-                        } else {
-                            // Skin Edge follows residue adjacent to real skin. The proximity
-                            // window is deliberately wider than before so jaw/ear/neck halo works.
-                            boolean innerSkin = inner != -1 && isSkinLikeColor(
-                                    Color.red(inner), Color.green(inner), Color.blue(inner));
-                            boolean nearSkin = innerSkin || hasNearbySkinColor(
-                                    src, w, h, x, y, Math.max(5, Math.min(w,h) / 120));
-                            if (!nearSkin) continue;
-                            if (likelyHair) continue;
-                            if (!closeSeed && !outerLike && !outerCloser) continue;
+                                // Protect strong real hair, but clean background between strands.
+                                if (likelyHair && confidence > 0.54f
+                                        && !outerCloser && !outerLike) continue;
 
-                            // Protect solid real skin; only contaminated edge skin is reduced.
-                            if (skin && confidence > 0.72f && !outerCloser) continue;
-                        }
+                                float colorWeight = seedLike
+                                        ? 1f - Math.min(1f, dSeed / Math.max(1f, toleranceSq))
+                                        : 0.45f;
+                                float strength;
+                                if (outerCloser || outerLike) strength = 1f;
+                                else if (lowConfidenceResidue) strength = 0.94f;
+                                else strength = 0.84f + 0.14f * colorWeight;
 
-                        float colorWeight = 1f - Math.min(1f,
-                                dSeed / Math.max(1f, toleranceSq));
-                        float strength;
+                                if (likelyHair && confidence > 0.28f) {
+                                    strength = Math.min(strength, 0.52f);
+                                }
 
-                        if (hairMode) {
-                            strength = (outerLike || outerCloser)
-                                    ? 1f
-                                    : (0.82f + 0.16f * colorWeight);
-                        } else {
-                            if (skin) {
-                                strength = outerCloser
-                                        ? (0.38f + 0.20f * colorWeight)
-                                        : (0.22f + 0.16f * colorWeight);
+                                int oldA = Color.alpha(erase[idx]);
+                                int newA = Math.max(oldA, Math.round(255f * strength));
+                                if (newA > oldA + 2) {
+                                    erase[idx] = Color.argb(newA, 255, 255, 255);
+                                    changed++;
+                                }
                             } else {
-                                strength = (outerLike || outerCloser)
-                                        ? 1f
-                                        : (0.82f + 0.16f * colorWeight);
+                                boolean innerSkin = inner != -1 && isSkinLikeColor(
+                                        Color.red(inner), Color.green(inner), Color.blue(inner));
+                                boolean nearSkin = innerSkin || hasNearbySkinColor(
+                                        src, w, h, x, y, Math.max(7, Math.min(w,h) / 100));
+                                if (!nearSkin) continue;
+                                if (likelyHair) continue;
+
+                                boolean residueEvidence = seedLike || outerLike
+                                        || outerCloser || lowConfidenceResidue;
+                                if (!residueEvidence) continue;
+
+                                // Protect solid real skin.
+                                if (skin && confidence > 0.76f && !outerCloser && !outerLike) {
+                                    continue;
+                                }
+
+                                float colorWeight = seedLike
+                                        ? 1f - Math.min(1f, dSeed / Math.max(1f, toleranceSq))
+                                        : 0.45f;
+                                float strength;
+                                if (!skin) {
+                                    if (outerCloser || outerLike) strength = 1f;
+                                    else if (lowConfidenceResidue) strength = 0.94f;
+                                    else strength = 0.84f + 0.14f * colorWeight;
+                                } else {
+                                    if (outerCloser || outerLike) {
+                                        strength = 0.42f + 0.22f * colorWeight;
+                                    } else {
+                                        strength = 0.26f + 0.16f * colorWeight;
+                                    }
+                                }
+
+                                int oldA = Color.alpha(erase[idx]);
+                                int newA = Math.max(oldA, Math.round(255f * strength));
+                                if (newA > oldA + 2) {
+                                    erase[idx] = Color.argb(newA, 255, 255, 255);
+                                    changed++;
+                                }
                             }
                         }
-
-                        strength = Math.max(0f, Math.min(1f, strength));
-                        int oldA = Color.alpha(erase[idx]);
-                        int newA = Math.max(oldA, Math.round(255f * strength));
-                        if (newA > oldA + 2) {
-                            erase[idx] = Color.argb(newA, 255, 255, 255);
-                            changed++;
-                        }
-
                     }
 
                     final int changedCount = changed;
@@ -1852,8 +1854,8 @@ public class MainActivity extends Activity {
                             updateHistoryButtons();
                             setEditingEnabled(true);
                             setBusy(false, hairMode
-                                    ? "Hair Edge • matching residue नहीं मिला"
-                                    : "Skin Edge • matching residue नहीं मिला");
+                                    ? "Hair Edge • ring में removable residue नहीं मिला"
+                                    : "Skin Edge • ring में removable residue नहीं मिला");
                             return;
                         }
 
@@ -1861,8 +1863,8 @@ public class MainActivity extends Activity {
                         updateHistoryButtons();
                         setEditingEnabled(true);
                         status.setText(hairMode
-                                ? "Hair Edge • selected hair area cleaned"
-                                : "Skin Edge • selected skin edge cleaned");
+                                ? "Hair Edge • ring area cleaned • " + changedCount + " px"
+                                : "Skin Edge • ring area cleaned • " + changedCount + " px");
                         renderResult();
                     });
                 } catch (Throwable e) {
@@ -1955,9 +1957,9 @@ public class MainActivity extends Activity {
                 showLens(e.getX(), e.getY());
                 if (hairEdgeOn || skinEdgeOn) showEdgeTarget(e.getX(), e.getY());
                 if (hairEdgeOn) {
-                    status.setText("Hair Edge • target ring के center पर residue रखें");
+                    status.setText("Hair Edge • पूरा ring actual work area है");
                 } else if (skinEdgeOn) {
-                    status.setText("Skin Edge • target ring के center पर halo रखें");
+                    status.setText("Skin Edge • पूरा ring actual work area है");
                 }
                 return true;
             }
@@ -2073,10 +2075,20 @@ public class MainActivity extends Activity {
         return Math.max(0.0001f, (float)Math.sqrt(sx * sx + sy * sy));
     }
 
+    private float currentEdgeTargetRadiusView(boolean hairMode) {
+        float t = Math.max(0f, Math.min(1f, colorToleranceValue / 100f));
+        // Visible ring and actual processing radius use this same value.
+        return dp(hairMode ? 28 : 24) + dp(hairMode ? 20 : 17) * t;
+    }
+
+    private int currentEdgeTargetRadiusSource(boolean hairMode) {
+        float viewRadius = currentEdgeTargetRadiusView(hairMode);
+        return Math.max(12, Math.round(viewRadius / Math.max(0.0001f, currentImageScale())));
+    }
+
     private void showEdgeTarget(float viewX, float viewY) {
         if (edgeTargetCursor == null) return;
-        float t = Math.max(0f, Math.min(1f, colorToleranceValue / 100f));
-        float radius = dp(hairEdgeOn ? 18 : 15) + dp(hairEdgeOn ? 14 : 10) * t;
+        float radius = currentEdgeTargetRadiusView(hairEdgeOn);
         edgeTargetCursor.setTarget(viewX, viewY, radius, hairEdgeOn);
         edgeTargetCursor.setVisibility(View.VISIBLE);
         edgeTargetCursor.bringToFront();
@@ -2102,7 +2114,8 @@ public class MainActivity extends Activity {
         float lensRadiusPx = dp(88);
         float sourceRadius = lensRadiusPx
                 / Math.max(0.0001f, currentImageScale() * magnification);
-        float targetRing = (hairEdgeOn ? dp(34) : (skinEdgeOn ? dp(29) : 0f));
+        float targetRing = hairEdgeOn ? currentEdgeTargetRadiusView(true)
+                : (skinEdgeOn ? currentEdgeTargetRadiusView(false) : 0f);
 
         int lensMode = hairEdgeOn ? LensView.MODE_HAIR_EDGE
                 : (skinEdgeOn ? LensView.MODE_SKIN_EDGE : LensView.MODE_COLOR_CLEAN);
