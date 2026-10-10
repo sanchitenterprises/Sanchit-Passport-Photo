@@ -111,7 +111,6 @@ public class MainActivity extends Activity {
     private SeekBar brushSeek;
     private Button compareButton;
     private Button brushButton;
-    private Button objectButton;
     private Button undoButton;
     private Button redoButton;
 
@@ -299,15 +298,12 @@ public class MainActivity extends Activity {
         brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
         LinearLayout row2 = buttonRow();
-        compareButton = button("SELECT AREA", false);
-        brushButton = button("CLEAR SELECT", false);
-        objectButton = button("LOCAL COLOR CLEAN", false);
-        compareButton.setTextSize(10);
-        brushButton.setTextSize(9);
-        objectButton.setTextSize(10);
+        compareButton = button("SELECT", false);
+        brushButton = button("CHOOSE COLOR", false);
+        compareButton.setTextSize(11);
+        brushButton.setTextSize(10);
         row2.addView(compareButton, weightedButton());
         row2.addView(brushButton, weightedButton());
-        row2.addView(objectButton, weightedButton());
         controls.addView(row2, weightedControlRow(1.0f));
 
         LinearLayout row3 = buttonRow();
@@ -322,8 +318,7 @@ public class MainActivity extends Activity {
         camera.setOnClickListener(v -> openCamera());
         gallery.setOnClickListener(v -> openGallery());
         compareButton.setOnClickListener(v -> toggleSelectionMode());
-        brushButton.setOnClickListener(v -> clearSelection());
-        objectButton.setOnClickListener(v -> toggleColorClean());
+        brushButton.setOnClickListener(v -> toggleColorClean());
         undoButton.setOnClickListener(v -> undo());
         redoButton.setOnClickListener(v -> redo());
         menuButton.setOnClickListener(v -> showTopMenu(menuButton));
@@ -427,10 +422,9 @@ public class MainActivity extends Activity {
         int textColor = Color.WHITE;
         if (text.contains("UNDO")) bgColor = 0xFF7C7399;
         else if (text.contains("REDO")) bgColor = 0xFF7E9B76;
-        else if (text.contains("SELECT AREA")) { bgColor = 0xFF4F8F8B; textColor = 0xFFFFFFFF; }
-        else if (text.contains("CLEAR SELECT")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
+        else if (text.contains("SELECT")) { bgColor = 0xFF4F8F8B; textColor = 0xFFFFFFFF; }
+        else if (text.contains("CHOOSE COLOR")) { bgColor = 0xFF5B7FA3; textColor = 0xFFFFFFFF; }
         else if (text.contains("COMPARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
-        else if (text.contains("LOCAL")) bgColor = 0xFF5B7FA3;
         else if (text.contains("कैमरा")) bgColor = 0xFF7C7399;
         else if (text.contains("फोटो")) bgColor = 0xFF5B7FA3;
         else if (text.contains("SHARE")) { bgColor = 0xFFB39B7A; textColor = 0xFF1F2933; }
@@ -610,7 +604,6 @@ public class MainActivity extends Activity {
         brushSeek.setEnabled(enabled);
         compareButton.setEnabled(enabled);
         brushButton.setEnabled(enabled);
-        objectButton.setEnabled(enabled);
         if (backgroundColorRow != null) {
             for (int i = 0; i < backgroundColorRow.getChildCount(); i++) {
                 View slot = backgroundColorRow.getChildAt(i);
@@ -1536,9 +1529,8 @@ public class MainActivity extends Activity {
         selectionModeOn = false;
         selectionDragging = false;
         colorCleanOn = false;
-        compareButton.setText("SELECT AREA");
-        brushButton.setText("CLEAR SELECT");
-        objectButton.setText("LOCAL COLOR CLEAN");
+        compareButton.setText(hasSelection() ? "DESELECT" : "SELECT");
+        brushButton.setText("CHOOSE COLOR");
 
         compareOriginal = !compareOriginal;
         imageView.setImageBitmap(compareOriginal ? originalBitmap : resultBitmap);
@@ -1560,28 +1552,24 @@ public class MainActivity extends Activity {
             return;
         }
 
-        selectionModeOn = !selectionModeOn;
+        // The same button is SELECT when no area exists and DESELECT when an
+        // area (or an active selection gesture) exists.
+        if (hasSelection() || selectionModeOn) {
+            clearSelection();
+            return;
+        }
+
+        selectionModeOn = true;
         selectionDragging = false;
         colorCleanOn = false;
         compareOriginal = false;
         imageView.setImageBitmap(resultBitmap);
 
-        compareButton.setText(selectionModeOn ? "SELECT AREA ✓" : "SELECT AREA");
-        brushButton.setText("CLEAR SELECT");
-        objectButton.setText("LOCAL COLOR CLEAN");
+        compareButton.setText("DESELECT");
+        brushButton.setText("CHOOSE COLOR");
         hideLens();
-
-        if (selectionModeOn) {
-            status.setText("Selection Tool • जिस हिस्से में BG बचा है उस area पर drag करें");
-            if (selectionOverlay != null && !hasSelection()) {
-                selectionOverlay.setVisibility(View.GONE);
-            }
-        } else {
-            updateSelectionOverlayFromSource();
-            status.setText(hasSelection()
-                    ? "Area selected • अब LOCAL COLOR CLEAN चुनें"
-                    : "Selection OFF");
-        }
+        if (selectionOverlay != null) selectionOverlay.setVisibility(View.GONE);
+        status.setText("SELECT • जिस हिस्से में BG बचा है उस area पर drag करें");
     }
 
     private void clearSelection() {
@@ -1589,15 +1577,14 @@ public class MainActivity extends Activity {
         selectionModeOn = false;
         selectionDragging = false;
         colorCleanOn = false;
-        compareButton.setText("SELECT AREA");
-        brushButton.setText("CLEAR SELECT");
-        objectButton.setText("LOCAL COLOR CLEAN");
+        compareButton.setText("SELECT");
+        brushButton.setText("CHOOSE COLOR");
         if (selectionOverlay != null) {
             selectionOverlay.clearSelection();
             selectionOverlay.setVisibility(View.GONE);
         }
         hideLens();
-        status.setText("Selection clear • नया area select करें");
+        status.setText("Deselected • नया area चुनने के लिए SELECT दबाएँ");
     }
 
     private void updateSelectionOverlayFromSource() {
@@ -1638,7 +1625,7 @@ public class MainActivity extends Activity {
         float right = Math.max(selectionStartViewX, endViewX);
         float bottom = Math.max(selectionStartViewY, endViewY);
 
-        // A simple tap creates a small useful selection box instead of failing.
+        // A simple tap creates a small local selection box.
         if (right - left < dp(12) && bottom - top < dp(12)) {
             float r = dp(34);
             left = endViewX - r;
@@ -1670,11 +1657,11 @@ public class MainActivity extends Activity {
         selectedAreaSource.set(sourceRect);
         selectionModeOn = false;
         selectionDragging = false;
-        compareButton.setText("SELECT AREA");
-        brushButton.setText("CLEAR SELECT");
-        objectButton.setText("LOCAL COLOR CLEAN");
+        colorCleanOn = false;
+        compareButton.setText("DESELECT");
+        brushButton.setText("CHOOSE COLOR");
         updateSelectionOverlayFromSource();
-        status.setText("Area selected • अब LOCAL COLOR CLEAN दबाकर बचा colour touch करें");
+        status.setText("Area selected • अब CHOOSE COLOR दबाकर edge का बचा colour चुनें");
     }
 
     private boolean isSourcePointInsideSelection(float sx, float sy) {
@@ -1683,10 +1670,12 @@ public class MainActivity extends Activity {
 
     private void toggleColorClean() {
         if (resultBitmap == null) return;
+
         if (!hasSelection()) {
             colorCleanOn = false;
-            objectButton.setText("LOCAL COLOR CLEAN");
-            status.setText("पहले SELECT AREA से बचा हुआ हिस्सा select करें");
+            compareButton.setText("SELECT");
+            brushButton.setText("CHOOSE COLOR");
+            status.setText("पहले SELECT से बचा हुआ area चुनें");
             toast("पहले area select करें");
             return;
         }
@@ -1694,21 +1683,20 @@ public class MainActivity extends Activity {
         colorCleanOn = !colorCleanOn;
         selectionModeOn = false;
         selectionDragging = false;
-        compareButton.setText("SELECT AREA");
-        brushButton.setText("CLEAR SELECT");
+        compareButton.setText("DESELECT");
 
         if (compareOriginal && colorCleanOn) {
             compareOriginal = false;
             imageView.setImageBitmap(resultBitmap);
         }
 
-        objectButton.setText(colorCleanOn ? "LOCAL COLOR CLEAN ✓" : "LOCAL COLOR CLEAN");
+        brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
         if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
         brushSeek.setProgress(colorToleranceValue);
         updateSelectionOverlayFromSource();
         status.setText(colorCleanOn
-                ? "Selected area में edge का बचा colour touch करें • पूरे matching edge को smooth हटाएगा"
-                : "Local Color Clean OFF");
+                ? "Selected area के अंदर colour touch करें • वही colour सिर्फ edge के किनारे smooth remove होगा"
+                : "Choose Color OFF");
         hideLens();
     }
 
@@ -1726,7 +1714,7 @@ public class MainActivity extends Activity {
             hideLens();
             if (selectionModeOn) {
                 updateSelectionOverlayFromSource();
-                status.setText("Selection Tool • एक finger से area select करें");
+                status.setText("SELECT • एक finger से area select करें");
             }
             return true;
         }
@@ -1742,7 +1730,7 @@ public class MainActivity extends Activity {
                 selectionStartViewX = e.getX();
                 selectionStartViewY = e.getY();
                 updateSelectionDrag(e.getX(), e.getY());
-                status.setText("Selection • area के चारों तरफ drag करें");
+                status.setText("SELECT • problem area के चारों तरफ drag करें");
                 return true;
             }
 
@@ -2305,8 +2293,9 @@ public class MainActivity extends Activity {
                         eraseMask = updated;
                         updateHistoryButtons();
                         setEditingEnabled(true);
-                        status.setText("Smooth Local Clean • " + changedCount
-                                + " px • पूरा selected edge");
+                        brushButton.setText("CHOOSE COLOR ✓");
+                        status.setText("Chosen colour smooth removed • " + changedCount
+                                + " px • सिर्फ selected edge");
                         renderResult();
                     });
                 } catch (Throwable e) {
