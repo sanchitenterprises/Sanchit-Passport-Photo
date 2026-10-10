@@ -1571,7 +1571,7 @@ public class MainActivity extends Activity {
             if (toolSeekLabel != null) toolSeekLabel.setText("Smart Clean Range");
             brushSeek.setProgress(colorToleranceValue);
             renderToolChoiceRow();
-            status.setText("Smart Edge Clean ON • जहाँ residue छूटा है वहीं finger रखें");
+            status.setText("Smart Edge Clean ON • local crisp clean • residue पर finger रखें");
         } else {
             compareButton.setText("SMART EDGE CLEAN");
             if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
@@ -1622,8 +1622,9 @@ public class MainActivity extends Activity {
                     source.getPixels(src, 0, w, 0, 0, w, h);
                     oldErase.getPixels(erase, 0, w, 0, 0, w, h);
 
-                    float[] edgeMask = blurMask(mask, mw, mh, 1);
-                    float[] supportMask = maxFilterMask(edgeMask, mw, mh, 2);
+                    // Smart clean should stay crisp/local: do not blur the segmentation mask here.
+                    float[] edgeMask = mask;
+                    float[] supportMask = maxFilterMask(edgeMask, mw, mh, 1);
                     int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
 
                     int smx = Math.min(mw - 1, Math.max(0,
@@ -1735,10 +1736,10 @@ public class MainActivity extends Activity {
                                     Color.red(inner), Color.green(inner), Color.blue(inner));
                         }
 
-                        boolean clickedColorMatch = dSeed <= toleranceSq * 0.58f;
-                        boolean outerLike = dOuter < 1100f;
+                        boolean clickedColorMatch = dSeed <= toleranceSq * 0.44f;
+                        boolean outerLike = dOuter < 900f;
                         boolean outerCloser = inner != -1 && outer != -1
-                                && dOuter + 180f < dInner;
+                                && dOuter + 120f < dInner;
 
                         if (!clickedColorMatch && !outerLike && !outerCloser) continue;
 
@@ -1752,11 +1753,23 @@ public class MainActivity extends Activity {
                         if (skin && dSeed > toleranceSq * 0.12f) continue;
 
                         float colorWeight = 1f - Math.min(1f, dSeed / Math.max(1f, toleranceSq));
-                        float confWeight = 1f - smoothStep(0.30f, 0.92f, confidence);
-                        float strength = 0.52f + 0.35f * colorWeight + 0.24f * confWeight;
-                        if (outerLike || outerCloser) strength = Math.max(strength, 0.86f);
-                        if (likelyHair) strength *= 0.55f;
-                        if (skin) strength *= 0.48f;
+
+                        // Less smoothing: strong residue is removed almost fully.
+                        // Borderline matches get only a small, controlled partial cut.
+                        float strength;
+                        if (clickedColorMatch && (outerLike || outerCloser)) {
+                            strength = 1f;
+                        } else if (outerLike || outerCloser) {
+                            strength = 0.88f + 0.10f * colorWeight;
+                        } else {
+                            strength = 0.70f + 0.12f * colorWeight;
+                        }
+
+                        if (likelyHair) strength *= 0.52f;
+                        if (skin) strength *= 0.44f;
+
+                        // Avoid a wide semi-transparent feather band.
+                        if (!likelyHair && !skin && strength < 0.76f) continue;
                         strength = Math.max(0f, Math.min(1f, strength));
 
                         int oldA = Color.alpha(erase[idx]);
