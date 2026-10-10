@@ -67,6 +67,12 @@ public class MainActivity extends Activity {
     private static final int REQ_GALLERY = 202;
     private static final int REQ_CAMERA_PERMISSION = 203;
     private static final int REQ_SAVE_PERMISSION = 204;
+    private static final int REQ_SHARE_PERMISSION = 205;
+    private static final int REQ_PASSPORT_PERMISSION = 206;
+
+    // 35x45 mm passport ratio (7:9), high-quality export size.
+    private static final int PASSPORT_WIDTH = 826;
+    private static final int PASSPORT_HEIGHT = 1062;
 
     private static final int BLUE = Color.rgb(74, 144, 194);
     private static final int[] PHOTO_BG_COLORS = new int[]{
@@ -296,8 +302,8 @@ public class MainActivity extends Activity {
         row1.addView(redoButton, weightedButton());
         controls.addView(row1, weightedControlRow(1.0f));
 
-        brightnessSeek = compactSlider(controls, "Brightness", 22);
-        fairnessSeek = compactSlider(controls, "Fairness", 28);
+        brightnessSeek = compactSlider(controls, "Brightness", 0);
+        fairnessSeek = compactSlider(controls, "Fairness", 0);
         smoothSeek = compactSlider(controls, "Smooth BG", 35);
         brushSeek = compactSlider(controls, "Color Tolerance", 22);
 
@@ -676,11 +682,7 @@ public class MainActivity extends Activity {
     }
 
     private String getAppVersion() {
-        try {
-            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-        } catch (Exception e) {
-            return "1.0.20";
-        }
+        return BuildConfig.VERSION_NAME;
     }
 
     private void showTopMenu(View anchor) {
@@ -688,6 +690,7 @@ public class MainActivity extends Activity {
         popup.getMenu().add(compareOriginal ? "Show Result" : "Compare");
         popup.getMenu().add("Share");
         popup.getMenu().add("Save");
+        popup.getMenu().add("Save 35×45");
         popup.getMenu().add("About");
         popup.setOnMenuItemClickListener(item -> {
             String title = item.getTitle().toString();
@@ -701,6 +704,10 @@ public class MainActivity extends Activity {
             }
             if ("Save".equals(title)) {
                 savePhoto();
+                return true;
+            }
+            if ("Save 35×45".equals(title)) {
+                savePassportPhoto35x45();
                 return true;
             }
             if ("About".equals(title)) {
@@ -749,8 +756,16 @@ public class MainActivity extends Activity {
         launchCamera();
     }
 
+    private void deleteCameraPlaceholder() {
+        if (cameraUri == null) return;
+        try { getContentResolver().delete(cameraUri, null, null); } catch (Exception ignored) {}
+        cameraUri = null;
+    }
+
     private void launchCamera() {
         try {
+            deleteCameraPlaceholder();
+
             ContentValues values = new ContentValues();
             values.put(MediaStore.Images.Media.DISPLAY_NAME, "Passport_" + System.currentTimeMillis() + ".jpg");
             values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
@@ -769,11 +784,13 @@ public class MainActivity extends Activity {
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             i.setClipData(ClipData.newRawUri("camera", cameraUri));
             if (i.resolveActivity(getPackageManager()) == null) {
+                deleteCameraPlaceholder();
                 toast("Camera उपलब्ध नहीं है");
                 return;
             }
             startActivityForResult(i, REQ_CAMERA);
         } catch (Exception e) {
+            deleteCameraPlaceholder();
             toast("Camera error");
         }
     }
@@ -789,16 +806,28 @@ public class MainActivity extends Activity {
         } else if (requestCode == REQ_SAVE_PERMISSION) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) savePhoto();
             else toast("Save permission नहीं मिला");
+        } else if (requestCode == REQ_SHARE_PERMISSION) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) sharePhoto();
+            else toast("Share permission नहीं मिला");
+        } else if (requestCode == REQ_PASSPORT_PERMISSION) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) savePassportPhoto35x45();
+            else toast("Save permission नहीं मिला");
         }
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode != RESULT_OK) return;
+        if (resultCode != RESULT_OK) {
+            if (requestCode == REQ_CAMERA) deleteCameraPlaceholder();
+            return;
+        }
 
         Uri uri = null;
-        if (requestCode == REQ_CAMERA) uri = cameraUri;
+        if (requestCode == REQ_CAMERA) {
+            uri = cameraUri;
+            cameraUri = null;
+        }
         if (requestCode == REQ_GALLERY && data != null) uri = data.getData();
         if (uri == null) return;
 
@@ -954,6 +983,7 @@ public class MainActivity extends Activity {
             worker.execute(() -> {
             Bitmap out = null;
             try {
+                if (destroyed || token != renderToken) return;
                 int w = source.getWidth();
                 int h = source.getHeight();
                 int[] src = new int[w * h];
@@ -995,6 +1025,7 @@ public class MainActivity extends Activity {
                 int bb = Color.blue(backgroundColor);
 
                 for (int y = 0; y < h; y++) {
+                    if ((y & 31) == 0 && (destroyed || token != renderToken)) return;
                     float maskY = y * (mh - 1f) / Math.max(1f, h - 1f);
                     int my = Math.min(mh - 1, Math.max(0, Math.round(maskY)));
                     for (int x = 0; x < w; x++) {
@@ -1076,6 +1107,7 @@ public class MainActivity extends Activity {
                 final Bitmap ready = out;
                 runOnUiThread(() -> {
                     if (destroyed || isFinishing() || (Build.VERSION.SDK_INT >= 17 && isDestroyed()) || token != renderToken) {
+                        if (ready != null && !ready.isRecycled()) ready.recycle();
                         return;
                     }
                     replaceResult(ready);
@@ -1099,6 +1131,8 @@ public class MainActivity extends Activity {
                         toast("Processing error");
                     }
                 });
+            } finally {
+                if (localErase != null && !localErase.isRecycled()) localErase.recycle();
             }
         });
         } catch (RejectedExecutionException ignored) {
@@ -2486,29 +2520,106 @@ public class MainActivity extends Activity {
     }
 
     private void sharePhoto() {
-        if (resultBitmap == null) {
+        if (resultBitmap == null || originalBitmap == null || personMask == null) {
             toast("पहले फोटो तैयार करें");
             return;
         }
+        if (Build.VERSION.SDK_INT >= 23 && Build.VERSION.SDK_INT <= 28
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_SHARE_PERMISSION);
+            return;
+        }
+        exportProcessedPhoto(true, false);
+    }
 
-        final Bitmap copy = resultBitmap.copy(Bitmap.Config.ARGB_8888, false);
-        setBusy(true, "Share तैयार हो रहा है…");
+    private void savePhoto() {
+        if (resultBitmap == null || originalBitmap == null || personMask == null) {
+            toast("पहले फोटो तैयार करें");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 && Build.VERSION.SDK_INT <= 28
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_SAVE_PERMISSION);
+            return;
+        }
+        exportProcessedPhoto(false, false);
+    }
+
+    private void savePassportPhoto35x45() {
+        if (resultBitmap == null || originalBitmap == null || personMask == null) {
+            toast("पहले फोटो तैयार करें");
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 23 && Build.VERSION.SDK_INT <= 28
+                && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_PASSPORT_PERMISSION);
+            return;
+        }
+        exportProcessedPhoto(false, true);
+    }
+
+    private void exportProcessedPhoto(boolean share, boolean passport35x45) {
+        final Uri exportSourceUri = sourceUri;
+        final Bitmap exportErase = eraseMask == null ? null : eraseMask.copy(Bitmap.Config.ALPHA_8, false);
+        final float[] exportMask = personMask.clone();
+        final int exportMaskW = maskWidth;
+        final int exportMaskH = maskHeight;
+        final int exportBrightness = brightnessUserAdjusted ? brightnessSeek.getProgress() : 0;
+        final int exportFairness = fairnessUserAdjusted ? fairnessSeek.getProgress() : 0;
+        final int exportSmooth = smoothSeek.getProgress();
+        final int exportBackgroundColor = selectedBackgroundColor;
+
+        setBusy(true, share ? "Full resolution share तैयार हो रहा है…"
+                : (passport35x45 ? "35×45 फोटो सेव हो रही है…" : "Original size में फोटो सेव हो रही है…"));
 
         try {
             worker.execute(() -> {
                 Uri uri = null;
+                Bitmap full = null;
+                boolean usedMemoryFallback = false;
                 try {
-                    String name = "STS_Photo_Background_Remover_Share_" + System.currentTimeMillis() + ".jpg";
+                    if (exportSourceUri == null) throw new IllegalStateException("source uri missing");
+
+                    try {
+                        full = decodeOriginalFull(exportSourceUri);
+                    } catch (OutOfMemoryError oom) {
+                        usedMemoryFallback = true;
+                        System.gc();
+                        full = decodeForExport(exportSourceUri, 4096);
+                    }
+                    if (full == null) throw new IllegalStateException("full decode failed");
+
+                    renderFullResolutionForSave(full, exportMask, exportMaskW, exportMaskH,
+                            exportErase, exportBrightness, exportFairness, exportSmooth, exportBackgroundColor);
+
+                    if (passport35x45) {
+                        Bitmap passport = makePassport35x45(full);
+                        if (passport != full && !full.isRecycled()) full.recycle();
+                        full = passport;
+                    }
+
+                    String prefix = passport35x45 ? "STS_Passport_35x45_"
+                            : (share ? "STS_Photo_Background_Remover_Share_" : "STS_Photo_Background_Remover_");
+                    String name = prefix + System.currentTimeMillis() + ".jpg";
+
                     ContentValues values = new ContentValues();
                     values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
                     values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                    values.put(MediaStore.Images.Media.WIDTH, full.getWidth());
+                    values.put(MediaStore.Images.Media.HEIGHT, full.getHeight());
 
                     if (Build.VERSION.SDK_INT >= 29) {
-                        values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Photo Background Remover/Shared");
+                        String folder = passport35x45
+                                ? "Pictures/STS Photo Background Remover/35x45"
+                                : (share ? "Pictures/STS Photo Background Remover/Shared"
+                                         : "Pictures/STS Photo Background Remover");
+                        values.put(MediaStore.Images.Media.RELATIVE_PATH, folder);
                         values.put(MediaStore.Images.Media.IS_PENDING, 1);
                     } else {
-                        File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                                "STS Passport Size Photo/Shared");
+                        String child = passport35x45 ? "35x45" : (share ? "Shared" : "");
+                        File base = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                                "STS Photo Background Remover");
+                        File dir = child.isEmpty() ? base : new File(base, child);
                         if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("folder");
                         File file = new File(dir, name);
                         values.put(MediaStore.Images.Media.DATA, file.getAbsolutePath());
@@ -2518,7 +2629,7 @@ public class MainActivity extends Activity {
                     if (uri == null) throw new IllegalStateException("insert");
 
                     try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
-                        if (out == null || !copy.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
+                        if (out == null || !full.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
                             throw new IllegalStateException("write");
                         }
                     }
@@ -2529,137 +2640,96 @@ public class MainActivity extends Activity {
                         getContentResolver().update(uri, ready, null, null);
                     }
 
-                    final Uri shareUri = uri;
+                    final Uri exportUri = uri;
+                    final int savedW = full.getWidth();
+                    final int savedH = full.getHeight();
+                    final boolean fallback = usedMemoryFallback;
                     runOnUiThread(() -> {
                         if (destroyed) return;
-                        stopProcessingAnimation();
-                        status.setText("Ready • Share");
-                        Intent send = new Intent(Intent.ACTION_SEND);
-                        send.setType("image/jpeg");
-                        send.putExtra(Intent.EXTRA_STREAM, shareUri);
-                        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                        try {
-                            startActivity(Intent.createChooser(send, "Photo share करें"));
-                        } catch (Exception e) {
-                            toast("Share नहीं खुला");
+                        if (share) {
+                            setBusy(false, "Ready • Full resolution " + savedW + "×" + savedH);
+                            Intent send = new Intent(Intent.ACTION_SEND);
+                            send.setType("image/jpeg");
+                            send.putExtra(Intent.EXTRA_STREAM, exportUri);
+                            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            try {
+                                startActivity(Intent.createChooser(send, "Photo share करें"));
+                            } catch (Exception e) {
+                                toast("Share नहीं खुला");
+                            }
+                        } else {
+                            String msg = passport35x45
+                                    ? "Saved • 35×45 • " + savedW + "×" + savedH
+                                    : "Saved • " + (fallback ? "High Resolution" : "Original Size")
+                                      + " " + savedW + "×" + savedH;
+                            setBusy(false, msg);
+                            toast(passport35x45 ? "35×45 फोटो सेव हो गई" : "फोटो सेव हो गई");
                         }
                     });
-                } catch (Exception e) {
-                    final Uri failedUri = uri;
-                    if (failedUri != null) {
-                        try { getContentResolver().delete(failedUri, null, null); } catch (Exception ignored) {}
+                } catch (OutOfMemoryError oom) {
+                    if (uri != null) {
+                        try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
                     }
                     runOnUiThread(() -> {
                         if (!destroyed) {
-                            setBusy(false, "Share failed");
-                            toast("Share तैयार नहीं हुआ");
+                            setBusy(false, "Memory कम है");
+                            toast("फोटो export के लिए memory कम है");
                         }
                     });
+                } catch (Exception ex) {
+                    if (uri != null) {
+                        try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
+                    }
+                    runOnUiThread(() -> {
+                        if (!destroyed) {
+                            setBusy(false, share ? "Share failed" : "Save failed");
+                            toast(share ? "Share तैयार नहीं हुआ" : "फोटो सेव नहीं हुई");
+                        }
+                    });
+                } finally {
+                    if (full != null && !full.isRecycled()) full.recycle();
+                    if (exportErase != null && !exportErase.isRecycled()) exportErase.recycle();
                 }
             });
         } catch (RejectedExecutionException ignored) {
-            setBusy(false, "Share failed");
+            setBusy(false, share ? "Share failed" : "Save failed");
         }
     }
 
-    private void savePhoto() {
-        if (resultBitmap == null || originalBitmap == null || personMask == null) {
-            toast("पहले फोटो तैयार करें");
-            return;
+    private Bitmap decodeForExport(Uri uri, int maxSide) throws Exception {
+        if (Build.VERSION.SDK_INT >= 28) {
+            ImageDecoder.Source src = ImageDecoder.createSource(getContentResolver(), uri);
+            return ImageDecoder.decodeBitmap(src, (decoder, info, source) -> {
+                int max = Math.max(info.getSize().getWidth(), info.getSize().getHeight());
+                if (max > maxSide) {
+                    int sample = (int)Math.ceil(max / (double)maxSide);
+                    decoder.setTargetSampleSize(Math.max(1, sample));
+                }
+                decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                decoder.setMutableRequired(true);
+            });
         }
 
-        if (Build.VERSION.SDK_INT >= 23 && Build.VERSION.SDK_INT <= 28 &&
-                checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_SAVE_PERMISSION);
-            return;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            BitmapFactory.decodeStream(in, null, bounds);
         }
+        int sample = 1;
+        while (Math.max(bounds.outWidth / sample, bounds.outHeight / sample) > maxSide) sample *= 2;
 
-        final Uri saveSourceUri = sourceUri;
-        final Bitmap previewSource = originalBitmap.copy(Bitmap.Config.ARGB_8888, false);
-        final Bitmap saveErase = eraseMask == null ? null : eraseMask.copy(Bitmap.Config.ALPHA_8, false);
-        final float[] saveMask = personMask.clone();
-        final int saveMaskW = maskWidth;
-        final int saveMaskH = maskHeight;
-        final int saveBrightness = brightnessUserAdjusted ? brightnessSeek.getProgress() : 0;
-        final int saveFairness = fairnessUserAdjusted ? fairnessSeek.getProgress() : 0;
-        final int saveSmooth = smoothSeek.getProgress();
-        final int saveBackgroundColor = selectedBackgroundColor;
-
-        setBusy(true, "Original size में फोटो सेव हो रही है…");
-
-        worker.execute(() -> {
-            Uri uri = null;
-            Bitmap full = null;
-            try {
-                if (saveSourceUri == null) throw new IllegalStateException("source uri missing");
-
-                full = decodeOriginalFull(saveSourceUri);
-                if (full == null) throw new IllegalStateException("full decode failed");
-
-                renderFullResolutionForSave(full, previewSource, saveMask, saveMaskW, saveMaskH,
-                        saveErase, saveBrightness, saveFairness, saveSmooth, saveBackgroundColor);
-
-                String name = "STS_Photo_Background_Remover_" + System.currentTimeMillis() + ".jpg";
-                ContentValues values = new ContentValues();
-                values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
-                values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
-                values.put(MediaStore.Images.Media.WIDTH, full.getWidth());
-                values.put(MediaStore.Images.Media.HEIGHT, full.getHeight());
-
-                if (Build.VERSION.SDK_INT >= 29) {
-                    values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/STS Photo Background Remover");
-                    values.put(MediaStore.Images.Media.IS_PENDING, 1);
-                } else {
-                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-                            "STS Photo Background Remover");
-                    if (!dir.exists() && !dir.mkdirs()) throw new IllegalStateException("folder");
-                    File file = new File(dir, name);
-                    values.put(MediaStore.Images.Media.DATA, file.getAbsolutePath());
-                }
-
-                uri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-                if (uri == null) throw new IllegalStateException("insert");
-
-                try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
-                    if (out == null || !full.compress(Bitmap.CompressFormat.JPEG, 100, out)) {
-                        throw new IllegalStateException("write");
-                    }
-                }
-
-                if (Build.VERSION.SDK_INT >= 29) {
-                    ContentValues ready = new ContentValues();
-                    ready.put(MediaStore.Images.Media.IS_PENDING, 0);
-                    getContentResolver().update(uri, ready, null, null);
-                }
-
-                final int savedW = full.getWidth();
-                final int savedH = full.getHeight();
-                runOnUiThread(() -> {
-                    setBusy(false, "Saved • Original Size " + savedW + "×" + savedH);
-                    toast("Original size में फोटो सेव हो गई");
-                });
-            } catch (OutOfMemoryError oom) {
-                if (uri != null) {
-                    try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
-                }
-                runOnUiThread(() -> {
-                    setBusy(false, "Original-size save memory error");
-                    toast("Original size save के लिए memory कम है");
-                });
-            } catch (Exception ex) {
-                if (uri != null) {
-                    try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
-                }
-                runOnUiThread(() -> {
-                    setBusy(false, "Save failed");
-                    toast("फोटो सेव नहीं हुई");
-                });
-            } finally {
-                if (full != null && !full.isRecycled()) full.recycle();
-                if (previewSource != null && !previewSource.isRecycled()) previewSource.recycle();
-                if (saveErase != null && !saveErase.isRecycled()) saveErase.recycle();
-            }
-        });
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inSampleSize = sample;
+        opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        opts.inMutable = true;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            Bitmap b = BitmapFactory.decodeStream(in, null, opts);
+            if (b == null) return null;
+            if (b.getConfig() == Bitmap.Config.ARGB_8888 && b.isMutable()) return b;
+            Bitmap copy = b.copy(Bitmap.Config.ARGB_8888, true);
+            if (b != copy && !b.isRecycled()) b.recycle();
+            return copy;
+        }
     }
 
     private Bitmap decodeOriginalFull(Uri uri) throws Exception {
@@ -2689,18 +2759,36 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void renderFullResolutionForSave(Bitmap full, Bitmap previewSource,
+    private Bitmap makePassport35x45(Bitmap source) {
+        if (source == null) return null;
+        float targetRatio = PASSPORT_WIDTH / (float)PASSPORT_HEIGHT;
+        float srcRatio = source.getWidth() / (float)source.getHeight();
+
+        Rect srcRect;
+        if (srcRatio > targetRatio) {
+            int cropW = Math.max(1, Math.round(source.getHeight() * targetRatio));
+            int left = Math.max(0, (source.getWidth() - cropW) / 2);
+            srcRect = new Rect(left, 0, Math.min(source.getWidth(), left + cropW), source.getHeight());
+        } else {
+            int cropH = Math.max(1, Math.round(source.getWidth() / targetRatio));
+            int top = Math.max(0, (source.getHeight() - cropH) / 2);
+            srcRect = new Rect(0, top, source.getWidth(), Math.min(source.getHeight(), top + cropH));
+        }
+
+        Bitmap out = Bitmap.createBitmap(PASSPORT_WIDTH, PASSPORT_HEIGHT, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(out);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
+        canvas.drawBitmap(source, srcRect,
+                new Rect(0, 0, PASSPORT_WIDTH, PASSPORT_HEIGHT), paint);
+        return out;
+    }
+
+    private void renderFullResolutionForSave(Bitmap full,
             float[] mask, int mw, int mh, Bitmap manualMask,
             int brightness, int fairness, int smooth, int backgroundColor) {
 
         int w = full.getWidth();
         int h = full.getHeight();
-        int pw = previewSource.getWidth();
-        int ph = previewSource.getHeight();
-
-        int[] previewSrc = new int[pw * ph];
-        previewSource.getPixels(previewSrc, 0, pw, 0, 0, pw, ph);
-
         int[] manual = null;
         int manualW = 0;
         int manualH = 0;
@@ -2738,15 +2826,9 @@ public class MainActivity extends Activity {
 
             float maskY = y * (mh - 1f) / Math.max(1f, h - 1f);
             int my = Math.min(mh - 1, Math.max(0, Math.round(maskY)));
-            int py = Math.min(ph - 1, Math.max(0,
-                    Math.round(y * (ph - 1f) / Math.max(1f, h - 1f))));
-
             for (int x = 0; x < w; x++) {
                 float maskX = x * (mw - 1f) / Math.max(1f, w - 1f);
                 int mx = Math.min(mw - 1, Math.max(0, Math.round(maskX)));
-                int px = Math.min(pw - 1, Math.max(0,
-                        Math.round(x * (pw - 1f) / Math.max(1f, w - 1f))));
-
                 int color = row[x];
                 int r = Color.red(color);
                 int g = Color.green(color);
@@ -3276,6 +3358,8 @@ public class MainActivity extends Activity {
         personMask = null;
         brightnessUserAdjusted = false;
         fairnessUserAdjusted = false;
+        if (brightnessSeek != null) brightnessSeek.setProgress(0);
+        if (fairnessSeek != null) fairnessSeek.setProgress(0);
         colorCleanOn = false;
         selectionModeOn = false;
         selectionDragging = false;
@@ -3297,6 +3381,11 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         destroyed = true;
         stopProcessingAnimation();
+        if (pendingSmoothRender != null) {
+            uiHandler.removeCallbacks(pendingSmoothRender);
+            pendingSmoothRender = null;
+        }
+        deleteCameraPlaceholder();
         renderToken++;
         if (segmenter != null) {
             try { segmenter.close(); } catch (Exception ignored) {}
