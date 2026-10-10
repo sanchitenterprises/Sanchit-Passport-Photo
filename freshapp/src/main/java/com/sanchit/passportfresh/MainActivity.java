@@ -169,7 +169,7 @@ public class MainActivity extends Activity {
     private float lastPanY;
     private boolean panMoved;
     private boolean gestureWasScaling;
-    private int renderToken;
+    private volatile int renderToken;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -3472,6 +3472,7 @@ public class MainActivity extends Activity {
         selectionDragging = false;
         selectedAreaSource.setEmpty();
         brushModeOn = false;
+        localCleanBusy = false;
         if (brushCursor != null) brushCursor.setVisibility(View.GONE);
         if (selectionOverlay != null) {
             selectionOverlay.clearSelection();
