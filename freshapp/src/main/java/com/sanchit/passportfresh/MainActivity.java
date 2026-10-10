@@ -129,6 +129,8 @@ public class MainActivity extends Activity {
     private int maskWidth;
     private int maskHeight;
     private Uri cameraUri;
+    private boolean cameraCaptureInProgress;
+    private boolean localCleanBusy;
     private Uri sourceUri;
     private boolean compareOriginal;
     private boolean brushModeOn = false; // legacy backend only; no BRUSH UI/runtime
@@ -172,7 +174,19 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) {
+            String savedCamera = state.getString("camera_uri");
+            if (savedCamera != null) cameraUri = Uri.parse(savedCamera);
+            cameraCaptureInProgress = state.getBoolean("camera_capture", false);
+        }
         buildUi();
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        if (cameraUri != null) state.putString("camera_uri", cameraUri.toString());
+        state.putBoolean("camera_capture", cameraCaptureInProgress);
     }
 
     private void buildUi() {
@@ -792,8 +806,10 @@ public class MainActivity extends Activity {
                 toast("Camera उपलब्ध नहीं है");
                 return;
             }
+            cameraCaptureInProgress = true;
             startActivityForResult(i, REQ_CAMERA);
         } catch (Exception e) {
+            cameraCaptureInProgress = false;
             deleteCameraPlaceholder();
             toast("Camera error");
         }
@@ -822,6 +838,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_CAMERA) cameraCaptureInProgress = false;
         if (resultCode != RESULT_OK) {
             if (requestCode == REQ_CAMERA) deleteCameraPlaceholder();
             return;
@@ -1015,6 +1032,7 @@ public class MainActivity extends Activity {
                 }
 
                 int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
+                float[] nearbyMask = maxFilterMask(mask, mw, mh, 1);
 
                 // Slight inward alpha trim hides old-background fringe without recolouring.
                 float threshold = 0.515f + (0.045f * smoothAmount);
@@ -1051,6 +1069,9 @@ public class MainActivity extends Activity {
                         float edgeMix = smooth == 0 ? 0f : Math.min(0.90f, 0.52f + 0.70f * smoothAmount);
                         float confidence = rawConfidence * (1f - edgeMix)
                                 + blurredConfidence * edgeMix;
+                        confidence = preserveDarkHairConfidence(rawConfidence, confidence,
+                                sampleMaskBilinear(nearbyMask, mw, mh, maskX, maskY),
+                                r, g, b, mx, my, personBounds, mw, mh);
                         // Auto BG Remove rule: foreground RGB stays exactly from source.
                         // Only segmentation alpha is smoothed; no hair/skin recolour or decontamination.
                         float linearA = Math.max(0f, Math.min(1f,
@@ -1064,6 +1085,7 @@ public class MainActivity extends Activity {
                         a = Math.max(0f, Math.min(1f,
                                 (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
 
+                        a = trimNeutralBackgroundFringe(a, rawConfidence, r, g, b);
                         boolean skinLike = isSkinLikeColor(r, g, b);
 
                         // Manual BRUSH / Local Color Clean mask. A full-alpha mask removes
@@ -1170,6 +1192,28 @@ public class MainActivity extends Activity {
         float horizontal = 1f * (1f - neckBlend) + centralNeck * neckBlend;
 
         return Math.max(0f, Math.min(1f, vertical * horizontal));
+    }
+
+    // Bound all corrections to uncertain edge alpha. Never recolour source hair or face RGB.
+    private float preserveDarkHairConfidence(float raw, float current, float adjacent,
+            int r, int g, int b, int mx, int my, int[] bounds, int mw, int mh) {
+        if (raw < 0.27f || raw > 0.85f || adjacent < 0.82f
+                || !isInsideHairZone(mx, my, bounds, mw, mh)
+                || isSkinLikeColor(r, g, b) || r > 135 || g > 132 || b > 140) {
+            return current;
+        }
+        float boost = Math.min(0.14f, Math.max(0f, adjacent - raw) * 0.18f);
+        return Math.max(current, Math.min(0.90f, raw + boost));
+    }
+
+    // Only suppress likely white/neutral old-background residue, never skin-like pixels.
+    // All changes are to alpha. Source RGB remains exactly as photographed at default edits.
+    private float trimNeutralBackgroundFringe(float alpha, float raw, int r, int g, int b) {
+        if (alpha <= 0.02f || alpha >= 0.80f || raw >= 0.62f
+                || isSkinLikeColor(r, g, b)) return alpha;
+        int low = Math.min(r, Math.min(g, b));
+        int high = Math.max(r, Math.max(g, b));
+        return low >= 214 && high - low <= 25 ? alpha * 0.82f : alpha;
     }
 
     private boolean isSkinLikeColor(int r, int g, int b) {
@@ -2210,7 +2254,8 @@ public class MainActivity extends Activity {
                             int g = Color.green(c);
                             int bl = Color.blue(c);
 
-                            // Simple colour match only.
+                            // Protect actual skin/face even if an edge colour is similar.
+                            if (isSkinLikeColor(r, g, bl)) continue;
                             if (colorDistanceSq(r, g, bl, tr, tg, tb) > toleranceSq) continue;
 
                             // Simple loose edge-near rule only.
@@ -2811,6 +2856,7 @@ public class MainActivity extends Activity {
                     Math.max(1, Math.round(1f + smoothAmount * 2f)));
         }
         int[] personBounds = findMaskBounds(mask, mw, mh, 0.55f);
+        float[] nearbyMask = maxFilterMask(mask, mw, mh, 1);
 
         float threshold = 0.515f + (0.045f * smoothAmount);
         float feather = 0.105f + (0.190f * smoothAmount);
@@ -2843,6 +2889,9 @@ public class MainActivity extends Activity {
                 float edgeMix = smooth == 0 ? 0f : Math.min(0.90f, 0.52f + 0.70f * smoothAmount);
                 float confidence = rawConfidence * (1f - edgeMix)
                         + blurredConfidence * edgeMix;
+                confidence = preserveDarkHairConfidence(rawConfidence, confidence,
+                        sampleMaskBilinear(nearbyMask, mw, mh, maskX, maskY),
+                        r, g, b, mx, my, personBounds, mw, mh);
                 // Same rule as preview: original foreground RGB is untouched.
                 // Smooth BG changes only segmentation alpha.
                 float linearA = Math.max(0f, Math.min(1f,
@@ -2854,6 +2903,7 @@ public class MainActivity extends Activity {
                 a = Math.max(0f, Math.min(1f,
                         (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
 
+                a = trimNeutralBackgroundFringe(a, rawConfidence, r, g, b);
                 boolean skinLike = isSkinLikeColor(r, g, b);
 
                 if (manual != null) {
@@ -3389,7 +3439,9 @@ public class MainActivity extends Activity {
             uiHandler.removeCallbacks(pendingSmoothRender);
             pendingSmoothRender = null;
         }
-        deleteCameraPlaceholder();
+        // Android may destroy the Activity while the external camera is open.
+        // Preserve its output URI until the camera returns after recreation.
+        if (!cameraCaptureInProgress) deleteCameraPlaceholder();
         renderToken++;
         if (segmenter != null) {
             try { segmenter.close(); } catch (Exception ignored) {}
