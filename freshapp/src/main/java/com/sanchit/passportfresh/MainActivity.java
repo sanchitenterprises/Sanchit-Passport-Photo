@@ -2331,27 +2331,27 @@ public class MainActivity extends Activity {
     }
 
     private void applyLocalColorCleanAt(float viewX, float viewY) {
+        if (localCleanBusy || resultBitmap == null || originalBitmap == null
+                || personMask == null) return;
         try {
-            if (resultBitmap == null || originalBitmap == null) return;
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return;
 
             Matrix inv = new Matrix();
             if (!photoMatrix.invert(inv)) return;
-            float[] point = new float[]{viewX, viewY};
-            inv.mapPoints(point);
-            int sx = Math.round(point[0]);
-            int sy = Math.round(point[1]);
-
-            int w = resultBitmap.getWidth();
-            int h = resultBitmap.getHeight();
+            float[] pt = new float[]{viewX, viewY};
+            inv.mapPoints(pt);
+            final int sx = Math.round(pt[0]);
+            final int sy = Math.round(pt[1]);
+            final Bitmap resultSnapshot = resultBitmap;
+            final int w = resultSnapshot.getWidth();
+            final int h = resultSnapshot.getHeight();
             if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
-            int target = resultBitmap.getPixel(sx, sy);
-            int tr = Color.red(target);
-            int tg = Color.green(target);
-            int tb = Color.blue(target);
-
+            final int target = resultSnapshot.getPixel(sx, sy);
+            final int tr = Color.red(target);
+            final int tg = Color.green(target);
+            final int tb = Color.blue(target);
             int br = Color.red(selectedBackgroundColor);
             int bg = Color.green(selectedBackgroundColor);
             int bb = Color.blue(selectedBackgroundColor);
@@ -2360,95 +2360,148 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            pushUndo();
-            clearDeque(redoMasks);
-
-            float toleranceProgress = Math.max(0f, Math.min(1f, brushSeek.getProgress() / 100f));
-            int localRadius = Math.min(220, Math.max(30,
-                    Math.round(Math.min(w, h) * (0.040f + 0.090f * toleranceProgress))));
-            int minX = Math.max(0, sx - localRadius);
-            int maxX = Math.min(w - 1, sx + localRadius);
-            int minY = Math.max(0, sy - localRadius);
-            int maxY = Math.min(h - 1, sy + localRadius);
-            int boxW = maxX - minX + 1;
-            int boxH = maxY - minY + 1;
-
-            boolean[] visited = new boolean[boxW * boxH];
-            ArrayDeque<Integer> queue = new ArrayDeque<>();
-            queue.add((sy - minY) * boxW + (sx - minX));
-
-            float tolerance = 4f + 76f * toleranceProgress;
-            float toleranceSq = tolerance * tolerance;
-            float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
-            boolean targetSkin = isSkinLikeColor(tr, tg, tb);
-            int[] resultPixels = new int[w * h];
-            int[] maskPixels = new int[w * h];
-            resultBitmap.getPixels(resultPixels, 0, w, 0, 0, w, h);
-            eraseMask.getPixels(maskPixels, 0, w, 0, 0, w, h);
-
-            int changed = 0;
-            final int maxChanged = 90000;
-
-            while (!queue.isEmpty() && changed < maxChanged) {
-                int q = queue.removeFirst();
-                if (q < 0 || q >= visited.length || visited[q]) continue;
-                visited[q] = true;
-
-                int lx = q % boxW;
-                int ly = q / boxW;
-                int x = minX + lx;
-                int y = minY + ly;
-
-                int dx = x - sx;
-                int dy = y - sy;
-                if (dx * dx + dy * dy > localRadius * localRadius) continue;
-
-                int c = resultPixels[y * w + x];
-                int r = Color.red(c);
-                int g = Color.green(c);
-                int b = Color.blue(c);
-                if (colorDistanceSq(r, g, b, tr, tg, tb) > toleranceSq) continue;
-
-                float channelLimit = tolerance * 0.92f + 2f;
-                if (Math.abs(r - tr) > channelLimit
-                        || Math.abs(g - tg) > channelLimit
-                        || Math.abs(b - tb) > channelLimit) continue;
-
-                float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-                if (Math.abs(lum - targetLum) > tolerance * 0.90f + 2f) continue;
-
-                boolean pixelSkin = isSkinLikeColor(r, g, b);
-                if (!targetSkin && pixelSkin) continue;
-
-                maskPixels[y * w + x] = Color.argb(255, 255, 255, 255);
-                changed++;
-
-                if (lx > 0) queue.add(q - 1);
-                if (lx + 1 < boxW) queue.add(q + 1);
-                if (ly > 0) queue.add(q - boxW);
-                if (ly + 1 < boxH) queue.add(q + boxW);
-
-                // Diagonals keep thin ear/hair fringe connected without jumping to
-                // another same-colour object elsewhere in the photo.
-                if (lx > 0 && ly > 0) queue.add(q - boxW - 1);
-                if (lx + 1 < boxW && ly > 0) queue.add(q - boxW + 1);
-                if (lx > 0 && ly + 1 < boxH) queue.add(q + boxW - 1);
-                if (lx + 1 < boxW && ly + 1 < boxH) queue.add(q + boxW + 1);
-            }
-
-            if (changed == 0) {
-                if (!undoMasks.isEmpty()) undoMasks.pop();
-                updateHistoryButtons();
-                status.setText("इस target पर matching edge colour नहीं मिला");
+            // A colour-only flood fill can otherwise erase cheeks, ears and neck.
+            if (isSkinLikeColor(tr, tg, tb)) {
+                status.setText("Skin colour protected • दूसरा background colour चुनें");
                 return;
             }
 
-            eraseMask.setPixels(maskPixels, 0, w, 0, 0, w, h);
-            updateHistoryButtons();
-            status.setText("Local clean • " + changed + " pixels • सिर्फ target area");
-            renderResult();
-        } catch (Throwable ignored) {
-            status.setText("Color clean apply नहीं हुआ");
+            final float toleranceProgress = Math.max(0f,
+                    Math.min(1f, brushSeek.getProgress() / 100f));
+            final int localRadius = Math.min(220, Math.max(30,
+                    Math.round(Math.min(w, h) * (0.040f + 0.090f * toleranceProgress))));
+            final int minX = Math.max(0, sx - localRadius);
+            final int maxX = Math.min(w - 1, sx + localRadius);
+            final int minY = Math.max(0, sy - localRadius);
+            final int maxY = Math.min(h - 1, sy + localRadius);
+            final int boxW = maxX - minX + 1;
+            final int boxH = maxY - minY + 1;
+            final float tolerance = 4f + 76f * toleranceProgress;
+            final float toleranceSq = tolerance * tolerance;
+            final float targetLum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
+            final float[] maskSnapshot = personMask.clone();
+            final int mw = maskWidth;
+            final int mh = maskHeight;
+            final Bitmap oldErase = eraseMask.copy(Bitmap.Config.ALPHA_8, false);
+            final int token = ++renderToken;
+
+            localCleanBusy = true;
+            setEditingEnabled(false);
+            setBusy(true, "Local colour clean…");
+
+            // Never run this flood-fill and full-image pixel copy on the touch/UI thread.
+            worker.execute(() -> {
+                Bitmap updated = null;
+                int changed = 0;
+                try {
+                    int[] resultPixels = new int[w * h];
+                    int[] erasePixels = new int[w * h];
+                    resultSnapshot.getPixels(resultPixels, 0, w, 0, 0, w, h);
+                    oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
+
+                    boolean[] visited = new boolean[boxW * boxH];
+                    ArrayDeque<Integer> queue = new ArrayDeque<>();
+                    int origin = (sy - minY) * boxW + (sx - minX);
+                    queue.add(origin);
+                    visited[origin] = true;
+                    final int maxChanged = 90000;
+                    while (!queue.isEmpty() && changed < maxChanged
+                            && !destroyed && token == renderToken) {
+                        int q = queue.removeFirst();
+                        int lx = q % boxW;
+                        int ly = q / boxW;
+                        int x = minX + lx;
+                        int y = minY + ly;
+                        int dx = x - sx;
+                        int dy = y - sy;
+                        if (dx * dx + dy * dy > localRadius * localRadius) continue;
+
+                        int idx = y * w + x;
+                        int c = resultPixels[idx];
+                        int r = Color.red(c);
+                        int g = Color.green(c);
+                        int b = Color.blue(c);
+                        if (isSkinLikeColor(r, g, b)) continue;
+                        if (colorDistanceSq(r, g, b, tr, tg, tb) > toleranceSq) continue;
+                        float channelLimit = tolerance * 0.92f + 2f;
+                        if (Math.abs(r - tr) > channelLimit
+                                || Math.abs(g - tg) > channelLimit
+                                || Math.abs(b - tb) > channelLimit) continue;
+                        float lum = 0.299f * r + 0.587f * g + 0.114f * b;
+                        if (Math.abs(lum - targetLum) > tolerance * 0.90f + 2f) continue;
+
+                        // Do not erase confident foreground, even if a shirt or hair
+                        // happens to share the selected old-background colour.
+                        float mx = x * (mw - 1f) / Math.max(1f, w - 1f);
+                        float my = y * (mh - 1f) / Math.max(1f, h - 1f);
+                        float confidence = sampleMaskBilinear(maskSnapshot, mw, mh, mx, my);
+                        if (confidence > 0.80f) continue;
+
+                        if (Color.alpha(erasePixels[idx]) < 255) {
+                            erasePixels[idx] = Color.argb(255, 255, 255, 255);
+                            changed++;
+                        }
+
+                        int[] neighbors = new int[]{
+                                lx > 0 ? q - 1 : -1,
+                                lx + 1 < boxW ? q + 1 : -1,
+                                ly > 0 ? q - boxW : -1,
+                                ly + 1 < boxH ? q + boxW : -1,
+                                lx > 0 && ly > 0 ? q - boxW - 1 : -1,
+                                lx + 1 < boxW && ly > 0 ? q - boxW + 1 : -1,
+                                lx > 0 && ly + 1 < boxH ? q + boxW - 1 : -1,
+                                lx + 1 < boxW && ly + 1 < boxH ? q + boxW + 1 : -1
+                        };
+                        for (int next : neighbors) {
+                            if (next >= 0 && !visited[next]) {
+                                visited[next] = true;
+                                queue.addLast(next);
+                            }
+                        }
+                    }
+
+                    if (!destroyed && token == renderToken && changed > 0) {
+                        updated = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
+                        updated.setPixels(erasePixels, 0, w, 0, 0, w, h);
+                    }
+                    final Bitmap ready = updated;
+                    final int changedCount = changed;
+                    runOnUiThread(() -> {
+                        if (destroyed || token != renderToken) {
+                            if (ready != null && !ready.isRecycled()) ready.recycle();
+                            return;
+                        }
+                        localCleanBusy = false;
+                        setEditingEnabled(true);
+                        if (changedCount == 0 || ready == null) {
+                            setBusy(false, "Local colour clean • कोई matching edge नहीं मिला");
+                            return;
+                        }
+                        pushUndo();
+                        clearDeque(redoMasks);
+                        eraseMask = ready;
+                        status.setText("Local clean • " + changedCount + " pixels");
+                        updateHistoryButtons();
+                        renderResult();
+                    });
+                } catch (Throwable error) {
+                    if (updated != null && !updated.isRecycled()) updated.recycle();
+                    runOnUiThread(() -> {
+                        if (destroyed || token != renderToken) return;
+                        localCleanBusy = false;
+                        setEditingEnabled(true);
+                        setBusy(false, "Local Color Clean apply नहीं हुआ");
+                    });
+                } finally {
+                    if (!oldErase.isRecycled()) oldErase.recycle();
+                }
+            });
+        } catch (Throwable error) {
+            localCleanBusy = false;
+            if (!destroyed) {
+                setEditingEnabled(true);
+                setBusy(false, "Local Color Clean apply नहीं हुआ");
+            }
         }
     }
 
