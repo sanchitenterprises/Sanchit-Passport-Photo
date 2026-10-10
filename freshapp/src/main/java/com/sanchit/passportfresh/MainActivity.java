@@ -147,6 +147,8 @@ public class MainActivity extends Activity {
     private int colorToleranceValue = 22;
     private int brushSizeValue = 18;
     private int selectedBackgroundColor = BLUE;
+    private boolean brightnessUserAdjusted = false;
+    private boolean fairnessUserAdjusted = false;
     private LinearLayout backgroundColorRow;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private Runnable pendingSmoothRender;
@@ -331,7 +333,13 @@ public class MainActivity extends Activity {
 
         SeekBar.OnSeekBarChangeListener redraw = new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int p, boolean fromUser) {
-                if (fromUser && seekBar == smoothSeek) {
+                if (fromUser && seekBar == brightnessSeek) {
+                    brightnessUserAdjusted = true;
+                    if (status != null) status.setText("Brightness " + p + "%");
+                } else if (fromUser && seekBar == fairnessSeek) {
+                    fairnessUserAdjusted = true;
+                    if (status != null) status.setText("Fairness " + p + "%");
+                } else if (fromUser && seekBar == smoothSeek) {
                     if (status != null) status.setText("Smooth BG " + p + "% • live");
 
                     // Debounced live preview: user can SEE Smooth BG working while dragging
@@ -344,8 +352,6 @@ public class MainActivity extends Activity {
                         }
                     };
                     uiHandler.postDelayed(pendingSmoothRender, 220);
-                } else if (fromUser && seekBar == fairnessSeek && status != null) {
-                    status.setText("Fairness " + p + "%");
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -934,8 +940,8 @@ public class MainActivity extends Activity {
         final float[] mask = personMask;
         final int mw = maskWidth;
         final int mh = maskHeight;
-        final int brightness = brightnessSeek.getProgress();
-        final int fairness = fairnessSeek.getProgress();
+        final int brightness = brightnessUserAdjusted ? brightnessSeek.getProgress() : 0;
+        final int fairness = fairnessUserAdjusted ? fairnessSeek.getProgress() : 0;
         final int smooth = smoothSeek.getProgress();
         final int backgroundColor = selectedBackgroundColor;
         final Bitmap localErase = eraseMask == null ? null : eraseMask.copy(Bitmap.Config.ALPHA_8, false);
@@ -1011,123 +1017,20 @@ public class MainActivity extends Activity {
                         float blurredConfidence = smoothMask[maskIndex];
                         float confidence = rawConfidence * (1f - smoothAmount)
                                 + blurredConfidence * smoothAmount;
-                        float hairSupport = hairSupportMask[maskIndex];
-
-                        boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                        boolean hairZone = isInsideHairZone(mx, my, personBounds, mw, mh);
-                        boolean sourceSkinLike = isSkinLikeColor(r, g, b);
-                        int rgDiff = r - g;
-                        int gbDiff = g - b;
-                        // Hair protection must never turn a face strip into "hair".
-                        // Brown/dark hair is accepted by colour + support, while real skin is excluded.
-                        boolean brownHairLike = luminance < 155f && rgDiff < 34 && gbDiff < 30;
-                        boolean hairCandidate = hairZone
-                                && luminance < 175f
-                                && hairSupport > 0.30f
-                                && (!sourceSkinLike || brownHairLike);
-                        boolean skinLike = sourceSkinLike && !hairCandidate;
-
-                        // Use ONE alpha pipeline for hair and face. The old separate hair alpha
-                        // branch created the visible horizontal band where the hair zone ended.
-                        if (hairCandidate) {
-                            float hairBoost = Math.max(0f, hairSupport - confidence) * 0.72f;
-                            confidence = Math.min(1f, confidence + hairBoost);
-                        }
-
+                        // Auto BG Remove rule: foreground RGB stays exactly from source.
+                        // Only segmentation alpha is smoothed; no hair/skin recolour or decontamination.
                         float linearA = Math.max(0f, Math.min(1f,
                                 (confidence - low) / Math.max(0.001f, high - low)));
                         float curvedA = smoothStep(0f, 1f, linearA);
                         float curveMix = 0.18f + 0.62f * smoothAmount;
                         float a = linearA * (1f - curveMix) + curvedA * curveMix;
 
-                        // Small inward matte trim, proportional to Smooth BG, avoids a white halo
-                        // without a second rectangular/hair-specific alpha region.
+                        // Smooth BG affects edge alpha only.
                         float edgeTrim = 0.055f * smoothAmount;
                         a = Math.max(0f, Math.min(1f,
                                 (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
 
-                        // Keep genuine hair strands, but only as a local minimum-alpha protection.
-                        if (hairCandidate && hairSupport > 0.64f) {
-                            float minHairA = 0.48f + 0.10f * Math.min(1f, hairSupport);
-                            if (a < minHairA) a = minHairA;
-                        }
-
-                        // Ear / cheek / jaw skin-edge refinement:
-                        // skin pixels must not inherit hair-preservation. Use a tighter,
-                        // narrower feather and a small inward cut to remove the pale halo.
-                        boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
-                        if (skinEdge) {
-                            float skinA = smoothStep(0.44f, 0.62f, confidence);
-                            float keep = 0.24f + 0.35f * (1f - Math.min(1f, smoothAmount));
-                            a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
-                        }
-
-                        // Proper local matte decontamination:
-                        // The original source often has a white/light background baked into
-                        // semi-transparent boundary pixels. Sample both directions of the mask:
-                        // inward = true subject color, outward = old background color. Remove
-                        // the old background contribution before compositing over blue.
-                        // Hair keeps its original RGB. Auto BG may change only hair alpha/mask, never hair colour.
-                        if (!hairCandidate && a > 0.025f && a < 0.995f) {
-                            int inner = sampleInnerForegroundColor(src, w, h, x, y,
-                                    smoothMask, mw, mh, mx, my, confidence);
-                            int outer = sampleOuterBackgroundColor(src, w, h, x, y,
-                                    smoothMask, mw, mh, mx, my, confidence);
-
-                            if (inner != -1) {
-                                int ir = Color.red(inner);
-                                int ig = Color.green(inner);
-                                int ib = Color.blue(inner);
-
-                                float edgeBand = 1f - Math.abs(a * 2f - 1f);
-                                float matchStrength = 0.24f + (0.34f + 0.24f * smoothAmount) * edgeBand;
-
-                                if (outer != -1) {
-                                    int or = Color.red(outer);
-                                    int og = Color.green(outer);
-                                    int ob = Color.blue(outer);
-
-                                    float dInner = colorDistanceSq(r, g, b, ir, ig, ib);
-                                    float dOuter = colorDistanceSq(r, g, b, or, og, ob);
-
-                                    // Recover foreground from C = A*F + (1-A)*B.
-                                    // Clamp A away from zero to avoid unstable color explosions.
-                                    float solveA = Math.max(0.34f, Math.min(0.96f, a));
-                                    int fr = clamp255(Math.round((r - (1f - solveA) * or) / solveA));
-                                    int fg = clamp255(Math.round((g - (1f - solveA) * og) / solveA));
-                                    int fb = clamp255(Math.round((b - (1f - solveA) * ob) / solveA));
-
-                                    // Recovered color is blended toward a real inward subject
-                                    // sample, which prevents false colors on skin and white clothes.
-                                    float recover = 0.48f + 0.34f * edgeBand;
-                                    fr = clamp255(Math.round(fr * recover + ir * (1f - recover)));
-                                    fg = clamp255(Math.round(fg * recover + ig * (1f - recover)));
-                                    fb = clamp255(Math.round(fb * recover + ib * (1f - recover)));
-
-                                    boolean outerContaminated = dOuter + 120f < dInner;
-                                    if (outerContaminated) {
-                                        matchStrength = Math.max(matchStrength, Math.min(0.98f, 0.78f + 0.18f * smoothAmount));
-                                        if (!hairCandidate) {
-                                            // Stronger Smooth BG removes old matte/halo while hair stays protected.
-                                            float trim = skinEdge
-                                                    ? (0.80f - 0.20f * smoothAmount)
-                                                    : (0.86f - 0.18f * smoothAmount);
-                                            a *= Math.max(0.60f, trim);
-                                        }
-                                    }
-
-                                    r = clamp255(Math.round(r * (1f - matchStrength) + fr * matchStrength));
-                                    g = clamp255(Math.round(g * (1f - matchStrength) + fg * matchStrength));
-                                    b = clamp255(Math.round(b * (1f - matchStrength) + fb * matchStrength));
-                                } else {
-                                    if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
-                                    if (skinEdge) matchStrength = Math.max(matchStrength, 0.72f * edgeBand);
-                                    r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
-                                    g = clamp255(Math.round(g * (1f - matchStrength) + ig * matchStrength));
-                                    b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
-                                }
-                            }
-                        }
+                        boolean skinLike = isSkinLikeColor(r, g, b);
 
                         // Manual BRUSH / Local Color Clean mask. A full-alpha mask removes
                         // the pixel completely; the soft outer brush ring only reduces alpha,
@@ -1154,7 +1057,7 @@ public class MainActivity extends Activity {
 
                         // Do not brighten the semi-transparent edge itself; that was creating
                         // a visible white outline. Brightness fades in only toward solid foreground.
-                        if (!hairCandidate && a > 0.03f && brighten > 0f) {
+                        if (a > 0.03f && brighten > 0f) {
                             float interior = smoothStep(0.48f, 0.93f, a);
                             float localBrighten = brighten * interior;
                             r = clamp255(Math.round(r + (255 - r) * localBrighten));
@@ -2659,8 +2562,8 @@ public class MainActivity extends Activity {
         final float[] saveMask = personMask.clone();
         final int saveMaskW = maskWidth;
         final int saveMaskH = maskHeight;
-        final int saveBrightness = brightnessSeek.getProgress();
-        final int saveFairness = fairnessSeek.getProgress();
+        final int saveBrightness = brightnessUserAdjusted ? brightnessSeek.getProgress() : 0;
+        final int saveFairness = fairnessUserAdjusted ? fairnessSeek.getProgress() : 0;
         final int saveSmooth = smoothSeek.getProgress();
         final int saveBackgroundColor = selectedBackgroundColor;
 
@@ -2839,26 +2742,8 @@ public class MainActivity extends Activity {
                 float blurredConfidence = smoothMask[maskIndex];
                 float confidence = rawConfidence * (1f - smoothAmount)
                         + blurredConfidence * smoothAmount;
-                float hairSupport = hairSupportMask[maskIndex];
-
-                boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                boolean hairZone = isInsideHairZone(mx, my, personBounds, mw, mh);
-                boolean sourceSkinLike = isSkinLikeColor(r, g, b);
-                int rgDiff = r - g;
-                int gbDiff = g - b;
-                boolean brownHairLike = luminance < 155f && rgDiff < 34 && gbDiff < 30;
-                boolean hairCandidate = hairZone
-                        && luminance < 175f
-                        && hairSupport > 0.30f
-                        && (!sourceSkinLike || brownHairLike);
-                boolean skinLike = sourceSkinLike && !hairCandidate;
-
-                // Same single alpha pipeline as preview so saved output cannot reintroduce a band.
-                if (hairCandidate) {
-                    float hairBoost = Math.max(0f, hairSupport - confidence) * 0.72f;
-                    confidence = Math.min(1f, confidence + hairBoost);
-                }
-
+                // Same rule as preview: original foreground RGB is untouched.
+                // Smooth BG changes only segmentation alpha.
                 float linearA = Math.max(0f, Math.min(1f,
                         (confidence - low) / Math.max(0.001f, high - low)));
                 float curvedA = smoothStep(0f, 1f, linearA);
@@ -2867,72 +2752,8 @@ public class MainActivity extends Activity {
                 float edgeTrim = 0.055f * smoothAmount;
                 a = Math.max(0f, Math.min(1f,
                         (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
-                if (hairCandidate && hairSupport > 0.64f) {
-                    float minHairA = 0.48f + 0.10f * Math.min(1f, hairSupport);
-                    if (a < minHairA) a = minHairA;
-                }
 
-                boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
-                if (skinEdge) {
-                    float skinA = smoothStep(0.44f, 0.62f, confidence);
-                    float keep = 0.24f + 0.35f * (1f - Math.min(1f, smoothAmount));
-                    a = Math.max(0f, Math.min(1f, skinA - keep * (1f - skinA) * 0.18f));
-                }
-
-                // Hair keeps its original RGB. Auto BG may change only hair alpha/mask, never hair colour.
-                        if (!hairCandidate && a > 0.025f && a < 0.995f) {
-                    int inner = sampleInnerForegroundColor(previewSrc, pw, ph, px, py,
-                            smoothMask, mw, mh, mx, my, confidence);
-                    int outer = sampleOuterBackgroundColor(previewSrc, pw, ph, px, py,
-                            smoothMask, mw, mh, mx, my, confidence);
-
-                    if (inner != -1) {
-                        int ir = Color.red(inner);
-                        int ig = Color.green(inner);
-                        int ib = Color.blue(inner);
-                        float edgeBand = 1f - Math.abs(a * 2f - 1f);
-                        float matchStrength = 0.24f + (0.34f + 0.24f * smoothAmount) * edgeBand;
-
-                        if (outer != -1) {
-                            int or = Color.red(outer);
-                            int og = Color.green(outer);
-                            int ob = Color.blue(outer);
-                            float dInner = colorDistanceSq(r, g, b, ir, ig, ib);
-                            float dOuter = colorDistanceSq(r, g, b, or, og, ob);
-
-                            float solveA = Math.max(0.34f, Math.min(0.96f, a));
-                            int fr = clamp255(Math.round((r - (1f - solveA) * or) / solveA));
-                            int fg = clamp255(Math.round((g - (1f - solveA) * og) / solveA));
-                            int fb = clamp255(Math.round((b - (1f - solveA) * ob) / solveA));
-
-                            float recover = 0.48f + 0.34f * edgeBand;
-                            fr = clamp255(Math.round(fr * recover + ir * (1f - recover)));
-                            fg = clamp255(Math.round(fg * recover + ig * (1f - recover)));
-                            fb = clamp255(Math.round(fb * recover + ib * (1f - recover)));
-
-                            boolean outerContaminated = dOuter + 120f < dInner;
-                            if (outerContaminated) {
-                                matchStrength = Math.max(matchStrength, Math.min(0.98f, 0.78f + 0.18f * smoothAmount));
-                                if (!hairCandidate) {
-                                    float trim = skinEdge
-                                            ? (0.80f - 0.20f * smoothAmount)
-                                            : (0.86f - 0.18f * smoothAmount);
-                                    a *= Math.max(0.60f, trim);
-                                }
-                            }
-
-                            r = clamp255(Math.round(r * (1f - matchStrength) + fr * matchStrength));
-                            g = clamp255(Math.round(g * (1f - matchStrength) + fg * matchStrength));
-                            b = clamp255(Math.round(b * (1f - matchStrength) + fb * matchStrength));
-                        } else {
-                            if (hairCandidate) matchStrength = Math.max(matchStrength, 0.58f * edgeBand);
-                            if (skinEdge) matchStrength = Math.max(matchStrength, 0.72f * edgeBand);
-                            r = clamp255(Math.round(r * (1f - matchStrength) + ir * matchStrength));
-                            g = clamp255(Math.round(g * (1f - matchStrength) + ig * matchStrength));
-                            b = clamp255(Math.round(b * (1f - matchStrength) + ib * matchStrength));
-                        }
-                    }
-                }
+                boolean skinLike = isSkinLikeColor(r, g, b);
 
                 if (manual != null) {
                     int ex = Math.min(manualW - 1, Math.max(0,
@@ -2957,7 +2778,7 @@ public class MainActivity extends Activity {
                     b = clamp255(Math.round(b * scale));
                 }
 
-                if (!hairCandidate && a > 0.03f && brighten > 0f) {
+                if (a > 0.03f && brighten > 0f) {
                     float interior = smoothStep(0.48f, 0.93f, a);
                     float localBrighten = brighten * interior;
                     r = clamp255(Math.round(r + (255 - r) * localBrighten));
@@ -3438,6 +3259,8 @@ public class MainActivity extends Activity {
         resultBitmap = null;
         eraseMask = null;
         personMask = null;
+        brightnessUserAdjusted = false;
+        fairnessUserAdjusted = false;
         colorCleanOn = false;
         selectionModeOn = false;
         selectionDragging = false;
