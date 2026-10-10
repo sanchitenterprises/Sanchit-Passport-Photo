@@ -1014,10 +1014,10 @@ public class MainActivity extends Activity {
                         float hairSupport = hairSupportMask[maskIndex];
 
                         boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                        // Hair must win over skin detection. Dark/brown hair can fall inside
-                        // skin-like YCbCr ranges, so classify hair first and exclude it from
-                        // fairness/brightness/RGB decontamination.
-                        boolean hairCandidate = headZone
+                        boolean hairZone = isInsideHairZone(mx, my, personBounds, mw, mh);
+                        // Hair protection is limited to the actual hair cap only.
+                        // Face skin can never be classified as hair merely because it is dark.
+                        boolean hairCandidate = hairZone
                                 && luminance < 190f
                                 && hairSupport > 0.26f;
                         boolean skinLike = isSkinLikeColor(r, g, b) && !hairCandidate;
@@ -1219,13 +1219,13 @@ public class MainActivity extends Activity {
         else if (relY >= 0.82f) vertical = 0f;
         else vertical = 1f - smoothStep(0.54f, 0.82f, relY);
 
-        // Below the jaw, prefer the central neck area so exposed arms/hands are not brightened.
-        float horizontal = 1f;
-        if (relY > 0.48f) {
-            float cx = (left + right) * 0.5f;
-            float dx = Math.abs(mx - cx) / Math.max(1f, bw * 0.5f);
-            horizontal = 1f - smoothStep(0.56f, 0.92f, dx);
-        }
+        // Fade into the central neck gradually. Never switch this mask at one exact Y,
+        // because a hard Y boundary can become a visible horizontal line on the face/neck.
+        float cx = (left + right) * 0.5f;
+        float dx = Math.abs(mx - cx) / Math.max(1f, bw * 0.5f);
+        float centralNeck = 1f - smoothStep(0.56f, 0.92f, dx);
+        float neckBlend = smoothStep(0.44f, 0.64f, relY);
+        float horizontal = 1f * (1f - neckBlend) + centralNeck * neckBlend;
 
         return Math.max(0f, Math.min(1f, vertical * horizontal));
     }
@@ -1411,6 +1411,34 @@ public class MainActivity extends Activity {
         int bottom = Math.min(h - 1, bounds[1] + Math.round(bh * 0.38f));
 
         return x >= left && x <= right && y >= top && y <= bottom;
+    }
+
+    private boolean isInsideHairZone(int x, int y, int[] bounds, int w, int h) {
+        if (bounds == null || bounds.length < 4) {
+            return y < Math.round(h * 0.24f);
+        }
+
+        float left = bounds[0];
+        float top = bounds[1];
+        float right = bounds[2];
+        float bottom = bounds[3];
+        float bw = Math.max(1f, right - left);
+        float bh = Math.max(1f, bottom - top);
+
+        float cx = (left + right) * 0.5f;
+        float halfW = Math.max(1f, bw * 0.5f);
+        float side = Math.min(1f, Math.abs(x - cx) / halfW);
+
+        // Hair cap stays high over the forehead, while side hair may extend a little lower.
+        // This prevents cheek/nose/lips/chin from ever entering hair-protection processing.
+        float capBottom = top + bh * (0.205f + 0.055f * side);
+        float capTop = top - bh * 0.035f;
+        float marginX = bw * 0.08f;
+
+        return x >= left - marginX
+                && x <= right + marginX
+                && y >= capTop
+                && y <= capBottom;
     }
 
     private boolean isNearPersonBoundary(float[] mask, int w, int h,
@@ -2812,8 +2840,9 @@ public class MainActivity extends Activity {
                 float hairSupport = hairSupportMask[maskIndex];
 
                 boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
-                // Hair must win over skin detection here too, so saved output matches preview.
-                boolean hairCandidate = headZone
+                boolean hairZone = isInsideHairZone(mx, my, personBounds, mw, mh);
+                // Same compact hair-only rule for original-resolution save.
+                boolean hairCandidate = hairZone
                         && luminance < 190f
                         && hairSupport > 0.26f;
                 boolean skinLike = isSkinLikeColor(r, g, b) && !hairCandidate;
