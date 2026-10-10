@@ -1015,39 +1015,41 @@ public class MainActivity extends Activity {
 
                         boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
                         boolean hairZone = isInsideHairZone(mx, my, personBounds, mw, mh);
-                        // Hair protection is limited to the actual hair cap only.
-                        // Face skin can never be classified as hair merely because it is dark.
+                        boolean sourceSkinLike = isSkinLikeColor(r, g, b);
+                        int rgDiff = r - g;
+                        int gbDiff = g - b;
+                        // Hair protection must never turn a face strip into "hair".
+                        // Brown/dark hair is accepted by colour + support, while real skin is excluded.
+                        boolean brownHairLike = luminance < 155f && rgDiff < 34 && gbDiff < 30;
                         boolean hairCandidate = hairZone
-                                && luminance < 190f
-                                && hairSupport > 0.26f;
-                        boolean skinLike = isSkinLikeColor(r, g, b) && !hairCandidate;
+                                && luminance < 175f
+                                && hairSupport > 0.30f
+                                && (!sourceSkinLike || brownHairLike);
+                        boolean skinLike = sourceSkinLike && !hairCandidate;
 
-                        float a;
+                        // Use ONE alpha pipeline for hair and face. The old separate hair alpha
+                        // branch created the visible horizontal band where the hair zone ended.
                         if (hairCandidate) {
-                            confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
-                            float hairThreshold = 0.31f + 0.020f * smoothAmount;
-                            float hairFeather = 0.24f + 0.050f * smoothAmount;
-                            a = smoothStep(hairThreshold - hairFeather * 0.5f,
-                                    hairThreshold + hairFeather * 0.5f,
-                                    confidence);
+                            float hairBoost = Math.max(0f, hairSupport - confidence) * 0.72f;
+                            confidence = Math.min(1f, confidence + hairBoost);
+                        }
 
-                            // Keep real hair strands; Smooth BG must not dissolve the hair mass.
-                            if (hairSupport > 0.62f && a < 0.60f) a = 0.60f;
-                        } else {
-                            float linearA = Math.max(0f, Math.min(1f,
-                                    (confidence - low) / Math.max(0.001f, high - low)));
-                            float curvedA = smoothStep(0f, 1f, linearA);
+                        float linearA = Math.max(0f, Math.min(1f,
+                                (confidence - low) / Math.max(0.001f, high - low)));
+                        float curvedA = smoothStep(0f, 1f, linearA);
+                        float curveMix = 0.18f + 0.62f * smoothAmount;
+                        float a = linearA * (1f - curveMix) + curvedA * curveMix;
 
-                            // At low Smooth values keep a tighter edge; at higher values use
-                            // more anti-aliased transition so the result visibly becomes smoother.
-                            float curveMix = 0.18f + 0.62f * smoothAmount;
-                            a = linearA * (1f - curveMix) + curvedA * curveMix;
+                        // Small inward matte trim, proportional to Smooth BG, avoids a white halo
+                        // without a second rectangular/hair-specific alpha region.
+                        float edgeTrim = 0.055f * smoothAmount;
+                        a = Math.max(0f, Math.min(1f,
+                                (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
 
-                            // Small inward matte trim, proportional to Smooth BG, avoids a white halo
-                            // without shrinking the subject aggressively.
-                            float edgeTrim = 0.055f * smoothAmount;
-                            a = Math.max(0f, Math.min(1f,
-                                    (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
+                        // Keep genuine hair strands, but only as a local minimum-alpha protection.
+                        if (hairCandidate && hairSupport > 0.64f) {
+                            float minHairA = 0.48f + 0.10f * Math.min(1f, hairSupport);
+                            if (a < minHairA) a = minHairA;
                         }
 
                         // Ear / cheek / jaw skin-edge refinement:
@@ -2841,29 +2843,33 @@ public class MainActivity extends Activity {
 
                 boolean headZone = isInsideHeadZone(mx, my, personBounds, mw, mh);
                 boolean hairZone = isInsideHairZone(mx, my, personBounds, mw, mh);
-                // Same compact hair-only rule for original-resolution save.
+                boolean sourceSkinLike = isSkinLikeColor(r, g, b);
+                int rgDiff = r - g;
+                int gbDiff = g - b;
+                boolean brownHairLike = luminance < 155f && rgDiff < 34 && gbDiff < 30;
                 boolean hairCandidate = hairZone
-                        && luminance < 190f
-                        && hairSupport > 0.26f;
-                boolean skinLike = isSkinLikeColor(r, g, b) && !hairCandidate;
+                        && luminance < 175f
+                        && hairSupport > 0.30f
+                        && (!sourceSkinLike || brownHairLike);
+                boolean skinLike = sourceSkinLike && !hairCandidate;
 
-                float a;
+                // Same single alpha pipeline as preview so saved output cannot reintroduce a band.
                 if (hairCandidate) {
-                    confidence = Math.max(confidence, Math.min(1f, hairSupport * 0.92f + 0.10f));
-                    float hairThreshold = 0.31f + 0.020f * smoothAmount;
-                    float hairFeather = 0.24f + 0.050f * smoothAmount;
-                    a = smoothStep(hairThreshold - hairFeather * 0.5f,
-                            hairThreshold + hairFeather * 0.5f, confidence);
-                    if (hairSupport > 0.62f && a < 0.60f) a = 0.60f;
-                } else {
-                    float linearA = Math.max(0f, Math.min(1f,
-                            (confidence - low) / Math.max(0.001f, high - low)));
-                    float curvedA = smoothStep(0f, 1f, linearA);
-                    float curveMix = 0.18f + 0.62f * smoothAmount;
-                    a = linearA * (1f - curveMix) + curvedA * curveMix;
-                    float edgeTrim = 0.055f * smoothAmount;
-                    a = Math.max(0f, Math.min(1f,
-                            (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
+                    float hairBoost = Math.max(0f, hairSupport - confidence) * 0.72f;
+                    confidence = Math.min(1f, confidence + hairBoost);
+                }
+
+                float linearA = Math.max(0f, Math.min(1f,
+                        (confidence - low) / Math.max(0.001f, high - low)));
+                float curvedA = smoothStep(0f, 1f, linearA);
+                float curveMix = 0.18f + 0.62f * smoothAmount;
+                float a = linearA * (1f - curveMix) + curvedA * curveMix;
+                float edgeTrim = 0.055f * smoothAmount;
+                a = Math.max(0f, Math.min(1f,
+                        (a - edgeTrim) / Math.max(0.01f, 1f - edgeTrim)));
+                if (hairCandidate && hairSupport > 0.64f) {
+                    float minHairA = 0.48f + 0.10f * Math.min(1f, hairSupport);
+                    if (a < minHairA) a = minHairA;
                 }
 
                 boolean skinEdge = skinLike && headZone && a > 0.03f && a < 0.985f;
