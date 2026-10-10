@@ -682,7 +682,11 @@ public class MainActivity extends Activity {
     }
 
     private String getAppVersion() {
-        return BuildConfig.VERSION_NAME;
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {
+            return "1.0.62";
+        }
     }
 
     private void showTopMenu(View anchor) {
