@@ -134,7 +134,8 @@ public class MainActivity extends Activity {
     private Uri sourceUri;
     private boolean compareOriginal;
     private boolean brushModeOn = false; // legacy backend only; no BRUSH UI/runtime
-    private boolean colorCleanOn = false; // SELECT-area CHOOSE COLOR mode
+    private boolean colorCleanOn = false; // Works with or without selected area
+    private boolean colorCleanBusy = false;
     private boolean localColorCleanOn = false; // independent old LOCAL COLOR CLEAN mode
     private boolean selectionModeOn = false;
     private boolean selectionDragging = false;
@@ -1711,7 +1712,7 @@ public class MainActivity extends Activity {
         brushButton.setText("CHOOSE COLOR");
         objectButton.setText("LOCAL COLOR CLEAN");
         updateSelectionOverlayFromSource();
-        status.setText("Area selected • CHOOSE COLOR selected-edge tool है • LOCAL COLOR CLEAN अलग independent tool है");
+        status.setText("Area selected • CHOOSE COLOR इस area में काम करेगा");
     }
 
     private boolean isSourcePointInsideSelection(float sx, float sy) {
@@ -1719,21 +1720,13 @@ public class MainActivity extends Activity {
     }
 
     private void toggleColorClean() {
-        if (resultBitmap == null) return;
-
-        if (!hasSelection()) {
-            colorCleanOn = false;
-            brushButton.setText("CHOOSE COLOR");
-            status.setText("CHOOSE COLOR के लिए पहले SELECT से area चुनें");
-            toast("पहले area select करें");
-            return;
-        }
+        if (resultBitmap == null || colorCleanBusy) return;
 
         colorCleanOn = !colorCleanOn;
         localColorCleanOn = false;
         selectionModeOn = false;
         selectionDragging = false;
-        compareButton.setText("DESELECT");
+        compareButton.setText(hasSelection() ? "DESELECT" : "SELECT");
 
         if (compareOriginal && colorCleanOn) {
             compareOriginal = false;
@@ -1745,9 +1738,10 @@ public class MainActivity extends Activity {
         if (toolSeekLabel != null) toolSeekLabel.setText("Color Tolerance");
         brushSeek.setProgress(colorToleranceValue);
         updateSelectionOverlayFromSource();
-        status.setText(colorCleanOn
-                ? "CHOOSE COLOR • selected area के edge का बचा colour touch करें"
-                : "Choose Color OFF");
+        status.setText(!colorCleanOn ? "Choose Color OFF"
+                : hasSelection()
+                ? "CHOOSE COLOR • selected area में बचा background रंग touch करें"
+                : "CHOOSE COLOR • बिना SELECT के बचा background रंग touch करें");
         hideLens();
     }
 
@@ -2180,9 +2174,11 @@ public class MainActivity extends Activity {
     }
 
     private void applySelectedEdgeColorAt(float viewX, float viewY) {
+        // Selected: clean chosen colour only within selection.
+        // Unselected: clean same colour around touched edge, with no preliminary selection.
+        if (colorCleanBusy || resultBitmap == null || originalBitmap == null
+                || personMask == null) return;
         try {
-            if (resultBitmap == null || originalBitmap == null || !hasSelection()) return;
-
             Matrix inv = new Matrix();
             if (!photoMatrix.invert(inv)) return;
             float[] point = new float[]{viewX, viewY};
@@ -2190,94 +2186,104 @@ public class MainActivity extends Activity {
 
             final int sx = Math.round(point[0]);
             final int sy = Math.round(point[1]);
-            final int w = resultBitmap.getWidth();
-            final int h = resultBitmap.getHeight();
+            final Bitmap resultSnapshot = resultBitmap;
+            final int w = resultSnapshot.getWidth();
+            final int h = resultSnapshot.getHeight();
             if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
-            if (!isSourcePointInsideSelection(sx, sy)) {
-                status.setText("CHOOSE COLOR selected area के अंदर से करें");
+            final boolean selectedOnly = hasSelection();
+            if (selectedOnly && !isSourcePointInsideSelection(sx, sy)) {
+                status.setText("CHOOSE COLOR • selected area के अंदर touch करें");
                 return;
             }
 
-            final Bitmap resultSnapshot = resultBitmap;
             final int target = resultSnapshot.getPixel(sx, sy);
             final int tr = Color.red(target);
             final int tg = Color.green(target);
             final int tb = Color.blue(target);
 
+            if (isSkinLikeColor(tr, tg, tb)) {
+                status.setText("Face/skin protected • बचा background रंग touch करें");
+                return;
+            }
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return;
 
-            pushUndo();
-            clearDeque(redoMasks);
-
-            final Bitmap oldErase = eraseMask.copy(Bitmap.Config.ALPHA_8, false);
-            final int minX = Math.max(0, Math.min(w - 1, (int)Math.floor(selectedAreaSource.left)));
-            final int maxX = Math.max(0, Math.min(w - 1, (int)Math.ceil(selectedAreaSource.right)));
-            final int minY = Math.max(0, Math.min(h - 1, (int)Math.floor(selectedAreaSource.top)));
-            final int maxY = Math.max(0, Math.min(h - 1, (int)Math.ceil(selectedAreaSource.bottom)));
+            // No selection = small local patch centred on the finger, not the whole
+            // photo. Prevents one colour match from erasing unrelated clothing/hair.
+            final int radius = Math.max(48, Math.min(320,
+                    Math.round(Math.min(w, h) * 0.19f)));
+            final int minX = selectedOnly
+                    ? Math.max(0, Math.min(w - 1, (int)Math.floor(selectedAreaSource.left)))
+                    : Math.max(0, sx - radius);
+            final int maxX = selectedOnly
+                    ? Math.max(0, Math.min(w - 1, (int)Math.ceil(selectedAreaSource.right)))
+                    : Math.min(w - 1, sx + radius);
+            final int minY = selectedOnly
+                    ? Math.max(0, Math.min(h - 1, (int)Math.floor(selectedAreaSource.top)))
+                    : Math.max(0, sy - radius);
+            final int maxY = selectedOnly
+                    ? Math.max(0, Math.min(h - 1, (int)Math.ceil(selectedAreaSource.bottom)))
+                    : Math.min(h - 1, sy + radius);
             final int boxW = maxX - minX + 1;
             final int boxH = maxY - minY + 1;
+            if (boxW <= 0 || boxH <= 0) return;
 
-            // Only the user's rule:
-            // selected area + near edge + chosen colour.
-            // No chroma, luminance, per-channel or hard ML-boundary filters.
             final float toleranceProgress = Math.max(0f,
                     Math.min(1f, brushSeek.getProgress() / 100f));
             final float tolerance = 4f + 76f * toleranceProgress;
             final float toleranceSq = tolerance * tolerance;
+            final Bitmap oldErase = eraseMask.copy(Bitmap.Config.ALPHA_8, false);
+            final float[] maskSnapshot = personMask.clone();
+            final int mw = maskWidth;
+            final int mh = maskHeight;
             final int token = ++renderToken;
 
+            colorCleanBusy = true;
             brushButton.setText("CHOOSE COLOR ✓");
             setEditingEnabled(false);
-            setBusy(true, "CHOOSE COLOR • selected edge colour clean हो रहा है…");
+            setBusy(true, selectedOnly
+                    ? "CHOOSE COLOR • selected area में सफाई…"
+                    : "CHOOSE COLOR • touch के आसपास सफाई…");
 
             worker.execute(() -> {
+                Bitmap updated = null;
                 try {
                     int[] resultPixels = new int[w * h];
                     int[] erasePixels = new int[w * h];
                     resultSnapshot.getPixels(resultPixels, 0, w, 0, 0, w, h);
                     oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
 
-                    boolean[] chosenColourNearEdge = new boolean[boxW * boxH];
+                    int changed = 0;
                     int matched = 0;
+                    final int maxChanged = 200000;
+                    final int radiusSq = radius * radius;
+                    for (int y = minY; y <= maxY && changed < maxChanged; y++) {
+                        if (destroyed || token != renderToken) return;
+                        for (int x = minX; x <= maxX && changed < maxChanged; x++) {
+                            if (!selectedOnly) {
+                                int dx = x - sx;
+                                int dy = y - sy;
+                                if (dx * dx + dy * dy > radiusSq) continue;
+                            }
 
-                    for (int y = minY; y <= maxY; y++) {
-                        int ly = y - minY;
-                        for (int x = minX; x <= maxX; x++) {
-                            int lx = x - minX;
-                            int localIndex = ly * boxW + lx;
                             int idx = y * w + x;
                             int c = resultPixels[idx];
-
                             int r = Color.red(c);
                             int g = Color.green(c);
-                            int bl = Color.blue(c);
+                            int b = Color.blue(c);
+                            if (isSkinLikeColor(r, g, b)
+                                    || colorDistanceSq(r, g, b, tr, tg, tb) > toleranceSq) continue;
 
-                            // Protect actual skin/face even if an edge colour is similar.
-                            if (isSkinLikeColor(r, g, bl)) continue;
-                            if (colorDistanceSq(r, g, bl, tr, tg, tb) > toleranceSq) continue;
-
-                            // Simple loose edge-near rule only.
-                            // Same chosen colour in the middle/interior stays untouched.
-                            if (!isNearSubjectBoundary(x, y, w, h)) continue;
-
-                            chosenColourNearEdge[localIndex] = true;
+                            // Only uncertain person-mask boundary pixels. Protect
+                            // confident foreground even if its colour looks similar.
+                            float mx = x * (mw - 1f) / Math.max(1f, w - 1f);
+                            float my = y * (mh - 1f) / Math.max(1f, h - 1f);
+                            float confidence = sampleMaskBilinear(maskSnapshot, mw, mh, mx, my);
+                            if (confidence > 0.82f) continue;
+                            if (!isNearSubjectBoundaryOnMask(maskSnapshot, mw, mh, mx, my)) continue;
                             matched++;
-                        }
-                    }
 
-                    int changed = 0;
-                    final int maxChanged = 200000;
-
-                    for (int y = minY; y <= maxY && changed < maxChanged; y++) {
-                        int ly = y - minY;
-                        for (int x = minX; x <= maxX && changed < maxChanged; x++) {
-                            int lx = x - minX;
-                            int localIndex = ly * boxW + lx;
-                            if (!chosenColourNearEdge[localIndex]) continue;
-
-                            int idx = y * w + x;
                             int oldA = Color.alpha(erasePixels[idx]);
                             if (oldA < 255) {
                                 erasePixels[idx] = Color.argb(255, 255, 255, 255);
@@ -2286,48 +2292,74 @@ public class MainActivity extends Activity {
                         }
                     }
 
+                    if (changed > 0) {
+                        updated = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
+                        updated.setPixels(erasePixels, 0, w, 0, 0, w, h);
+                    }
+
+                    final Bitmap ready = updated;
                     final int changedCount = changed;
                     final int matchedCount = matched;
-                    final int toleranceValue = Math.round(toleranceProgress * 100f);
-                    final Bitmap updated = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8);
-                    updated.setPixels(erasePixels, 0, w, 0, 0, w, h);
-
                     runOnUiThread(() -> {
-                        if (destroyed || token != renderToken) return;
-
-                        if (changedCount == 0) {
-                            if (!undoMasks.isEmpty()) undoMasks.pop();
-                            updateHistoryButtons();
-                            setEditingEnabled(true);
-                            brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
-                            setBusy(false, matchedCount > 0
-                                    ? "Selected edge colour पहले से साफ है"
-                                    : "Selected area के edge के पास chosen colour नहीं मिला");
+                        if (destroyed || token != renderToken) {
+                            if (ready != null && !ready.isRecycled()) ready.recycle();
                             return;
                         }
 
-                        eraseMask = updated;
-                        updateHistoryButtons();
+                        colorCleanBusy = false;
                         setEditingEnabled(true);
                         brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
+                        if (ready == null || changedCount == 0) {
+                            setBusy(false, matchedCount > 0
+                                    ? "यह किनारा पहले से साफ है"
+                                    : "इस touch पर बचा background रंग नहीं मिला");
+                            return;
+                        }
+                        pushUndo();
+                        clearDeque(redoMasks);
+                        eraseMask = ready;
+                        updateHistoryButtons();
                         status.setText("CHOOSE COLOR • " + changedCount
-                                + " px edge clean • Tolerance " + toleranceValue + "%");
+                                + " px साफ • Tolerance " + Math.round(toleranceProgress * 100f) + "%");
                         renderResult();
                     });
-                } catch (Throwable e) {
+                } catch (Throwable error) {
+                    if (updated != null && !updated.isRecycled()) updated.recycle();
                     runOnUiThread(() -> {
                         if (destroyed || token != renderToken) return;
-                        if (!undoMasks.isEmpty()) undoMasks.pop();
-                        updateHistoryButtons();
+                        colorCleanBusy = false;
                         setEditingEnabled(true);
                         brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
-                        setBusy(false, "CHOOSE COLOR edge clean error");
+                        setBusy(false, "CHOOSE COLOR apply नहीं हुआ");
                     });
+                } finally {
+                    if (!oldErase.isRecycled()) oldErase.recycle();
                 }
             });
-        } catch (Throwable e) {
-            status.setText("CHOOSE COLOR apply नहीं हुआ");
+        } catch (Throwable error) {
+            colorCleanBusy = false;
+            if (!destroyed) {
+                setEditingEnabled(true);
+                setBusy(false, "CHOOSE COLOR apply नहीं हुआ");
+            }
         }
+    }
+
+    private boolean isNearSubjectBoundaryOnMask(float[] mask, int mw, int mh,
+            float x, float y) {
+        if (mask == null || mw <= 0 || mh <= 0) return false;
+        int mx = Math.max(0, Math.min(mw - 1, Math.round(x)));
+        int my = Math.max(0, Math.min(mh - 1, Math.round(y)));
+        float min = 1f;
+        float max = 0f;
+        for (int yy = Math.max(0, my - 3); yy <= Math.min(mh - 1, my + 3); yy++) {
+            for (int xx = Math.max(0, mx - 3); xx <= Math.min(mw - 1, mx + 3); xx++) {
+                float v = mask[yy * mw + xx];
+                min = Math.min(min, v);
+                max = Math.max(max, v);
+            }
+        }
+        return max > 0.06f && min < 0.985f;
     }
 
     private void applyLocalColorCleanAt(float viewX, float viewY) {
@@ -3473,6 +3505,7 @@ public class MainActivity extends Activity {
         selectedAreaSource.setEmpty();
         brushModeOn = false;
         localCleanBusy = false;
+        colorCleanBusy = false;
         if (brushCursor != null) brushCursor.setVisibility(View.GONE);
         if (selectionOverlay != null) {
             selectionOverlay.clearSelection();
