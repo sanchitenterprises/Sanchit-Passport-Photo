@@ -1740,8 +1740,8 @@ public class MainActivity extends Activity {
         updateSelectionOverlayFromSource();
         status.setText(!colorCleanOn ? "Choose Color OFF"
                 : hasSelection()
-                ? "CHOOSE COLOR • चुना रंग सिर्फ selected area में हटाएँ"
-                : "CHOOSE COLOR • फोटो में कोई रंग छूकर सभी matching pixels हटाएँ");
+                ? "CHOOSE COLOR • SELECT area की किनारी पर चुना रंग हटाएँ"
+                : "CHOOSE COLOR • बिना SELECT, कहीं भी किनारी के पास चुना रंग हटाएँ");
         hideLens();
     }
 
@@ -2174,8 +2174,9 @@ public class MainActivity extends Activity {
     }
 
     private void applySelectedEdgeColorAt(float viewX, float viewY) {
-        // Manual tool: only colour similarity and optional SELECT area apply.
-        // Auto BG protection never blocks the user after processing.
+        // CHOOSE COLOR removes the sampled colour only NEAR the subject edge.
+        // SELECT is optional and limits the edge cleanup to the selected rectangle.
+        // Face, hair, and foreground protection belong exclusively to Auto BG Remove.
         if (colorCleanBusy || resultBitmap == null || originalBitmap == null
                 || personMask == null) return;
         try {
@@ -2205,8 +2206,8 @@ public class MainActivity extends Activity {
             if (eraseMask == null) createEmptyEraseMask();
             if (eraseMask == null) return;
 
-            // SELECT is optional. If absent, match the chosen colour across the
-            // full edited photo; if present, only inside that selected rectangle.
+            // Without SELECT, scan for matching colour at any SUBJECT EDGE in the
+            // photo. With SELECT, scan only that area and still only near the edge.
             final int minX = selectedOnly
                     ? Math.max(0, Math.min(w - 1, (int)Math.floor(selectedAreaSource.left))) : 0;
             final int maxX = selectedOnly
@@ -2224,6 +2225,9 @@ public class MainActivity extends Activity {
             final float tolerance = 4f + 76f * toleranceProgress;
             final float toleranceSq = tolerance * tolerance;
             final Bitmap oldErase = eraseMask.copy(Bitmap.Config.ALPHA_8, false);
+            final float[] sourceMask = personMask.clone();
+            final int mw = maskWidth;
+            final int mh = maskHeight;
             final int token = ++renderToken;
 
             colorCleanBusy = true;
@@ -2231,7 +2235,7 @@ public class MainActivity extends Activity {
             setEditingEnabled(false);
             setBusy(true, selectedOnly
                     ? "CHOOSE COLOR • selected area में सफाई…"
-                    : "CHOOSE COLOR • चुना गया रंग पूरी फोटो में साफ हो रहा है…");
+                    : "CHOOSE COLOR • फोटो की किनारियों के पास चुना रंग साफ हो रहा है…");
 
             worker.execute(() -> {
                 Bitmap updated = null;
@@ -2241,6 +2245,10 @@ public class MainActivity extends Activity {
                     resultSnapshot.getPixels(resultPixels, 0, w, 0, 0, w, h);
                     oldErase.getPixels(erasePixels, 0, w, 0, 0, w, h);
 
+                    // Compute the narrow edge band ONCE at ML-mask resolution.
+                    // This is a spatial boundary condition, not a face/hair
+                    // protection: any chosen colour may be erased within it.
+                    final boolean[] edgeBand = buildSubjectEdgeBand(sourceMask, mw, mh, 5);
                     int changed = 0;
                     int matched = 0;
                     for (int y = minY; y <= maxY; y++) {
@@ -2248,10 +2256,15 @@ public class MainActivity extends Activity {
                         for (int x = minX; x <= maxX; x++) {
                             int idx = y * w + x;
                             int c = resultPixels[idx];
-                            // Only colour tolerance controls the manual cleanup.
-                            // No face, hair, person-mask or edge protection.
+                            // Both conditions are mandatory: a colour match AND
+                            // proximity to the cutout edge. No skin/face/hair veto.
                             if (colorDistanceSq(Color.red(c), Color.green(c),
                                     Color.blue(c), tr, tg, tb) > toleranceSq) continue;
+                            int mx = Math.max(0, Math.min(mw - 1,
+                                    Math.round(x * (mw - 1f) / Math.max(1f, w - 1f))));
+                            int my = Math.max(0, Math.min(mh - 1,
+                                    Math.round(y * (mh - 1f) / Math.max(1f, h - 1f))));
+                            if (!edgeBand[my * mw + mx]) continue;
                             matched++;
                             if (Color.alpha(erasePixels[idx]) < 255) {
                                 erasePixels[idx] = Color.argb(255, 255, 255, 255);
@@ -2279,8 +2292,8 @@ public class MainActivity extends Activity {
                         brushButton.setText(colorCleanOn ? "CHOOSE COLOR ✓" : "CHOOSE COLOR");
                         if (ready == null || changedCount == 0) {
                             setBusy(false, matchedCount > 0
-                                    ? "यह रंग पहले से साफ है"
-                                    : "चुना गया रंग नहीं मिला");
+                                    ? "किनारे का यह रंग पहले से साफ है"
+                                    : "किनारे के पास यह रंग नहीं मिला");
                             return;
                         }
                         pushUndo();
@@ -2454,6 +2467,37 @@ public class MainActivity extends Activity {
                 setBusy(false, "Local Color Clean apply नहीं हुआ");
             }
         }
+    }
+
+    // A spatial band surrounding the ML-cutout outline. The mask is ONLY used
+    // to locate the boundary; no alpha/skin/foreground confidence veto applies
+    // after the user deliberately chooses a colour.
+    private boolean[] buildSubjectEdgeBand(float[] mask, int mw, int mh, int radius) {
+        boolean[] band = new boolean[Math.max(0, mw * mh)];
+        if (mask == null || mw <= 0 || mh <= 0 || mask.length < mw * mh) return band;
+        for (int y = 0; y < mh; y++) {
+            for (int x = 0; x < mw; x++) {
+                float min = 1f;
+                float max = 0f;
+                int top = Math.max(0, y - radius);
+                int bottom = Math.min(mh - 1, y + radius);
+                int left = Math.max(0, x - radius);
+                int right = Math.min(mw - 1, x + radius);
+                for (int yy = top; yy <= bottom; yy++) {
+                    int row = yy * mw;
+                    for (int xx = left; xx <= right; xx++) {
+                        float confidence = mask[row + xx];
+                        if (confidence < min) min = confidence;
+                        if (confidence > max) max = confidence;
+                    }
+                }
+                // Allow fuzzy cutout boundaries, including hair strands,
+                // while keeping background interiors and subject interiors out.
+                band[y * mw + x] = (max >= 0.52f && min <= 0.48f)
+                        || (mask[y * mw + x] >= 0.18f && mask[y * mw + x] <= 0.82f);
+            }
+        }
+        return band;
     }
 
     private boolean isNearSubjectBoundary(int x, int y, int imageW, int imageH) {
