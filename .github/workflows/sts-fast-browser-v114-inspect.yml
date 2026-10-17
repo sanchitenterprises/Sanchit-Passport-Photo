@@ -1,4 +1,4 @@
-name: Inspect STS v114 PDF error/save paths
+name: Inspect v114 PDF regression assertion
 on:
   push:
     branches: [sts-fast-browser-v114-password-pdf]
@@ -11,14 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect PDF errors and saving
+      - name: Print regression test and affected methods
         shell: bash
         run: |
-          mkdir src; unzip -q sts-fast-browser-v113-source.zip -d src
-          V=src/app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java
-          echo '@@@ PDF 1155-1348'
-          sed -n '1155,1348p' "$V"
-          echo '@@@ PDF 434-520'
-          sed -n '434,520p' "$V"
-          echo '@@@ PDF 1-70'
-          sed -n '1,70p' "$V"
+          mkdir -p src
+          unzip -q sts-fast-browser-v113-source.zip -d src
+          echo '@@@ DELETE TEST'
+          nl -ba src/review-tests/test-pdf-delete.py | head -95
+          echo '@@@ JAVACALLS'
+          grep -nE 'showOpenError|openDocumentWithPassword|savePdfEdits|Text, Replace, Highlighter' src/app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java | head -50
