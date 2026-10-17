@@ -1,4 +1,4 @@
-name: Inspect STS v114 PDF network and cleanup
+name: Inspect STS v114 PDF error/save paths
 on:
   push:
     branches: [sts-fast-browser-v114-password-pdf]
@@ -11,18 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect PDF open errors and cleanup
+      - name: Inspect PDF errors and saving
         shell: bash
         run: |
           mkdir src; unzip -q sts-fast-browser-v113-source.zip -d src
           V=src/app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java
-          echo '@@@ MATCH'
-          grep -nE 'showOpenError|void download\(|copyUriToFile|sourceFile|pdfFile|pdfEditable|onDestroy|closePdfResources|savePdf|saveEdited|saveAs|renderAllPages|doInBackground|download\(' "$V" | tail -140
-          echo '@@@ SOURCE 1730-1870'
-          sed -n '1730,1870p' "$V"
-          echo '@@@ SOURCE 1840-2050'
-          sed -n '1840,2050p' "$V"
-          echo '@@@ PDF 440-520'
-          sed -n '440,520p' "$V"
-          echo '@@@ PDF IMPORTS 1-70'
+          echo '@@@ PDF 1155-1348'
+          sed -n '1155,1348p' "$V"
+          echo '@@@ PDF 434-520'
+          sed -n '434,520p' "$V"
+          echo '@@@ PDF 1-70'
           sed -n '1,70p' "$V"
