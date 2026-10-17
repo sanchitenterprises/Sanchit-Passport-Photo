@@ -1,4 +1,4 @@
-name: Inspect STS v114 PDF opening path
+name: Inspect STS v114 password and source handling
 on:
   push:
     branches: [sts-fast-browser-v114-password-pdf]
@@ -11,19 +11,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Print relevant PDF opening code and dependencies
+      - name: Relevant existing source
         shell: bash
         run: |
           mkdir src
           unzip -q sts-fast-browser-v113-source.zip -d src
-          echo '@@@ STRUCTURE'
-          find src -name '*Pdf*.java' -o -name 'build.gradle' | head -60
-          echo '@@@ GRADLE'
-          sed -n '1,240p' src/app/build.gradle
-          echo '@@@ CLASS MATCHES'
-          grep -RInE 'PdfRenderer|PDDocument|PDFBox|Password|password|openPdf|PdfViewerActivity|openFileDescriptor|ParcelFileDescriptor|FileProvider' src/app/src/main/java | grep -vF '/R.java:' | head -180
-          echo '@@@ FILE HEAD AND ONCREATE'
-          FILE=$(find src -name PdfViewerActivity.java | head -1)
-          sed -n '1,380p' "$FILE"
-          echo '@@@ RENDERER AND CATCH'
-          grep -nE 'PdfRenderer|openPdf|ParcelFileDescriptor|loadPdf|onDestroy|onActivityResult|onCreate|onNewIntent|setDataSource|catch \(' "$FILE" | head -130
+          V=src/app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java
+          echo '@@@ PDF 70-155'
+          sed -n '70,155p' "$V"
+          echo '@@@ PDF 510-740'
+          sed -n '510,740p' "$V"
+          echo '@@@ PDF 750-820'
+          sed -n '750,820p' "$V"
+          echo '@@@ MAIN 1410-1500'
+          sed -n '1410,1500p' src/app/src/main/java/com/sts/fastbrowser/MainActivity.java
+          echo '@@@ ROUTER 140-225'
+          sed -n '140,225p' src/app/src/main/java/com/sts/fastbrowser/IntentRouterActivity.java
