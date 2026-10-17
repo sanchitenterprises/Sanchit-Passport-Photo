@@ -1,0 +1,61 @@
+name: Build STS Fast Browser v1.0.114 password PDF update
+on:
+  push:
+    branches: [sts-fast-browser-v114-password-pdf]
+    paths: ['.github/workflows/sts-fast-browser-v114-build.yml','sts-fast-browser-v114-patch.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack locked v1.0.113 source and patch only PDF opening
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir sts-fast-browser
+          unzip -q sts-fast-browser-v113-source.zip -d sts-fast-browser
+          python3 sts-fast-browser-v114-patch.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Run existing PDF source regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 sts-fast-browser/review-tests/test-pdf-delete.py
+          python3 sts-fast-browser/review-tests/test-pdf-five-tools.py
+          python3 sts-fast-browser/review-tests/test-native-pdf-preview.py
+          python3 sts-fast-browser/review-tests/test-pdf-scan-replace.py
+      - name: Build APK
+        run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
+      - name: Check APK package and preserve source
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/local/lib/android/sdk/build-tools/35.0.0/aapt dump badging sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk | head -n 2
+          cd sts-fast-browser
+          zip -qr ../sts-fast-browser-v114-source.zip . -x 'app/build/*' '.gradle/*' 'build/*' '.git/*'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STS-Fast-Browser-v1.0.114-unsigned-and-source
+          path: |
+            sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+            sts-fast-browser-v114-source.zip
+          retention-days: 30
+          if-no-files-found: error
