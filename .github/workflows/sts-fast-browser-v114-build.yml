@@ -16,6 +16,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf sts-fast-browser
           mkdir sts-fast-browser
           unzip -q sts-fast-browser-v113-source.zip -d sts-fast-browser
           python3 sts-fast-browser-v114-patch.py
