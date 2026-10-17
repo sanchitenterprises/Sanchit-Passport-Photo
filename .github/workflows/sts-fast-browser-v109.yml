@@ -1,0 +1,68 @@
+name: Build STS Fast Browser v1.0.109 APK
+
+on:
+  push:
+    branches: [sts-fast-browser-v109-select-range]
+    paths:
+      - 'sts-fast-browser-v109-source.zip'
+      - '.github/workflows/sts-fast-browser-v109.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify source SHA-256 and unpack isolated Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "87a1e6427f31350f09d199a9f085eee0d428568d74c95130eaed8bc95b82b3ba  sts-fast-browser-v109-source.zip" | sha256sum -c -
+          rm -rf sts-fast-browser
+          mkdir sts-fast-browser
+          unzip -q sts-fast-browser-v109-source.zip -d sts-fast-browser
+          grep -q 'versionCode 110' sts-fast-browser/app/build.gradle
+          grep -q "versionName '1.0.109'" sts-fast-browser/app/build.gradle
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Run range-selection source regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 sts-fast-browser/review-tests/test-text-select-range.py
+          python3 sts-fast-browser/review-tests/test-native-pdf-preview.py
+      - name: Compile unsigned release APK
+        run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
+      - name: Check APK version and SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          /usr/local/lib/android/sdk/build-tools/35.0.0/aapt dump badging "$APK" | head -n 2
+          sha256sum "$APK" > sts-fast-browser-v109-unsigned-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STS-Fast-Browser-v1.0.109-unsigned
+          path: |
+            sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+            sts-fast-browser-v109-unsigned-sha256.txt
+          retention-days: 30
+          if-no-files-found: error
