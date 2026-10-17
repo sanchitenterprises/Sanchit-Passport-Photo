@@ -1,0 +1,29 @@
+name: Inspect STS v114 PDF opening path
+on:
+  push:
+    branches: [sts-fast-browser-v114-password-pdf]
+    paths: ['.github/workflows/sts-fast-browser-v114-inspect.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print relevant PDF opening code and dependencies
+        shell: bash
+        run: |
+          mkdir src
+          unzip -q sts-fast-browser-v113-source.zip -d src
+          echo '@@@ STRUCTURE'
+          find src -name '*Pdf*.java' -o -name 'build.gradle' | head -60
+          echo '@@@ GRADLE'
+          sed -n '1,240p' src/app/build.gradle
+          echo '@@@ CLASS MATCHES'
+          grep -RInE 'PdfRenderer|PDDocument|PDFBox|Password|password|openPdf|PdfViewerActivity|openFileDescriptor|ParcelFileDescriptor|FileProvider' src/app/src/main/java | grep -vF '/R.java:' | head -180
+          echo '@@@ FILE HEAD AND ONCREATE'
+          FILE=$(find src -name PdfViewerActivity.java | head -1)
+          sed -n '1,380p' "$FILE"
+          echo '@@@ RENDERER AND CATCH'
+          grep -nE 'PdfRenderer|openPdf|ParcelFileDescriptor|loadPdf|onDestroy|onActivityResult|onCreate|onNewIntent|setDataSource|catch \(' "$FILE" | head -130
