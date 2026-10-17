@@ -224,4 +224,10 @@ g=gradle.read_text()
 assert "versionCode 114" in g and "versionName '1.0.113'" in g
 g=g.replace('versionCode 114','versionCode 115').replace("versionName '1.0.113'","versionName '1.0.114'")
 gradle.write_text(g)
+# Keep version-locked regression expectations in sync with the new APK version.
+test = root/'review-tests/test-pdf-delete.py'
+txt = test.read_text()
+assert "versionName '1.0.113'" in txt and "'versionCode 114'" in txt
+txt = txt.replace("versionName '1.0.113'", "versionName '1.0.114'").replace("'versionCode 114'", "'versionCode 115'")
+test.write_text(txt)
 print("PATCH V114: password error classification, retry and cleanup applied")
