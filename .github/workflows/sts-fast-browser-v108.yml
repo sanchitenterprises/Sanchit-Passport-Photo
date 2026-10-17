@@ -1,0 +1,56 @@
+name: Build STS Fast Browser v1.0.108 APK
+on:
+  push:
+    branches: [sts-fast-browser-v108-pdf-preview]
+    paths: ['sts-fast-browser-v108-source.zip', '.github/workflows/sts-fast-browser-v108.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack versioned verified source
+        run: |
+          set -euo pipefail
+          echo "6865435d3d5fe8b8f7267c9420f19d8eca816aae695578ece26108a062611d81  sts-fast-browser-v108-source.zip" | sha256sum -c -
+          rm -rf sts-fast-browser
+          mkdir sts-fast-browser
+          unzip -q sts-fast-browser-v108-source.zip -d sts-fast-browser
+          grep -q 'versionCode 109' sts-fast-browser/app/build.gradle
+          grep -q "versionName '1.0.108'" sts-fast-browser/app/build.gradle
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Compile unsigned APK
+        run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
+      - name: Inspect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$APK"
+          /usr/local/lib/android/sdk/build-tools/35.0.0/aapt dump badging "$APK" | head -n 2
+          sha256sum "$APK" > sts-fast-browser-v108-unsigned-sha256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STS-Fast-Browser-v1.0.108-unsigned
+          path: |
+            sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+            sts-fast-browser-v108-unsigned-sha256.txt
+          retention-days: 30
+          if-no-files-found: error
