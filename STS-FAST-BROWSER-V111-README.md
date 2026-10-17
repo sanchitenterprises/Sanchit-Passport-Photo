@@ -1,0 +1,1 @@
+v1.0.111 fixes PDF Replace UX: original PDF text never auto-populates the user input; do not draw rectangle selection marquee; highlight actual individual words and Android-style handles for native PDF/OCR text. Five-item toolbar and other v1.0.110 features unchanged. v1.0.105 locked backup preserved. Sign on local machine only; on-device verification pending.
