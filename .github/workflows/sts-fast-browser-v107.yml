@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "ae22bf3cef605613b332da2ebcaf3ccc555c8984142618fd6f2eaf19830f9b30  sts-fast-browser-v107-source.zip" | sha256sum -c -
+          echo "3ec91b25fa0bc5b272f59c5d1025fcf6addb9721a7a4884bacd75945ad6e7331  sts-fast-browser-v107-source.zip" | sha256sum -c -
           rm -rf sts-fast-browser
           mkdir sts-fast-browser
           unzip -q sts-fast-browser-v107-source.zip -d sts-fast-browser
