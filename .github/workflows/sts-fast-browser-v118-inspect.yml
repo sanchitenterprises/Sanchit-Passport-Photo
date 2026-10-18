@@ -1,4 +1,4 @@
-name: Review protected PDF export code v118
+name: Review PDF save implementation v118
 on:
   push:
     branches: [sts-fast-browser-v118-save-unprotected]
@@ -11,25 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Show PDF export routines for safe source patch
+      - name: Read precise PDF save paths and encrypted viewer creation
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/sts117
           unzip -q sts-fast-browser-v117-source.zip -d /tmp/sts117
           python3 - <<'PY'
-          import pathlib, re
-          root=pathlib.Path('/tmp/sts117')
-          for p in root.rglob('*.java'):
-              if p.name not in ('PdfViewerActivity.java','PdfEditMark.java'): continue
-              a=p.read_text(errors='replace').splitlines()
-              print('FILE',p,'TOTAL',len(a))
-              pats=('saveAs','savePdf','saveOriginal','saveCurrent','exportPdf','exportFull','exportAll','handleSave','writePdf','Password','password','PdfRenderer','createPdf','onActivityResult','launchSave','ACTION_CREATE_DOCUMENT')
-              starts=[]
-              for i,line in enumerate(a):
-                  if any(t in line for t in pats) and ('void ' in line or 'boolean ' in line or 'private ' in line or 'public ' in line or 'setOnClickListener' in line or 'PdfRenderer ' in line):
-                      starts.append(i)
-              for i in starts[:80]:
-                  print('SECTION',i+1)
-                  for j in range(max(0,i-4),min(len(a),i+15)):print(f'{j+1} {a[j][:230]}')
+          from pathlib import Path
+          p=Path('/tmp/sts117/app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java')
+          a=p.read_text().splitlines()
+          for lo,hi in [(445,565),(675,805),(875,935),(1017,1058),(1058,1094)]:
+              print('START RANGE',lo,hi)
+              for i in range(lo-1,min(hi,len(a))):print(f'{i+1}: {a[i]}')
           PY
