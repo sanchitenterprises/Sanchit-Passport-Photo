@@ -66,8 +66,9 @@ gradle.write_text(
 )
 for test in (root / "review-tests").glob("*.py"):
     t = test.read_text()
-    if "versionName '1.0.117'" in t:
-        test.write_text(t.replace("versionName '1.0.117'", "versionName '1.0.118'"))
+    t=t.replace("versionName '1.0.117'", "versionName '1.0.118'")
+    t=t.replace("'versionCode 118' in b", "'versionCode 119' in b")
+    test.write_text(t)
 assert "renderSource = sourceFile" not in source
 assert "exportPdfCopy(sourceFile" not in source
 assert "doc.setAllSecurityToBeRemoved(true);" in source
