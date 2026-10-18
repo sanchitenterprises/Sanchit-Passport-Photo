@@ -46,6 +46,7 @@ jobs:
           python3 sts-fast-browser/review-tests/test-pdf-five-tools.py
           python3 sts-fast-browser/review-tests/test-native-pdf-preview.py
           python3 sts-fast-browser/review-tests/test-pdf-scan-replace.py
+          sed -n '1,65p' sts-fast-browser/review-tests/test-pdf-delete.py
           python3 sts-fast-browser/review-tests/test-pdf-delete.py
           python3 sts-fast-browser/review-tests/test-pdf-open-paths.py
           python3 sts-fast-browser/review-tests/test-blob-document-flow.py
