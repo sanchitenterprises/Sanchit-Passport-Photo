@@ -39,13 +39,13 @@ jobs:
           patch('if (save && "pdf".equals(format) && sourceUri != null && !hasScannedEdits()) {',
                 'if (save && "pdf".equals(format) && sourceUri != null && !hasScannedEdits() && !openedEncrypted) {')
           patch('''                } else if (openedEncrypted && "pdf".equals(format) && sourceFile != null) {
-                      // Preserve the source\'s existing PDF password when no edits are requested.
-                      renderSource = sourceFile;
-                  }''','''                }''')
+                    // Preserve the source\'s existing PDF password when no edits are requested.
+                    renderSource = sourceFile;
+                }''','''                }''')
           patch('if (pdfSaving || sourceFile == null) return;\n        pdfSaving=true;','if (pdfSaving || pdfFile == null) return;\n        pdfSaving=true;')
           patch('exportPdfCopy(sourceFile,newName);','exportPdfCopy(pdfFile,newName);')
           patch('''    private void exportPdfCopy(File source, String outputName) throws Exception {
-                  if (android.os.Build.VERSION.SDK_INT >= 29) {''','''    private void exportPdfCopy(File source, String outputName) throws Exception {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {''','''    private void exportPdfCopy(File source, String outputName) throws Exception {
                   // Never write a password-protected PDF through Save/Save As/Rename.
                   // Use the already authenticated, decrypted viewer copy instead.
                   try (PDDocument checked = PDDocument.load(source, "")) {
