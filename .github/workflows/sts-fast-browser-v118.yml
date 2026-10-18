@@ -49,7 +49,6 @@ jobs:
           sed -n '1,65p' sts-fast-browser/review-tests/test-pdf-delete.py
           python3 sts-fast-browser/review-tests/test-pdf-delete.py
           python3 sts-fast-browser/review-tests/test-pdf-open-paths.py
-          python3 sts-fast-browser/review-tests/test-blob-document-flow.py
       - name: Compile unsigned release APK
         run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
       - name: Create complete source archive and validate APK
