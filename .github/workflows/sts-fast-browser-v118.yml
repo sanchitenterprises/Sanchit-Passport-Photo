@@ -1,0 +1,124 @@
+name: Build STS Fast Browser v1.0.118 PDF unprotected Save
+on:
+  push:
+    branches: [sts-fast-browser-v118-save-unprotected]
+    paths:
+      - '.github/workflows/sts-fast-browser-v118.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify locked working source
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "0304c80cf28bc1042fed0b9081dfa251888aa5878d81d5a02ddeed7222a6bd77  sts-fast-browser-v117-source.zip" | sha256sum -c -
+          mkdir -p sts-fast-browser
+          unzip -q sts-fast-browser-v117-source.zip -d sts-fast-browser
+      - name: Patch only PDF Save and Save As protected document export
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('sts-fast-browser')
+          p=root/'app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java'
+          s=p.read_text()
+          def patch(old,new,expected=1):
+              global s
+              n=s.count(old)
+              if n!=expected: raise Exception(f'Expected {expected} occurrence(s), got {n}: {old[:90]}')
+              s=s.replace(old,new)
+          patch('if (save && pdfMarks.isEmpty()) {','if (save && pdfMarks.isEmpty() && !openedEncrypted) {')
+          patch('if (save && "pdf".equals(format) && sourceUri != null && !hasScannedEdits()) {',
+                'if (save && "pdf".equals(format) && sourceUri != null && !hasScannedEdits() && !openedEncrypted) {')
+          patch('''                } else if (openedEncrypted && "pdf".equals(format) && sourceFile != null) {
+                      // Preserve the source\'s existing PDF password when no edits are requested.
+                      renderSource = sourceFile;
+                  }''','''                }''')
+          patch('if (pdfSaving || sourceFile == null) return;\n        pdfSaving=true;','if (pdfSaving || pdfFile == null) return;\n        pdfSaving=true;')
+          patch('exportPdfCopy(sourceFile,newName);','exportPdfCopy(pdfFile,newName);')
+          patch('''    private void exportPdfCopy(File source, String outputName) throws Exception {
+                  if (android.os.Build.VERSION.SDK_INT >= 29) {''','''    private void exportPdfCopy(File source, String outputName) throws Exception {
+                  // Never write a password-protected PDF through Save/Save As/Rename.
+                  // Use the already authenticated, decrypted viewer copy instead.
+                  try (PDDocument checked = PDDocument.load(source, "")) {
+                      if (checked.isEncrypted()) throw new java.io.IOException("Encrypted export blocked");
+                  }
+                  if (android.os.Build.VERSION.SDK_INT >= 29) {''')
+          p.write_text(s)
+          gradle=root/'app/build.gradle'
+          v=gradle.read_text()
+          assert 'versionCode 118' in v and "versionName '1.0.117'" in v
+          gradle.write_text(v.replace('versionCode 118','versionCode 119').replace("versionName '1.0.117'","versionName '1.0.118'"))
+          for test in (root/'review-tests').glob('*.py'):
+              t=test.read_text()
+              if 'versionName' in t and '1.0.117' in t:
+                  t=t.replace("versionName '1.0.117'","versionName '1.0.118'")
+                  test.write_text(t)
+          test=root/'review-tests/test-save-unprotected.py'
+          test.write_text("""from pathlib import Path
+          s=Path(__file__).resolve().parents[1].joinpath('app/src/main/java/com/sts/fastbrowser/PdfViewerActivity.java').read_text()
+          assert 'if (save && pdfMarks.isEmpty() && !openedEncrypted)' in s
+          assert '&& !openedEncrypted)' in s
+          assert 'renderSource = sourceFile' not in s
+          assert 'exportPdfCopy(pdfFile,newName);' in s
+          assert 'if (checked.isEncrypted()) throw new java.io.IOException("Encrypted export blocked");' in s
+          assert 'doc.setAllSecurityToBeRemoved(true);' in s
+          assert 'buildEditedPdf(pdfFile, edited, marks);' in s
+          assert 'exportPdfPagesAsImages(renderSource, format, outName);' in s
+          print('PASSED: protected Save, Save As and Rename copy paths never export original encrypted PDF')
+          """)
+          print('PATCHED: only PDF export flow, version metadata, and related regression test')
+          PY
+          python3 sts-fast-browser/review-tests/test-save-unprotected.py
+          grep -q 'versionCode 119' sts-fast-browser/app/build.gradle
+          grep -q "versionName '1.0.118'" sts-fast-browser/app/build.gradle
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
+          /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Run PDF regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 sts-fast-browser/review-tests/test-save-unprotected.py
+          python3 sts-fast-browser/review-tests/test-pdf-export-rename.py
+          python3 sts-fast-browser/review-tests/test-pdf-five-tools.py
+          python3 sts-fast-browser/review-tests/test-native-pdf-preview.py
+          python3 sts-fast-browser/review-tests/test-pdf-scan-replace.py
+          python3 sts-fast-browser/review-tests/test-pdf-delete.py
+      - name: Compile release APK
+        run: gradle -p sts-fast-browser :app:assembleRelease --no-daemon --stacktrace
+      - name: Package complete modified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sts-fast-browser
+          zip -qr ../STS-Fast-Browser-v1.0.118-SOURCE.zip . -x '**/build/**' '**/.gradle/**'
+          cd ..
+          /usr/local/lib/android/sdk/build-tools/35.0.0/aapt dump badging sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk | head -n 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: STS-Fast-Browser-v1.0.118-unsigned-and-source
+          path: |
+            sts-fast-browser/app/build/outputs/apk/release/app-release-unsigned.apk
+            STS-Fast-Browser-v1.0.118-SOURCE.zip
+          retention-days: 30
+          if-no-files-found: error
